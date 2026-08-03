@@ -16,18 +16,18 @@
 
 ## 1.2 Thời gian thực hiện
 
-- Thời gian phát triển: **2 tuần**
-- Số thành viên: **4 người**
-- Mục tiêu: xây dựng một MVP có thể chạy, kiểm thử, deploy và demo được.
+* Thời gian phát triển: **2 tuần**
+* Số thành viên: **4 người**
+* Mục tiêu: xây dựng một MVP có thể chạy, kiểm thử, deploy và demo được.
 
 ## 1.3 Thành viên và trách nhiệm
 
-| Thành viên | Trách nhiệm chính |
-|---|---|
-| Leader | Kiến trúc, quản lý dự án, API contract, tích hợp, review, CI/CD, deploy |
-| Đoàn | Database, backend nghiệp vụ, authentication, rule engine |
-| Quang Thành | Next.js frontend, Supabase Auth, UI/UX, sơ đồ bãi xe, realtime |
-| Phú Thành | LangGraph Agent, Agent tools, RAG, prompt, Agent evaluation |
+| Thành viên  | Trách nhiệm chính                                                       |
+| ----------- | ----------------------------------------------------------------------- |
+| Leader      | Kiến trúc, quản lý dự án, API contract, tích hợp, review, CI/CD, deploy |
+| Đoàn        | Database, backend nghiệp vụ, authentication, rule engine                |
+| Quang Thành | Next.js frontend, Supabase Auth, UI/UX, sơ đồ bãi xe, realtime          |
+| Phú Thành   | LangGraph Agent, Agent tools, RAG, prompt, Agent evaluation             |
 
 ## 1.4 Thứ tự ưu tiên
 
@@ -47,26 +47,26 @@ Hầm gửi xe của doanh nghiệp bất động sản thường quá tải và
 
 Các vấn đề chính:
 
-- Cư dân không biết khu hoặc tầng nào còn chỗ.
-- Khách vãng lai không rõ vị trí gửi xe phù hợp.
-- Đăng ký thẻ xe và đổi xe còn thủ công.
-- Cư dân có thể đăng ký vượt định mức xe của căn hộ.
-- Ban quản lý phải xử lý nhiều yêu cầu thủ công.
-- Trạng thái chỗ đỗ phải được cập nhật gần thời gian thực.
-- Biển số và dữ liệu ra vào là dữ liệu nhạy cảm.
-- Hệ thống phải hạn chế gian lận đăng ký và truy cập trái phép.
+* Cư dân không biết khu hoặc tầng nào còn chỗ.
+* Khách vãng lai không rõ vị trí gửi xe phù hợp.
+* Đăng ký thẻ xe và đổi xe còn thủ công.
+* Cư dân có thể đăng ký vượt định mức xe của căn hộ.
+* Ban quản lý phải xử lý nhiều yêu cầu thủ công.
+* Trạng thái chỗ đỗ phải được cập nhật gần thời gian thực.
+* Biển số và dữ liệu ra vào là dữ liệu nhạy cảm.
+* Hệ thống phải hạn chế gian lận đăng ký và truy cập trái phép.
 
 ParkSmart AI cung cấp AI Agent hỗ trợ:
 
-- Quản lý phương tiện.
-- Đăng ký phương tiện.
-- Tra cứu chỗ trống.
-- Đặt và hủy chỗ.
-- Hướng dẫn tầng, khu và vị trí đỗ.
-- Đăng ký xe khách.
-- Kiểm tra trạng thái yêu cầu.
-- Giải đáp nội quy gửi xe.
-- Chuyển yêu cầu vượt định mức cho BQL phê duyệt.
+* Quản lý phương tiện.
+* Đăng ký phương tiện.
+* Tra cứu chỗ trống.
+* Đặt và hủy chỗ.
+* Hướng dẫn tầng, khu và vị trí đỗ.
+* Đăng ký xe khách.
+* Kiểm tra trạng thái yêu cầu.
+* Giải đáp nội quy gửi xe.
+* Chuyển yêu cầu vượt định mức cho BQL phê duyệt.
 
 ---
 
@@ -86,44 +86,44 @@ admin
 
 Trong đó:
 
-- `resident`: cư dân.
-- `security`: bảo vệ.
-- `admin`: Ban quản lý.
+* `resident`: cư dân.
+* `security`: bảo vệ.
+* `admin`: Ban quản lý.
 
 Yêu cầu:
 
-- Đăng nhập bằng Supabase Auth.
-- Frontend gửi Supabase access token đến FastAPI.
-- FastAPI xác minh JWT.
-- Backend xác định danh tính và quyền người dùng.
-- Không chỉ kiểm tra quyền bằng cách ẩn nút trên frontend.
-- Không tin tưởng `user_id` hoặc `role` do client gửi trong request body.
+* Đăng nhập bằng Supabase Auth.
+* Frontend gửi Supabase access token đến FastAPI.
+* FastAPI xác minh JWT.
+* Backend xác định danh tính và quyền người dùng.
+* Không chỉ kiểm tra quyền bằng cách ẩn nút trên frontend.
+* Không tin tưởng `user_id` hoặc `role` do client gửi trong request body.
 
 ### Quản lý phương tiện
 
-- Cư dân xem danh sách xe của mình.
-- Cư dân đăng ký thêm xe.
-- Cư dân cập nhật thông tin xe được phép thay đổi.
-- Cư dân ngừng sử dụng một xe.
-- Hệ thống kiểm tra biển số trùng.
-- Xe vượt định mức phải chờ BQL duyệt.
+* Cư dân xem danh sách xe của mình.
+* Cư dân đăng ký thêm xe.
+* Cư dân cập nhật thông tin xe được phép thay đổi.
+* Cư dân ngừng sử dụng một xe.
+* Hệ thống kiểm tra biển số trùng.
+* Xe vượt định mức phải chờ BQL duyệt.
 
 ### Quản lý chỗ đỗ
 
-- Xem danh sách tầng và khu.
-- Xem số slot còn trống.
-- Xem trạng thái từng slot.
-- Đặt chỗ.
-- Hủy đặt chỗ.
-- Hướng dẫn tầng, khu và mã slot.
-- Ngăn hai người đặt cùng một slot.
+* Xem danh sách tầng và khu.
+* Xem số slot còn trống.
+* Xem trạng thái từng slot.
+* Đặt chỗ.
+* Hủy đặt chỗ.
+* Hướng dẫn tầng, khu và mã slot.
+* Ngăn hai người đặt cùng một slot.
 
 ### Xe khách
 
-- Cư dân đăng ký xe khách.
-- Cư dân khai báo thời gian xe khách có hiệu lực.
-- Bảo vệ xem danh sách xe khách hợp lệ.
-- Bảo vệ check-in và check-out.
+* Cư dân đăng ký xe khách.
+* Cư dân khai báo thời gian xe khách có hiệu lực.
+* Bảo vệ xem danh sách xe khách hợp lệ.
+* Bảo vệ check-in và check-out.
 
 ### Human-in-the-Loop
 
@@ -158,12 +158,12 @@ UNKNOWN
 
 RAG được dùng cho:
 
-- Nội quy gửi xe.
-- Quy trình đăng ký thẻ xe.
-- Chính sách định mức.
-- Quy định xe khách.
-- Quy trình xử lý mất thẻ.
-- Câu hỏi thường gặp.
+* Nội quy gửi xe.
+* Quy trình đăng ký thẻ xe.
+* Chính sách định mức.
+* Quy định xe khách.
+* Quy trình xử lý mất thẻ.
+* Câu hỏi thường gặp.
 
 RAG không được dùng để truy vấn dữ liệu realtime hoặc dữ liệu cá nhân.
 
@@ -171,10 +171,10 @@ RAG không được dùng để truy vấn dữ liệu realtime hoặc dữ li�
 
 Frontend cần cập nhật khi:
 
-- Trạng thái slot thay đổi.
-- Reservation được tạo hoặc hủy.
-- Approval được duyệt hoặc từ chối.
-- Notification mới được tạo.
+* Trạng thái slot thay đổi.
+* Reservation được tạo hoặc hủy.
+* Approval được duyệt hoặc từ chối.
+* Notification mới được tạo.
 
 ---
 
@@ -182,16 +182,16 @@ Frontend cần cập nhật khi:
 
 Không triển khai trong hai tuần:
 
-- Camera nhận diện biển số thật.
-- Cảm biến vật lý.
-- Điều khiển barrier.
-- Thanh toán phí gửi xe.
-- Ứng dụng mobile riêng.
-- Bản đồ dẫn đường 3D.
-- Computer vision phát hiện gian lận.
-- Mô hình machine learning dự báo tải phức tạp.
-- Tích hợp hệ thống quản lý tòa nhà thật.
-- Kubernetes hoặc kiến trúc microservice.
+* Camera nhận diện biển số thật.
+* Cảm biến vật lý.
+* Điều khiển barrier.
+* Thanh toán phí gửi xe.
+* Ứng dụng mobile riêng.
+* Bản đồ dẫn đường 3D.
+* Computer vision phát hiện gian lận.
+* Mô hình machine learning dự báo tải phức tạp.
+* Tích hợp hệ thống quản lý tòa nhà thật.
+* Kubernetes hoặc kiến trúc microservice.
 
 Các chức năng này chỉ được trình bày dưới dạng roadmap.
 
@@ -205,12 +205,12 @@ Trạng thái chỗ đỗ được cung cấp bởi **Slot Simulator**.
 
 Simulator hỗ trợ:
 
-- Chuyển slot thành `available`.
-- Chuyển slot thành `reserved`.
-- Chuyển slot thành `occupied`.
-- Chuyển slot thành `maintenance`.
-- Chạy kịch bản giờ cao điểm.
-- Reset dữ liệu demo.
+* Chuyển slot thành `available`.
+* Chuyển slot thành `reserved`.
+* Chuyển slot thành `occupied`.
+* Chuyển slot thành `maintenance`.
+* Chạy kịch bản giờ cao điểm.
+* Reset dữ liệu demo.
 
 Các service và Agent không phụ thuộc trực tiếp vào simulator.
 
@@ -257,59 +257,59 @@ ExternalAPISlotProvider
 
 ## 6.1 Backend
 
-- Python 3.11 hoặc phiên bản đã được nhóm thống nhất.
-- FastAPI.
-- Pydantic.
-- Pydantic Settings.
-- SQLAlchemy.
-- Alembic.
-- PostgreSQL.
-- pgvector.
-- pytest.
+* Python 3.11 hoặc phiên bản đã được nhóm thống nhất.
+* FastAPI.
+* Pydantic.
+* Pydantic Settings.
+* SQLAlchemy.
+* Alembic.
+* PostgreSQL.
+* pgvector.
+* pytest.
 
 ## 6.2 AI Agent
 
-- GPT-4o-mini.
-- LangGraph.
-- Tool calling.
-- Structured output.
-- Retrieval-Augmented Generation.
-- Rule-based validation.
-- pgvector retrieval.
+* GPT-4o-mini.
+* LangGraph.
+* Tool calling.
+* Structured output.
+* Retrieval-Augmented Generation.
+* Rule-based validation.
+* pgvector retrieval.
 
 ## 6.3 Frontend
 
-- Next.js.
-- TypeScript.
-- App Router.
-- Supabase Auth.
-- Supabase Realtime.
-- Sơ đồ bãi xe dạng grid 2D.
+* Next.js.
+* TypeScript.
+* App Router.
+* Supabase Auth.
+* Supabase Realtime.
+* Sơ đồ bãi xe dạng grid 2D.
 
 Frontend có thể được lưu trong repository riêng hoặc được bổ sung sau. Frontend phải tuân thủ API contract của FastAPI.
 
 ## 6.4 Authentication
 
-- Supabase Auth.
-- Supabase JWT.
-- Role-based authorization tại backend.
+* Supabase Auth.
+* Supabase JWT.
+* Role-based authorization tại backend.
 
 ## 6.5 Deployment
 
-- Backend: Railway hoặc nền tảng chạy Docker tương thích.
-- Frontend: Vercel.
-- Database/Auth: Supabase.
-- Local development: Docker Compose.
+* Backend: Railway hoặc nền tảng chạy Docker tương thích.
+* Frontend: Vercel.
+* Database/Auth: Supabase.
+* Local development: Docker Compose.
 
 Không tự ý đổi sang:
 
-- Django.
-- Flask.
-- NestJS.
-- MongoDB.
-- Firebase.
-- Một Agent framework khác.
-- Một vector database khác.
+* Django.
+* Flask.
+* NestJS.
+* MongoDB.
+* Firebase.
+* Một Agent framework khác.
+* Một vector database khác.
 
 ---
 
@@ -367,11 +367,11 @@ Chứa toàn bộ mã nguồn liên quan đến LangGraph Agent.
 
 Không đặt:
 
-- FastAPI route.
-- SQLAlchemy model.
-- Logic xác thực JWT.
-- Business logic nghiệp vụ chính.
-- Code frontend.
+* FastAPI route.
+* SQLAlchemy model.
+* Logic xác thực JWT.
+* Business logic nghiệp vụ chính.
+* Code frontend.
 
 ### `src/agents/state.py`
 
@@ -406,12 +406,12 @@ Không đặt node implementation trong file này.
 
 Chịu trách nhiệm:
 
-- Khởi tạo `StateGraph`.
-- Đăng ký node.
-- Định nghĩa edge.
-- Định nghĩa conditional edge.
-- Compile graph.
-- Export Agent graph để API gọi.
+* Khởi tạo `StateGraph`.
+* Đăng ký node.
+* Định nghĩa edge.
+* Định nghĩa conditional edge.
+* Compile graph.
+* Export Agent graph để API gọi.
 
 Không đặt business rule chi tiết trong `graph.py`.
 
@@ -433,17 +433,17 @@ src/agents/nodes/
 
 Node được phép:
 
-- Đọc Agent state.
-- Gọi tool.
-- Gọi service AI.
-- Cập nhật Agent state.
+* Đọc Agent state.
+* Gọi tool.
+* Gọi service AI.
+* Cập nhật Agent state.
 
 Node không được:
 
-- Viết SQL trực tiếp.
-- Tự quyết định quyền của người dùng.
-- Tự bỏ qua business rule.
-- Tự tạo dữ liệu slot giả.
+* Viết SQL trực tiếp.
+* Tự quyết định quyền của người dùng.
+* Tự bỏ qua business rule.
+* Tự tạo dữ liệu slot giả.
 
 ### `src/agents/tools/`
 
@@ -463,13 +463,13 @@ src/agents/tools/
 
 Mỗi tool phải:
 
-- Có input schema rõ ràng.
-- Có output có cấu trúc.
-- Lấy user context từ runtime.
-- Gọi hàm trong `src/services/`.
-- Không truy cập database trực tiếp.
-- Không lặp lại business logic.
-- Không trả dữ liệu không cần thiết cho LLM.
+* Có input schema rõ ràng.
+* Có output có cấu trúc.
+* Lấy user context từ runtime.
+* Gọi hàm trong `src/services/`.
+* Không truy cập database trực tiếp.
+* Không lặp lại business logic.
+* Không trả dữ liệu không cần thiết cho LLM.
 
 ---
 
@@ -505,20 +505,20 @@ Chỉ tách khi cần thiết và phải giữ `routes.py` làm router tổng.
 
 API layer chịu trách nhiệm:
 
-- Nhận request.
-- Validate request bằng Pydantic.
-- Lấy authenticated user.
-- Kiểm tra role ở mức endpoint.
-- Gọi service.
-- Trả response.
+* Nhận request.
+* Validate request bằng Pydantic.
+* Lấy authenticated user.
+* Kiểm tra role ở mức endpoint.
+* Gọi service.
+* Trả response.
 
 API layer không được chứa:
 
-- Business logic dài.
-- SQL query trực tiếp.
-- Logic LangGraph chi tiết.
-- Quyết định định mức xe.
-- Logic transaction đặt slot.
+* Business logic dài.
+* SQL query trực tiếp.
+* Logic LangGraph chi tiết.
+* Quyết định định mức xe.
+* Logic transaction đặt slot.
 
 ---
 
@@ -526,11 +526,11 @@ API layer không được chứa:
 
 Chứa **Pydantic schemas** dùng cho:
 
-- API request.
-- API response.
-- Tool input.
-- Tool output.
-- Internal data transfer.
+* API request.
+* API response.
+* Tool input.
+* Tool output.
+* Internal data transfer.
 
 Gợi ý:
 
@@ -577,10 +577,10 @@ class ErrorResponse(BaseModel):
 
 Lưu ý:
 
-- `src/models/` trong dự án này là Pydantic schemas.
-- Không mặc định xem đây là thư mục SQLAlchemy ORM.
-- Nếu sử dụng SQLAlchemy, ORM entities có thể được đặt trong `src/services/database.py` ở giai đoạn đầu hoặc bổ sung một module con rõ ràng như `src/services/db_models.py`.
-- Không đổi ý nghĩa thư mục `models` mà không cập nhật tài liệu.
+* `src/models/` trong dự án này là Pydantic schemas.
+* Không mặc định xem đây là thư mục SQLAlchemy ORM.
+* Nếu sử dụng SQLAlchemy, ORM entities có thể được đặt trong `src/services/database.py` ở giai đoạn đầu hoặc bổ sung một module con rõ ràng như `src/services/db_models.py`.
+* Không đổi ý nghĩa thư mục `models` mà không cập nhật tài liệu.
 
 ---
 
@@ -612,21 +612,21 @@ src/services/
 
 ### Service được phép
 
-- Truy cập repository/database layer.
-- Thực hiện business rule.
-- Quản lý transaction.
-- Gọi Supabase.
-- Gọi embedding/LLM ở service phù hợp.
-- Ghi audit log.
-- Gọi SlotProvider.
+* Truy cập repository/database layer.
+* Thực hiện business rule.
+* Quản lý transaction.
+* Gọi Supabase.
+* Gọi embedding/LLM ở service phù hợp.
+* Ghi audit log.
+* Gọi SlotProvider.
 
 ### Service không được
 
-- Phụ thuộc vào giao diện Next.js.
-- Trả response FastAPI trực tiếp.
-- Phụ thuộc vào Agent state.
-- Tin tưởng role do LLM cung cấp.
-- Đưa toàn bộ dữ liệu nhạy cảm cho LLM.
+* Phụ thuộc vào giao diện Next.js.
+* Trả response FastAPI trực tiếp.
+* Phụ thuộc vào Agent state.
+* Tin tưởng role do LLM cung cấp.
+* Đưa toàn bộ dữ liệu nhạy cảm cho LLM.
 
 ### Business rules
 
@@ -638,9 +638,9 @@ src/services/rule_engine.py
 
 Quy tắc:
 
-- Rule dùng ở nhiều service phải nằm trong `rule_engine.py`.
-- Rule chỉ dùng riêng một nghiệp vụ có thể nằm trong service đó.
-- Không lặp lại rule trong Agent tool.
+* Rule dùng ở nhiều service phải nằm trong `rule_engine.py`.
+* Rule chỉ dùng riêng một nghiệp vụ có thể nằm trong service đó.
+* Không lặp lại rule trong Agent tool.
 
 ### Database và repository
 
@@ -655,8 +655,8 @@ src/services/<domain>_service.py
 
 Trong đó:
 
-- `database.py`: session, engine, base, transaction helpers.
-- Các service: truy vấn nghiệp vụ tương ứng.
+* `database.py`: session, engine, base, transaction helpers.
+* Các service: truy vấn nghiệp vụ tương ứng.
 
 #### Khi code database lớn hơn
 
@@ -712,10 +712,10 @@ def get_settings() -> Settings:
 
 Quy tắc:
 
-- Không hard-code secret.
-- Không commit `.env`.
-- Không đọc environment variables rải rác trong nhiều file.
-- Các module phải sử dụng `get_settings()`.
+* Không hard-code secret.
+* Không commit `.env`.
+* Không đọc environment variables rải rác trong nhiều file.
+* Các module phải sử dụng `get_settings()`.
 
 ---
 
@@ -725,12 +725,12 @@ Là entry point của FastAPI.
 
 Trách nhiệm:
 
-- Khởi tạo FastAPI.
-- Đăng ký router.
-- Cấu hình CORS.
-- Cấu hình exception handler.
-- Khởi tạo lifecycle cần thiết.
-- Cung cấp health endpoint.
+* Khởi tạo FastAPI.
+* Đăng ký router.
+* Cấu hình CORS.
+* Cấu hình exception handler.
+* Khởi tạo lifecycle cần thiết.
+* Cung cấp health endpoint.
 
 Ví dụ:
 
@@ -785,41 +785,41 @@ tests/
 
 Kiểm thử:
 
-- Intent routing.
-- Graph transition.
-- Tool selection.
-- Tool input validation.
-- Tool error handling.
-- Không bịa dữ liệu.
-- HITL routing.
-- Policy retrieval.
-- Agent response.
+* Intent routing.
+* Graph transition.
+* Tool selection.
+* Tool input validation.
+* Tool error handling.
+* Không bịa dữ liệu.
+* HITL routing.
+* Policy retrieval.
+* Agent response.
 
 ### `tests/test_api/`
 
 Kiểm thử:
 
-- Health endpoint.
-- Authentication.
-- Authorization.
-- Request validation.
-- Response schema.
-- Vehicle endpoints.
-- Reservation endpoints.
-- Guest endpoints.
-- Approval endpoints.
-- Agent endpoint.
+* Health endpoint.
+* Authentication.
+* Authorization.
+* Request validation.
+* Response schema.
+* Vehicle endpoints.
+* Reservation endpoints.
+* Guest endpoints.
+* Approval endpoints.
+* Agent endpoint.
 
 ### `tests/test_services/`
 
 Nếu được bổ sung, kiểm thử:
 
-- Rule engine.
-- Database transaction.
-- Vehicle limit.
-- Reservation concurrency.
-- Approval transition.
-- Guest validity.
+* Rule engine.
+* Database transaction.
+* Vehicle limit.
+* Reservation concurrency.
+* Approval transition.
+* Guest validity.
 
 ---
 
@@ -838,23 +838,23 @@ scripts/
 
 ### Mục đích
 
-- Ghi nhận việc sử dụng AI trong quá trình phát triển.
-- Hỗ trợ nhiều công cụ AI.
-- Chuẩn bị dữ liệu minh chứng hoặc reflection.
-- Submit log theo quy trình của nhóm.
+* Ghi nhận việc sử dụng AI trong quá trình phát triển.
+* Hỗ trợ nhiều công cụ AI.
+* Chuẩn bị dữ liệu minh chứng hoặc reflection.
+* Submit log theo quy trình của nhóm.
 
 ### Quy tắc bảo mật
 
 AI logging không được lưu:
 
-- API key.
-- Access token.
-- Supabase service role key.
-- Database URL có mật khẩu.
-- Dữ liệu thật của cư dân.
-- Biển số thật chưa được che.
-- Nội dung audit log nhạy cảm.
-- File `.env`.
+* API key.
+* Access token.
+* Supabase service role key.
+* Database URL có mật khẩu.
+* Dữ liệu thật của cư dân.
+* Biển số thật chưa được che.
+* Nội dung audit log nhạy cảm.
+* File `.env`.
 
 Các log phải được lọc trước khi ghi.
 
@@ -866,13 +866,13 @@ Chứa cấu hình hoặc rule riêng cho từng AI coding tool.
 
 Các cấu hình phải:
 
-- Dẫn AI đến `AI_PROJECT_CONTEXT.md`.
-- Nhắc AI không tự thay đổi kiến trúc.
-- Nhắc AI ghi rõ file cần sửa.
-- Nhắc AI tạo test.
-- Nhắc AI không ghi secret.
-- Nhắc AI tuân theo API contract.
-- Nhắc AI không đưa dữ liệu nhạy cảm vào prompt hoặc log.
+* Dẫn AI đến `AI_PROJECT_CONTEXT.md`.
+* Nhắc AI không tự thay đổi kiến trúc.
+* Nhắc AI ghi rõ file cần sửa.
+* Nhắc AI tạo test.
+* Nhắc AI không ghi secret.
+* Nhắc AI tuân theo API contract.
+* Nhắc AI không đưa dữ liệu nhạy cảm vào prompt hoặc log.
 
 Các thư mục này không chứa business logic của ứng dụng.
 
@@ -903,11 +903,11 @@ Chứa log sử dụng AI được sinh tự động.
 
 Quy tắc:
 
-- Không chỉnh sửa thủ công trừ khi quy trình yêu cầu.
-- Không lưu secret.
-- Không lưu dữ liệu người dùng thật.
-- Không sử dụng log này làm nguồn sự thật của nghiệp vụ.
-- Cần quyết định rõ file nào được commit và file nào nằm trong `.gitignore`.
+* Không chỉnh sửa thủ công trừ khi quy trình yêu cầu.
+* Không lưu secret.
+* Không lưu dữ liệu người dùng thật.
+* Không sử dụng log này làm nguồn sự thật của nghiệp vụ.
+* Cần quyết định rõ file nào được commit và file nào nằm trong `.gitignore`.
 
 ---
 
@@ -992,8 +992,8 @@ Không đặt pytest thông thường trong `eval/`.
 
 Phân biệt:
 
-- `tests/`: kiểm tra code và hành vi có tính xác định.
-- `eval/`: đo chất lượng Agent, LLM, retrieval và response.
+* `tests/`: kiểm tra code và hành vi có tính xác định.
+* `eval/`: đo chất lượng Agent, LLM, retrieval và response.
 
 ---
 
@@ -1019,12 +1019,12 @@ Chứa GitHub Actions.
 
 CI tối thiểu:
 
-- Cài dependencies.
-- Chạy lint.
-- Chạy type check nếu có.
-- Chạy pytest.
-- Kiểm tra Docker build.
-- Kiểm tra secret không bị commit.
+* Cài dependencies.
+* Chạy lint.
+* Chạy type check nếu có.
+* Chạy pytest.
+* Kiểm tra Docker build.
+* Kiểm tra secret không bị commit.
 
 CD chỉ được thêm sau khi môi trường deploy đã ổn định.
 
@@ -1046,12 +1046,12 @@ Sử dụng multi-stage build nếu phù hợp.
 
 Yêu cầu:
 
-- Image nhỏ gọn.
-- Không copy `.env`.
-- Không chứa secret.
-- Chạy ứng dụng bằng user không phải root nếu dễ triển khai.
-- Có command khởi động FastAPI.
-- Tương thích Railway hoặc nền tảng Docker.
+* Image nhỏ gọn.
+* Không copy `.env`.
+* Không chứa secret.
+* Chạy ứng dụng bằng user không phải root nếu dễ triển khai.
+* Có command khởi động FastAPI.
+* Tương thích Railway hoặc nền tảng Docker.
 
 Lệnh chạy dự kiến:
 
@@ -1115,18 +1115,18 @@ từ `README_boilerplate.md`.
 
 README chính phải có:
 
-- Mô tả dự án.
-- Thành viên.
-- Tech stack.
-- Cấu trúc thư mục.
-- Cách cấu hình `.env`.
-- Cách chạy Docker.
-- Cách chạy backend.
-- Cách chạy test.
-- Cách chạy Agent eval.
-- Cách cài AI logging hooks.
-- Quy trình Git.
-- Link demo khi deploy.
+* Mô tả dự án.
+* Thành viên.
+* Tech stack.
+* Cấu trúc thư mục.
+* Cách cấu hình `.env`.
+* Cách chạy Docker.
+* Cách chạy backend.
+* Cách chạy test.
+* Cách chạy Agent eval.
+* Cách cài AI logging hooks.
+* Quy trình Git.
+* Link demo khi deploy.
 
 ---
 
@@ -1232,17 +1232,17 @@ Agent response
 
 ## 10.3 Điều cấm
 
-- LLM không được truy cập database trực tiếp.
-- LLM không được sinh SQL để chạy.
-- Tool không được tự viết lại business rule.
-- Route không được chứa business logic phức tạp.
-- Agent không được tự quyết định authorization.
-- Agent không được tự duyệt approval.
-- Agent không được tự tạo số lượng slot trống.
-- RAG không được dùng để lấy trạng thái realtime.
-- Frontend không được chứa service role key.
-- Không sử dụng dữ liệu thật trong demo.
-- Không lưu secret trong AI log.
+* LLM không được truy cập database trực tiếp.
+* LLM không được sinh SQL để chạy.
+* Tool không được tự viết lại business rule.
+* Route không được chứa business logic phức tạp.
+* Agent không được tự quyết định authorization.
+* Agent không được tự duyệt approval.
+* Agent không được tự tạo số lượng slot trống.
+* RAG không được dùng để lấy trạng thái realtime.
+* Frontend không được chứa service role key.
+* Không sử dụng dữ liệu thật trong demo.
+* Không lưu secret trong AI log.
 
 ---
 
@@ -1366,18 +1366,18 @@ Một biển số đang gắn với xe `active` hoặc `pending` không được
 
 Nếu số xe đang hoạt động nhỏ hơn `vehicle_limit`:
 
-- Tạo xe.
-- Đặt trạng thái `active`.
-- Có thể tạo thẻ xe tùy phạm vi triển khai.
+* Tạo xe.
+* Đặt trạng thái `active`.
+* Có thể tạo thẻ xe tùy phạm vi triển khai.
 
 ### BR-VEH-004
 
 Nếu số xe đang hoạt động bằng hoặc vượt `vehicle_limit`:
 
-- Tạo xe với trạng thái `pending`.
-- Tạo approval request.
-- Không kích hoạt xe.
-- Không cho xe đặt chỗ.
+* Tạo xe với trạng thái `pending`.
+* Tạo approval request.
+* Không kích hoạt xe.
+* Không cho xe đặt chỗ.
 
 ---
 
@@ -1407,8 +1407,8 @@ Tạo reservation và đổi slot sang `reserved` phải nằm trong cùng trans
 
 Khi reservation bị hủy hoặc hết hạn:
 
-- Reservation được cập nhật trạng thái.
-- Slot trở lại `available`, trừ khi slot đã chuyển sang `occupied` hoặc `maintenance`.
+* Reservation được cập nhật trạng thái.
+* Slot trở lại `available`, trừ khi slot đã chuyển sang `occupied` hoặc `maintenance`.
 
 ---
 
@@ -1588,33 +1588,33 @@ Tool không được ném raw database exception cho LLM.
 
 ## 15.1 Đưa vào RAG
 
-- Nội quy gửi xe.
-- Quy trình cấp thẻ.
-- Chính sách định mức.
-- Quy định xe khách.
-- Quy trình mất thẻ.
-- Thời gian hoạt động.
-- FAQ.
+* Nội quy gửi xe.
+* Quy trình cấp thẻ.
+* Chính sách định mức.
+* Quy định xe khách.
+* Quy trình mất thẻ.
+* Thời gian hoạt động.
+* FAQ.
 
 ## 15.2 Không đưa vào RAG
 
-- Trạng thái slot.
-- Reservation.
-- Danh sách xe.
-- Thông tin căn hộ.
-- Lịch sử ra vào.
-- Approval request.
-- Notification.
-- Audit log.
-- Role và permission.
+* Trạng thái slot.
+* Reservation.
+* Danh sách xe.
+* Thông tin căn hộ.
+* Lịch sử ra vào.
+* Approval request.
+* Notification.
+* Audit log.
+* Role và permission.
 
 ## 15.3 Quy tắc retrieval
 
-- Chỉ trả lời dựa trên chunk phù hợp.
-- Nếu không có context phù hợp, nói chưa đủ thông tin.
-- Không tự tạo chính sách.
-- Không lưu dữ liệu cá nhân vào embedding.
-- Metadata nên có nguồn tài liệu và mục nội quy.
+* Chỉ trả lời dựa trên chunk phù hợp.
+* Nếu không có context phù hợp, nói chưa đủ thông tin.
+* Không tự tạo chính sách.
+* Không lưu dữ liệu cá nhân vào embedding.
+* Metadata nên có nguồn tài liệu và mục nội quy.
 
 ---
 
@@ -1804,20 +1804,20 @@ AGENT_INTERNAL_ERROR
 
 ## Quy tắc bắt buộc
 
-- Không commit `.env`.
-- Không đặt Supabase service role key ở frontend.
-- Không log access token.
-- Không log OpenAI API key.
-- Không nhận `user_id` từ LLM làm nguồn tin cậy.
-- Backend lấy user từ JWT.
-- Kiểm tra ownership ở backend.
-- Không gửi toàn bộ lịch sử ra vào cho LLM.
-- Không gửi audit log cho LLM.
-- Không đưa dữ liệu người dùng vào vector database.
-- Dữ liệu demo không sử dụng thông tin thật.
-- Simulator chỉ bật ở môi trường demo/development.
-- Approval phải có audit log.
-- Biển số trong log phải được che.
+* Không commit `.env`.
+* Không đặt Supabase service role key ở frontend.
+* Không log access token.
+* Không log OpenAI API key.
+* Không nhận `user_id` từ LLM làm nguồn tin cậy.
+* Backend lấy user từ JWT.
+* Kiểm tra ownership ở backend.
+* Không gửi toàn bộ lịch sử ra vào cho LLM.
+* Không gửi audit log cho LLM.
+* Không đưa dữ liệu người dùng vào vector database.
+* Dữ liệu demo không sử dụng thông tin thật.
+* Simulator chỉ bật ở môi trường demo/development.
+* Approval phải có audit log.
+* Biển số trong log phải được che.
 
 Ví dụ:
 
@@ -1848,31 +1848,31 @@ Refresh token
 
 Tối thiểu:
 
-- Phân loại đúng intent.
-- Chọn đúng tool.
-- Truyền đúng tham số.
-- Không gọi tool ngoài quyền.
-- Không bịa slot.
-- Không báo thành công khi tool thất bại.
-- Không tự approve.
-- Không trả dữ liệu người khác.
-- Không trả chính sách nếu retrieval không có nguồn.
+* Phân loại đúng intent.
+* Chọn đúng tool.
+* Truyền đúng tham số.
+* Không gọi tool ngoài quyền.
+* Không bịa slot.
+* Không báo thành công khi tool thất bại.
+* Không tự approve.
+* Không trả dữ liệu người khác.
+* Không trả chính sách nếu retrieval không có nguồn.
 
 ## 20.2 API tests
 
 Tối thiểu:
 
-- Health endpoint.
-- Token không hợp lệ.
-- Resident không gọi được API admin.
-- Security không sửa approval.
-- Đăng ký biển số trùng.
-- Vượt định mức tạo approval.
-- Xe inactive không đặt chỗ.
-- Slot không available thì không đặt được.
-- Hai request cùng đặt một slot thì chỉ một request thành công.
-- Approval không được xử lý hai lần.
-- Xe khách hết hạn không được check-in.
+* Health endpoint.
+* Token không hợp lệ.
+* Resident không gọi được API admin.
+* Security không sửa approval.
+* Đăng ký biển số trùng.
+* Vượt định mức tạo approval.
+* Xe inactive không đặt chỗ.
+* Slot không available thì không đặt được.
+* Hai request cùng đặt một slot thì chỉ một request thành công.
+* Approval không được xử lý hai lần.
+* Xe khách hết hạn không được check-in.
 
 ## 20.3 Agent evaluation
 
@@ -1908,26 +1908,26 @@ README.md
 
 Nhiệm vụ:
 
-- Khóa kiến trúc.
-- Khóa API contract.
-- Khóa database schema.
-- Khóa business rules.
-- Tạo repository skeleton.
-- Cấu hình CI.
-- Review PR.
-- Tích hợp các module.
-- Deploy backend.
-- Quản lý issue.
-- Chuẩn bị Demo Day.
+* Khóa kiến trúc.
+* Khóa API contract.
+* Khóa database schema.
+* Khóa business rules.
+* Tạo repository skeleton.
+* Cấu hình CI.
+* Review PR.
+* Tích hợp các module.
+* Deploy backend.
+* Quản lý issue.
+* Chuẩn bị Demo Day.
 
 Khi Leader hỏi AI, AI phải ưu tiên:
 
-- Tính nhất quán.
-- Khả năng tích hợp.
-- Phát hiện contract conflict.
-- Giải pháp vừa đủ cho MVP.
-- Test và deployment.
-- Không mở rộng phạm vi.
+* Tính nhất quán.
+* Khả năng tích hợp.
+* Phát hiện contract conflict.
+* Giải pháp vừa đủ cho MVP.
+* Test và deployment.
+* Không mở rộng phạm vi.
 
 ---
 
@@ -1953,24 +1953,24 @@ tests/test_services/
 
 Nhiệm vụ:
 
-- Database connection.
-- ORM entities và migration.
-- Authentication.
-- Authorization.
-- Business services.
-- Rule engine.
-- Transaction.
-- API schemas.
-- Backend tests.
+* Database connection.
+* ORM entities và migration.
+* Authentication.
+* Authorization.
+* Business services.
+* Rule engine.
+* Transaction.
+* API schemas.
+* Backend tests.
 
 Khi Đoàn hỏi AI, AI phải:
 
-- Tách API schema và business service.
-- Không đặt logic dài trong route.
-- Dùng transaction cho reservation.
-- Viết test cho business rule.
-- Không thay đổi Agent graph nếu không liên quan.
-- Cảnh báo khi thay đổi database hoặc API contract.
+* Tách API schema và business service.
+* Không đặt logic dài trong route.
+* Dùng transaction cho reservation.
+* Viết test cho business rule.
+* Không thay đổi Agent graph nếu không liên quan.
+* Cảnh báo khi thay đổi database hoặc API contract.
 
 ---
 
@@ -1980,30 +1980,30 @@ Frontend có thể nằm trong repository riêng hoặc được thêm vào repo
 
 Chịu trách nhiệm:
 
-- Next.js App Router.
-- Supabase Auth.
-- Protected routes.
-- Resident UI.
-- Parking map.
-- Reservation UI.
-- Guest UI.
-- Security UI.
-- Admin approval UI.
-- Agent chat UI.
-- Notification UI.
-- Realtime.
+* Next.js App Router.
+* Supabase Auth.
+* Protected routes.
+* Resident UI.
+* Parking map.
+* Reservation UI.
+* Guest UI.
+* Security UI.
+* Admin approval UI.
+* Agent chat UI.
+* Notification UI.
+* Realtime.
 
 Frontend phải gọi API đã được định nghĩa trong context này.
 
 Khi Quang Thành hỏi AI, AI phải:
 
-- Dùng TypeScript.
-- Không tự đổi API response.
-- Có loading, error và empty state.
-- Không lưu secret.
-- Không thực hiện authorization chỉ bằng frontend.
-- Không gọi trực tiếp database cho nghiệp vụ.
-- Giữ giao diện đơn giản, dễ demo.
+* Dùng TypeScript.
+* Không tự đổi API response.
+* Có loading, error và empty state.
+* Không lưu secret.
+* Không thực hiện authorization chỉ bằng frontend.
+* Không gọi trực tiếp database cho nghiệp vụ.
+* Giữ giao diện đơn giản, dễ demo.
 
 ---
 
@@ -2022,29 +2022,29 @@ tests/test_agents/
 
 Nhiệm vụ:
 
-- Agent state.
-- LangGraph graph.
-- Nodes.
-- Tools.
-- Intent routing.
-- RAG ingestion.
-- Retrieval.
-- Structured output.
-- Prompt.
-- Guardrails.
-- Agent tests.
-- Agent evaluation.
+* Agent state.
+* LangGraph graph.
+* Nodes.
+* Tools.
+* Intent routing.
+* RAG ingestion.
+* Retrieval.
+* Structured output.
+* Prompt.
+* Guardrails.
+* Agent tests.
+* Agent evaluation.
 
 Khi Phú Thành hỏi AI, AI phải:
 
-- Không tạo Agent quá tự trị.
-- Không truy cập database trực tiếp.
-- Tool phải gọi service.
-- Không lặp business rule.
-- Không dùng RAG cho realtime data.
-- Không để Agent bịa kết quả.
-- Viết test cho graph và tool.
-- Giữ context nhỏ và tránh dữ liệu nhạy cảm.
+* Không tạo Agent quá tự trị.
+* Không truy cập database trực tiếp.
+* Tool phải gọi service.
+* Không lặp business rule.
+* Không dùng RAG cho realtime data.
+* Không để Agent bịa kết quả.
+* Viết test cho graph và tool.
+* Giữ context nhỏ và tránh dữ liệu nhạy cảm.
 
 ---
 
@@ -2077,16 +2077,16 @@ fix/31-reservation-conflict
 
 ## Quy tắc
 
-- Không push trực tiếp vào `main`.
-- Mỗi issue tương ứng một branch.
-- Database change phải có migration.
-- API change phải cập nhật API contract.
-- Agent tool change phải cập nhật Agent contract hoặc test.
-- PR phải ghi cách kiểm tra.
-- PR giao diện phải có screenshot.
-- Mỗi PR cần ít nhất một người review.
-- Merge thường xuyên vào `develop`.
-- Không chờ đến cuối tuần mới tích hợp.
+* Không push trực tiếp vào `main`.
+* Mỗi issue tương ứng một branch.
+* Database change phải có migration.
+* API change phải cập nhật API contract.
+* Agent tool change phải cập nhật Agent contract hoặc test.
+* PR phải ghi cách kiểm tra.
+* PR giao diện phải có screenshot.
+* Mỗi PR cần ít nhất một người review.
+* Merge thường xuyên vào `develop`.
+* Không chờ đến cuối tuần mới tích hợp.
 
 ## Commit convention
 
@@ -2105,70 +2105,70 @@ chore: configure CI workflow
 
 ## Ngày 1
 
-- Chốt context.
-- Chốt architecture.
-- Chốt database.
-- Chốt API contract.
-- Chốt business rules.
-- Tạo repository structure.
-- Tạo issue.
-- Cấu hình branch.
+* Chốt context.
+* Chốt architecture.
+* Chốt database.
+* Chốt API contract.
+* Chốt business rules.
+* Tạo repository structure.
+* Tạo issue.
+* Cấu hình branch.
 
 ## Ngày 2–4
 
-- FastAPI skeleton.
-- Config.
-- Database connection.
-- Authentication.
-- Authorization.
-- Pydantic schemas.
-- Agent graph skeleton.
-- Mock tools.
-- Test health và auth.
-- Docker local.
+* FastAPI skeleton.
+* Config.
+* Database connection.
+* Authentication.
+* Authorization.
+* Pydantic schemas.
+* Agent graph skeleton.
+* Mock tools.
+* Test health và auth.
+* Docker local.
 
 ## Ngày 4–7
 
-- Vehicle service.
-- Parking service.
-- Reservation.
-- Guest registration.
-- Slot simulator.
-- Frontend login.
-- Frontend parking map.
-- Agent tool adapters.
+* Vehicle service.
+* Parking service.
+* Reservation.
+* Guest registration.
+* Slot simulator.
+* Frontend login.
+* Frontend parking map.
+* Agent tool adapters.
 
 ## Ngày 6–10
 
-- LangGraph hoàn chỉnh.
-- RAG.
-- Approval workflow.
-- Notification.
-- Admin approval UI.
-- Security UI.
-- Agent chat.
-- Realtime.
+* LangGraph hoàn chỉnh.
+* RAG.
+* Approval workflow.
+* Notification.
+* Admin approval UI.
+* Security UI.
+* Agent chat.
+* Realtime.
 
 ## Ngày 10–12
 
-- Unit tests.
-- API integration tests.
-- Agent evaluation.
-- Security tests.
-- Fix bug.
-- Hoàn thiện UI.
-- Kiểm tra AI logs.
+* Unit tests.
+* API integration tests.
+* Agent evaluation.
+* Security tests.
+* Fix bug.
+* Hoàn thiện UI.
+* Kiểm tra AI logs.
 
 ## Ngày 13–14
 
-- Docker production.
-- Deploy.
-- Seed demo data.
-- Smoke test.
-- Demo script.
-- Slides.
-- Video dự phòng.
-- Release `v0.1.0-mvp`.
+* Docker production.
+* Deploy.
+* Seed demo data.
+* Smoke test.
+* Demo script.
+* Slides.
+* Video dự phòng.
+* Release `v0.1.0-mvp`.
 
 ---
 
@@ -2176,37 +2176,37 @@ chore: configure CI workflow
 
 Một chức năng chỉ hoàn thành khi:
 
-- Code chạy được.
-- Có Pydantic validation.
-- Có xử lý lỗi.
-- Có kiểm tra authorization nếu cần.
-- Có test phù hợp.
-- Không chứa secret.
-- Không phá API contract.
-- Có migration nếu thay đổi database.
-- Có tài liệu nếu thay đổi hành vi.
-- Đã được review.
-- Đã merge vào `develop`.
+* Code chạy được.
+* Có Pydantic validation.
+* Có xử lý lỗi.
+* Có kiểm tra authorization nếu cần.
+* Có test phù hợp.
+* Không chứa secret.
+* Không phá API contract.
+* Có migration nếu thay đổi database.
+* Có tài liệu nếu thay đổi hành vi.
+* Đã được review.
+* Đã merge vào `develop`.
 
 MVP hoàn thành khi:
 
-- Ba vai trò đăng nhập được.
-- Cư dân quản lý xe được.
-- Cư dân xem và đặt slot được.
-- Slot cập nhật realtime.
-- Cư dân đăng ký xe khách được.
-- Bảo vệ xử lý xe khách được.
-- Agent gọi đúng tool.
-- Agent không bịa slot.
-- Đăng ký vượt định mức tạo approval.
-- Admin duyệt hoặc từ chối được.
-- Cư dân nhận notification.
-- Có audit log.
-- Có pytest.
-- Có Agent evaluation.
-- Docker build thành công.
-- Backend và frontend được deploy.
-- Luồng demo chạy ổn định.
+* Ba vai trò đăng nhập được.
+* Cư dân quản lý xe được.
+* Cư dân xem và đặt slot được.
+* Slot cập nhật realtime.
+* Cư dân đăng ký xe khách được.
+* Bảo vệ xử lý xe khách được.
+* Agent gọi đúng tool.
+* Agent không bịa slot.
+* Đăng ký vượt định mức tạo approval.
+* Admin duyệt hoặc từ chối được.
+* Cư dân nhận notification.
+* Có audit log.
+* Có pytest.
+* Có Agent evaluation.
+* Docker build thành công.
+* Backend và frontend được deploy.
+* Luồng demo chạy ổn định.
 
 ---
 
@@ -2222,11 +2222,12 @@ Khi hỗ trợ dự án này, AI phải:
 6. Chỉ hỏi lại khi thiếu thông tin ảnh hưởng trực tiếp đến contract.
 7. Với chi tiết nhỏ, chọn giải pháp đơn giản nhất và ghi rõ giả định.
 8. Khi viết code phải nêu:
-   - File cần tạo hoặc sửa.
-   - Nội dung code.
-   - Dependency.
-   - Lệnh chạy.
-   - Cách test.
+
+   * File cần tạo hoặc sửa.
+   * Nội dung code.
+   * Dependency.
+   * Lệnh chạy.
+   * Cách test.
 9. Không viết pseudo-code nếu được yêu cầu implementation.
 10. Không thay đổi API hoặc schema mà không cảnh báo.
 11. Không đặt business logic trong Agent tool.
