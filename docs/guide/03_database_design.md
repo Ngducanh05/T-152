@@ -15,7 +15,6 @@ File này là bản vẽ dữ liệu của ParkSmart AI. Mọi người đọc f
 - Các bảng liên quan với nhau ra sao.
 - Dữ liệu nào không được trùng hoặc không được sửa tùy ý.
 
-Hôm nay chỉ **chốt thiết kế**. Chưa cần tạo bảng hay viết migration.
 
 ## 2. Các từ dùng chung
 
