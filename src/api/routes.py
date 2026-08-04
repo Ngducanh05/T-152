@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
+<<<<<<< HEAD
 from src.agents.graph import agent
 from src.models.auth import CurrentUser
 from src.models.common import SuccessResponse
@@ -8,20 +9,33 @@ from src.services.auth_service import get_current_user
 from src.services.database import check_database_connection
 
 router = APIRouter()
+=======
+from src.models.common import SuccessResponse
+from src.services.database import check_database_connection
+>>>>>>> 7bfdef8664e5fb388c432168789d837cc6c3dcb0
 
 
-@router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
-    """Chat với AI agent."""
+api_router = APIRouter()
+
+
+@api_router.get(
+    "/health/database",
+    response_model=SuccessResponse[dict[str, str]],
+    tags=["Health"],
+)
+async def database_health() -> SuccessResponse[dict[str, str]]:
     try:
-        result = await agent.ainvoke({"query": request.message})
-        return ChatResponse(
-            response=result.get("response", ""),
-            analysis=result.get("analysis", ""),
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        await check_database_connection()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "DATABASE_UNAVAILABLE",
+                "message": "Database connection failed.",
+            },
+        ) from exc
 
+<<<<<<< HEAD
 
 @router.get("/status")
 async def agent_status():
@@ -52,3 +66,9 @@ async def get_me(
 ) -> SuccessResponse[CurrentUser]:
     """Return the authenticated ParkSmart user and application role."""
     return SuccessResponse(data=current_user, message="Current user loaded.")
+=======
+    return SuccessResponse(
+        data={"database": "connected"},
+        message="Database is available.",
+    )
+>>>>>>> 7bfdef8664e5fb388c432168789d837cc6c3dcb0
