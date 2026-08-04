@@ -1,38 +1,82 @@
-# Architecture Diagram
-
-## System Overview
+# ParkSmart AI Architecture Diagram
 
 ```mermaid
-graph TB
-    User([User]) --> UI[Frontend<br/>React/Next.js]
-    UI -->|REST API| API[FastAPI Backend]
-    API --> Agent[LangGraph Agent]
-    Agent --> LLM[LLM Service<br/>GPT-4o / Gemini]
-    Agent --> Tools[Agent Tools]
-    Tools --> DB[(Database)]
-    Agent --> VS[Vector Store<br/>ChromaDB]
+flowchart TD
+    USER[User] --> FE[Next.js Frontend]
+
+    FE -->|Login| AUTH[Supabase Auth]
+    AUTH -->|Access Token| FE
+
+    FE -->|REST API + Bearer Token| API[FastAPI API]
+    FE <-->|Realtime Subscription| RT[Supabase Realtime]
+
+    API --> AUTHZ[Authentication and Authorization]
+    AUTHZ --> SERVICES[Business Services]
+
+    API --> AGENT[LangGraph Agent]
+    AGENT --> NODES[Agent Nodes]
+    NODES --> TOOLS[Agent Tools]
+    TOOLS --> SERVICES
+
+    SERVICES --> RULES[Rule Engine]
+    RULES --> DB[(PostgreSQL)]
+
+    SERVICES --> SLOT[SlotProvider]
+    SLOT --> SIM[Slot Simulator]
+
+    AGENT --> RAG[RAG Service]
+    RAG --> VECTOR[(pgvector)]
+
+    SERVICES --> NOTIFY[Notification Service]
+    SERVICES --> AUDIT[Audit Service]
+
+    DB --> RT
 ```
 
-## Agent Flow
+## Luồng API
 
 ```mermaid
-graph LR
-    START((Start)) --> Input[Parse Input]
-    Input --> Analyze[Analyze Query]
-    Analyze --> Decide{Need Tool?}
-    Decide -->|Yes| CallTool[Call Tool]
-    CallTool --> Analyze
-    Decide -->|No| Generate[Generate Response]
-    Generate --> END((End))
+sequenceDiagram
+    actor User
+    participant FE as Next.js
+    participant API as FastAPI
+    participant Service
+    participant DB as PostgreSQL
+
+    User->>FE: Thực hiện thao tác
+    FE->>API: Request + Bearer token
+    API->>API: Xác thực và phân quyền
+    API->>Service: Gọi nghiệp vụ
+    Service->>DB: Transaction/query
+    DB-->>Service: Kết quả
+    Service-->>API: Structured result
+    API-->>FE: API response
+    FE-->>User: Hiển thị kết quả
 ```
 
-## Component Details
+## Luồng Agent
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| Frontend | React/Next.js | User interface |
-| Backend | FastAPI | API server |
-| Agent | LangGraph | AI agent orchestration |
-| LLM | OpenAI/Gemini | Language model |
-| Database | PostgreSQL/SQLite | Data persistence |
-| Vector Store | ChromaDB | RAG / embeddings |
+```mermaid
+sequenceDiagram
+    actor User
+    participant FE as Next.js
+    participant API as FastAPI
+    participant Graph as LangGraph
+    participant Tool as Agent Tool
+    participant Service
+    participant DB as PostgreSQL/RAG
+
+    User->>FE: Gửi câu hỏi
+    FE->>API: POST /agent/chat
+    API->>Graph: Message + trusted user context
+    Graph->>Graph: Classify intent
+    Graph->>Tool: Execute tool
+    Tool->>Service: Gọi business service
+    Service->>DB: Query hoặc transaction
+    DB-->>Service: Result
+    Service-->>Tool: Structured result
+    Tool-->>Graph: Tool result
+    Graph-->>API: Agent response
+    API-->>FE: Response
+    FE-->>User: Hiển thị câu trả lời
+```
