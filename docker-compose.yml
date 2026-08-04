@@ -1,19 +1,47 @@
-version: "3.8"
-
 services:
+  database:
+    image: pgvector/pgvector:pg16
+    container_name: parksmart-database
+    environment:
+      POSTGRES_DB: parksmart
+      POSTGRES_USER: parksmart
+      POSTGRES_PASSWORD: parksmart
+    ports:
+      - "5432:5432"
+    volumes:
+      - parksmart_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parksmart -d parksmart"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    container_name: parksmart-backend
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://parksmart:parksmart@database:5432/parksmart
+    ports:
+      - "8000:8000"
     volumes:
-      - ./data:/app/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - .:/app
+    depends_on:
+      database:
+        condition: service_healthy
+    command:
+      [
+        "uvicorn",
+        "src.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload"
+      ]
+
+volumes:
+  parksmart_postgres_data:

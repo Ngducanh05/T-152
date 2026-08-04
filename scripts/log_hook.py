@@ -180,8 +180,11 @@ def main():
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    # Output valid JSON (required by some tools like Gemini)
-    print(json.dumps({"status": "logged"}))
+    # Hooks parse stdout as a control response, not as an acknowledgement.
+    # Keep the response neutral and schema-compatible across Codex, Claude,
+    # Gemini, Cursor, and Copilot.  In particular, Codex rejects arbitrary
+    # fields such as {"status": "logged"} for UserPromptSubmit and Stop.
+    print("{}")
 
 
 if __name__ == "__main__":

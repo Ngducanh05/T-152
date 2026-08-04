@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parksmart-ai"
+version = "0.1.0"
+description = "ParkSmart AI backend and LangGraph agent"
+requires-python = ">=3.11,<3.13"
+
+dependencies = [
+    "fastapi>=0.139,<0.140",
+    "uvicorn[standard]>=0.35,<1",
+    "pydantic>=2.11,<3",
+    "pydantic-settings>=2.14,<3",
+    "sqlalchemy[asyncio]>=2.0.51,<2.1",
+    "asyncpg>=0.30,<1",
+    "alembic>=1.16,<2",
+    "langgraph>=1.2,<1.3",
+    "httpx>=0.28,<1",
+    "PyJWT[crypto]>=2.10,<3",
+    "pgvector>=0.4,<1"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+    "pytest-asyncio>=1,<2",
+    "pytest-cov>=6,<8",
+    "ruff>=0.12,<1"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
