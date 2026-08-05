@@ -4,7 +4,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api.routes import api_router
 from src.config import get_settings
 
-
 settings = get_settings()
 
 app = FastAPI(
@@ -29,7 +28,4 @@ app.include_router(
 
 @app.get("/health", tags=["Health"])
 async def application_health() -> dict[str, str]:
-    return {
-        "status": "ok",
-        "environment": settings.app_env,
-    }
+    return {"status": "ok"}
