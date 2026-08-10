@@ -140,3 +140,12 @@ ruff --version
 ```bash
 deactivate
 ```
+
+
+
+
+##chạy frontend
+```bash
+cd frontend
+npm.cmd run dev
+```
