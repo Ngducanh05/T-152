@@ -9,6 +9,7 @@ Tài liệu này mô tả ba góc nhìn kiến trúc chính của hệ thống P
 ## Nguyên tắc chính
 
 - `Parking State Service` là source of truth cho trạng thái ô đỗ.
+- Trạng thái ô đỗ trong MVP gồm `AVAILABLE`, `RESERVED` và `OCCUPIED`.
 - Agent chỉ hiểu yêu cầu và gọi tools, không trực tiếp sửa database.
 - Recommendation chọn ô bằng deterministic scoring, không để LLM tự chọn.
 - Routing sử dụng parking graph với A* hoặc Dijkstra.
@@ -81,6 +82,24 @@ graph TB
 
 **Data Layer** lưu trạng thái ô đỗ, thông tin phiên đỗ xe và parking map graph.
 
+### Trạng thái ô đỗ
+
+- `AVAILABLE`: ô đang trống và có thể được đề xuất hoặc giữ chỗ.
+- `RESERVED`: ô đang được giữ tạm thời cho một yêu cầu đã xác nhận; ô này không được đề xuất cho người khác.
+- `OCCUPIED`: xe đã đỗ thực tế tại ô.
+
+`RESERVED` trong MVP là cơ chế giữ ô có thời hạn, không phải chức năng đặt chỗ và thanh toán online hoàn chỉnh. Parking State Service chịu trách nhiệm kiểm tra chủ thể giữ chỗ, thời hạn và mọi chuyển trạng thái.
+
+```mermaid
+stateDiagram-v2
+    [*] --> AVAILABLE
+    AVAILABLE --> RESERVED: Xác nhận giữ ô
+    AVAILABLE --> OCCUPIED: Xe mô phỏng đỗ trực tiếp
+    RESERVED --> OCCUPIED: Xác nhận đã đỗ hợp lệ
+    RESERVED --> AVAILABLE: Hủy hoặc hết thời hạn
+    OCCUPIED --> AVAILABLE: Xe rời ô
+```
+
 ---
 
 ## 2. Agent Flow Diagram
@@ -98,12 +117,14 @@ graph TD
     CheckInfo -->|Yes| Router[Intent Router]
 
     Router -->|Find Slot| Recommend[Recommendation Tool]
+    Router -->|Reserve Slot| Reserve[Reservation Tool]
     Router -->|Get Directions| Route[Routing Tool]
     Router -->|Save Parking| Save[Parking Session Tool]
     Router -->|Find Vehicle| Find[Find Vehicle Tool]
     Router -->|Check Status| Status[Parking State Tool]
 
     Recommend --> Evaluate[Evaluate Tool Result]
+    Reserve --> Evaluate
     Route --> Evaluate
     Save --> Evaluate
     Find --> Evaluate
