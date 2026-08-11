@@ -153,7 +153,7 @@ MVP không được phụ thuộc vào việc huấn luyện một mô hình AI 
 Hệ thống có thể:
 
 - Tạo danh sách tầng, khu vực và ô đỗ.
-- Lưu trạng thái `AVAILABLE` hoặc `OCCUPIED`.
+- Lưu trạng thái `AVAILABLE` hoặc `OCCUPIED` hoặc `RESERVED`.
 - Truy vấn các ô đang trống.
 - Cập nhật trạng thái khi xe đỗ hoặc rời đi.
 - Cung cấp một nguồn dữ liệu thống nhất về trạng thái bãi xe.
@@ -164,9 +164,10 @@ Simulator mô phỏng hoạt động của các xe khác trong bãi:
 
 - Xe đi vào bãi.
 - Xe chọn một ô.
+- Ô chuyển từ `AVAILABLE` sang `RESERVED` giữ chỗ
 - Xe đỗ vào ô.
 - Xe rời khỏi ô.
-- Ô chuyển từ `AVAILABLE` sang `OCCUPIED`.
+- Ô chuyển từ `RESERVED` sang `OCCUPIED`.
 - Ô chuyển từ `OCCUPIED` sang `AVAILABLE`.
 
 Simulator không phải AI và không sử dụng LLM để thay đổi trạng thái bãi xe.
@@ -318,7 +319,7 @@ Không được dùng nội dung hội thoại, trạng thái trong LLM hoặc d
 
 ### 8.2. LLM không quyết định ô nào trống
 
-LLM không được tự kết luận một ô đang `AVAILABLE` hoặc `OCCUPIED`.
+LLM không được tự kết luận một ô đang `AVAILABLE` hoặc `OCCUPIED` hoặc `RESERVED`.
 
 LLM chỉ được:
 
@@ -495,6 +496,7 @@ A07 changes from OCCUPIED to AVAILABLE
 
 - Xe chỉ được đỗ vào ô đang `AVAILABLE`.
 - Khi xe đỗ thành công, ô chuyển thành `OCCUPIED`.
+- Khi xe chọn một ô đỗ thì ô đó đang `AVAILABLE` chuyển sang `RESERVED` giữ chỗ trong một khoảng thời gian. Nếu quá thời gian chưa xác nhận đỗ thì chuyển lại thành `AVAILABLE`
 - Xe chỉ được rời khỏi ô đang `OCCUPIED`.
 - Khi xe rời đi, ô chuyển thành `AVAILABLE`.
 - Không được để hai xe cùng chiếm một ô.
