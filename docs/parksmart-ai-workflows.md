@@ -52,10 +52,12 @@ flowchart LR
     D --> E[Lọc các ô còn trống]
     E --> F[Chọn ô phù hợp]
     F --> G[Đề xuất ô đỗ]
-    G --> H[Bản đồ và hướng dẫn bằng giọng nói]
+    G --> I[Người dùng xác nhận]
+    I --> R[Giữ ô ở trạng thái RESERVED]
+    R --> H[Bản đồ và hướng dẫn bằng giọng nói]
 ```
 
-**Kết quả:** Hệ thống đề xuất một ô còn trống, có thể ưu tiên theo yêu cầu như gần thang máy, gần lối ra hoặc gần vị trí hiện tại.
+**Kết quả:** Hệ thống đề xuất một ô còn trống, có thể ưu tiên theo yêu cầu như gần thang máy, gần lối ra hoặc gần vị trí hiện tại. Khi người dùng xác nhận, Parking State Service giữ ô trong thời hạn cấu hình (mặc định đề xuất 300 giây cho MVP) trước khi hệ thống hướng dẫn đến ô.
 
 ---
 
@@ -96,8 +98,8 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A[Parking Simulator] --> B[Giả lập xe vào hoặc rời ô]
-    B --> C[Cập nhật trạng thái ô đỗ]
+    A[Parking Simulator hoặc thao tác demo] --> B[Giả lập xe vào, giữ ô, đỗ hoặc rời ô]
+    B --> C[Parking State Service kiểm tra và cập nhật trạng thái]
     C --> D[(Parking State)]
     D --> E[Web Dashboard]
     D --> F[AI Agent]
@@ -109,7 +111,22 @@ flowchart LR
 
 - `AVAILABLE`: ô đỗ đang trống.
 - `OCCUPIED`: ô đỗ đã có xe.
-- `RESERVED`: đặt ô đỗ (nếu quá timeout chưa xác nhận đỗ -> AVAILABLE)
+- `RESERVED`: ô được giữ tạm thời cho một yêu cầu đã xác nhận; nếu bị hủy hoặc quá thời hạn mà chưa xác nhận đỗ thì trở về `AVAILABLE`.
+
+Các chuyển trạng thái hợp lệ trong MVP:
+
+```text
+AVAILABLE → RESERVED → OCCUPIED → AVAILABLE
+AVAILABLE → RESERVED → AVAILABLE
+AVAILABLE → OCCUPIED → AVAILABLE
+```
+
+- `AVAILABLE → RESERVED`: người dùng xác nhận giữ ô; hệ thống lưu mã tham chiếu và thời điểm hết hạn.
+- `RESERVED → OCCUPIED`: người dùng hoặc xe có mã tham chiếu hợp lệ xác nhận đã đỗ.
+- `RESERVED → AVAILABLE`: yêu cầu giữ ô bị hủy hoặc hết thời hạn.
+- `AVAILABLE → OCCUPIED`: xe mô phỏng không đặt trước đỗ trực tiếp.
+- Ô `RESERVED` không được đề xuất cho người khác; chỉ Parking State Service được phép xác nhận các chuyển trạng thái.
+- `RESERVED` chỉ là giữ ô tạm thời trong luồng MVP, không bao gồm đặt chỗ và thanh toán online hoàn chỉnh.
 
 **Vai trò của Simulator:** Tạo dữ liệu thay đổi trạng thái ô đỗ để kiểm thử toàn bộ hệ thống mà chưa cần lắp đặt camera thực tế.
 
