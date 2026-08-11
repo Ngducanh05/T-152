@@ -1,17 +1,14 @@
+"""Health routes retained during the feature-router split."""
+
 from fastapi import APIRouter, HTTPException
 
+from src.core.database import check_database_connection
 from src.models.common import SuccessResponse
-from src.services.database import check_database_connection
+
+router = APIRouter(tags=["Health"])
 
 
-api_router = APIRouter()
-
-
-@api_router.get(
-    "/health/database",
-    response_model=SuccessResponse[dict[str, str]],
-    tags=["Health"],
-)
+@router.get("/health/database", response_model=SuccessResponse[dict[str, str]])
 async def database_health() -> SuccessResponse[dict[str, str]]:
     try:
         await check_database_connection()
