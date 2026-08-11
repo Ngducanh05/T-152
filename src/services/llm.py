@@ -1,9 +1,9 @@
-from langchain_openai import ChatOpenAI
-
 from src.config import get_settings
 
 
-def get_llm() -> ChatOpenAI:
+def get_llm():
+    from langchain_openai import ChatOpenAI
+
     settings = get_settings()
     return ChatOpenAI(
         model=settings.model_name,
