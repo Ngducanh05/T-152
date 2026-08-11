@@ -36,7 +36,7 @@ The canonical Pydantic definitions live in src/models/schemas.py.
 |---|---|
 | User | id, display_name, current_node_id |
 | Vehicle | id, user_id, plate_number, requires_charging |
-| ParkingSlot | id, floor_id, zone_id, node_id, status, has_charger, is_accessible, version |
+| ParkingSlot | id, floor_id, zone_id, node_id, status, has_charger, is_accessible, version, occupied_by_vehicle_id |
 | ParkingReservation | id, user_id, vehicle_id, slot_id, status, expires_at, created_at |
 | ParkingSession | id, user_id, vehicle_id, slot_id, status, parked_at, completed_at |
 | LocationCheckpoint | id, node_id, qr_payload |
@@ -44,7 +44,10 @@ The canonical Pydantic definitions live in src/models/schemas.py.
 | MapEdge | from_node, to_node, distance_m, bidirectional, enabled |
 | ParkingEvent | id, event_type, slot_id, actor_type, actor_id, old_status, new_status, created_at, metadata |
 
-Nullable fields are User.current_node_id, ParkingSession.completed_at, and the event fields that may not apply to a particular event: slot_id, actor_id, old_status, and new_status. ParkingEvent.metadata defaults to an empty object. MapEdge.bidirectional and MapEdge.enabled default to true.
+Nullable fields are User.current_node_id, ParkingSlot.occupied_by_vehicle_id,
+ParkingSession.completed_at, and the event fields that may not apply to a particular event:
+slot_id, actor_id, old_status, and new_status. ParkingEvent.metadata defaults to an empty
+object. MapEdge.bidirectional and MapEdge.enabled default to true.
 
 ### Parking slot contract
 
@@ -58,6 +61,11 @@ Nullable fields are User.current_node_id, ParkingSession.completed_at, and the e
 | has_charger | boolean | Required |
 | is_accessible | boolean | Required |
 | version | integer | Required; zero or greater |
+| occupied_by_vehicle_id | string or null | Vehicle occupying the slot; null when no vehicle ownership is recorded |
+
+`occupied_by_vehicle_id` is a Phase 1 contract refinement that exposes the nullable
+ownership field required by the persistence model. Parking State Service remains responsible
+for changing it atomically with slot state and the corresponding ParkingEvent.
 
 ### Reservation timing
 

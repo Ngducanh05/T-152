@@ -5,10 +5,10 @@ Revises:
 Create Date: 2026-08-04
 """
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
 
 revision = "20260804_0001"
 down_revision = None
@@ -16,11 +16,12 @@ branch_labels = None
 depends_on = None
 
 
-app_role_enum = sa.Enum(
+app_role_enum = postgresql.ENUM(
     "resident",
     "security",
     "admin",
     name="app_role_enum",
+    create_type=False,
 )
 
 
