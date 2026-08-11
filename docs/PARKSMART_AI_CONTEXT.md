@@ -153,9 +153,10 @@ MVP không được phụ thuộc vào việc huấn luyện một mô hình AI 
 Hệ thống có thể:
 
 - Tạo danh sách tầng, khu vực và ô đỗ.
-- Lưu trạng thái `AVAILABLE` hoặc `OCCUPIED` hoặc `RESERVED`.
+- Lưu trạng thái `AVAILABLE`, `RESERVED` hoặc `OCCUPIED`.
 - Truy vấn các ô đang trống.
-- Cập nhật trạng thái khi xe đỗ hoặc rời đi.
+- Giữ tạm thời một ô theo thời hạn khi người dùng xác nhận đề xuất.
+- Cập nhật trạng thái khi ô được giữ, hết hạn giữ chỗ, xe đỗ hoặc rời đi.
 - Cung cấp một nguồn dữ liệu thống nhất về trạng thái bãi xe.
 
 ### 6.2. Parking Simulator
@@ -164,10 +165,13 @@ Simulator mô phỏng hoạt động của các xe khác trong bãi:
 
 - Xe đi vào bãi.
 - Xe chọn một ô.
-- Ô chuyển từ `AVAILABLE` sang `RESERVED` giữ chỗ
+- Xe hoặc kịch bản demo giữ tạm thời một ô.
 - Xe đỗ vào ô.
 - Xe rời khỏi ô.
-- Ô chuyển từ `RESERVED` sang `OCCUPIED`.
+- Ô chuyển từ `AVAILABLE` sang `RESERVED` khi được giữ tạm thời.
+- Ô chuyển từ `RESERVED` sang `OCCUPIED` khi xe được xác nhận đã đỗ.
+- Ô chuyển từ `RESERVED` sang `AVAILABLE` khi bị hủy hoặc hết thời hạn.
+- Ô có thể chuyển trực tiếp từ `AVAILABLE` sang `OCCUPIED` đối với xe mô phỏng không qua bước giữ chỗ.
 - Ô chuyển từ `OCCUPIED` sang `AVAILABLE`.
 
 Simulator không phải AI và không sử dụng LLM để thay đổi trạng thái bãi xe.
@@ -319,7 +323,7 @@ Không được dùng nội dung hội thoại, trạng thái trong LLM hoặc d
 
 ### 8.2. LLM không quyết định ô nào trống
 
-LLM không được tự kết luận một ô đang `AVAILABLE` hoặc `OCCUPIED` hoặc `RESERVED`.
+LLM không được tự kết luận một ô đang `AVAILABLE`, `RESERVED` hoặc `OCCUPIED`.
 
 LLM chỉ được:
 
@@ -476,6 +480,9 @@ Simulator cần tạo ra hành vi có thể quan sát được nhưng không c�
 
 ```text
 VEHICLE_ENTERED
+SLOT_RESERVED
+RESERVATION_CANCELLED
+RESERVATION_EXPIRED
 VEHICLE_PARKED
 VEHICLE_LEFT_SLOT
 VEHICLE_EXITED
@@ -485,8 +492,10 @@ Ví dụ:
 
 ```text
 CAR_01 enters parking
+CAR_01 reserves A03
+A03 changes from AVAILABLE to RESERVED
 CAR_01 parks at A03
-A03 changes from AVAILABLE to OCCUPIED
+A03 changes from RESERVED to OCCUPIED
 
 CAR_05 leaves A07
 A07 changes from OCCUPIED to AVAILABLE
@@ -494,12 +503,18 @@ A07 changes from OCCUPIED to AVAILABLE
 
 ### 11.3. Quy tắc cập nhật
 
-- Xe chỉ được đỗ vào ô đang `AVAILABLE`.
-- Khi xe đỗ thành công, ô chuyển thành `OCCUPIED`.
-- Khi xe chọn một ô đỗ thì ô đó đang `AVAILABLE` chuyển sang `RESERVED` giữ chỗ trong một khoảng thời gian. Nếu quá thời gian chưa xác nhận đỗ thì chuyển lại thành `AVAILABLE`
+- Chỉ ô đang `AVAILABLE` mới được chuyển sang `RESERVED`.
+- Mỗi lần giữ ô phải có chủ thể hoặc mã tham chiếu, thời điểm giữ và thời điểm hết hạn.
+- Thời gian giữ ô phải cấu hình được; giá trị mặc định đề xuất cho MVP là 300 giây.
+- Ô `RESERVED` không được trả về trong danh sách ô có thể đề xuất cho người khác.
+- Xe có giữ chỗ chỉ được đỗ vào ô `RESERVED` khi mã tham chiếu còn hiệu lực và khớp với yêu cầu giữ chỗ.
+- Khi xác nhận đỗ hợp lệ, ô chuyển từ `RESERVED` sang `OCCUPIED`.
+- Simulator có thể cho xe không đặt trước đỗ trực tiếp vào ô `AVAILABLE`; khi thành công ô chuyển thành `OCCUPIED`.
+- Khi giữ chỗ bị hủy hoặc hết thời hạn, ô chuyển từ `RESERVED` về `AVAILABLE`.
 - Xe chỉ được rời khỏi ô đang `OCCUPIED`.
 - Khi xe rời đi, ô chuyển thành `AVAILABLE`.
 - Không được để hai xe cùng chiếm một ô.
+- Không được để hai yêu cầu cùng giữ một ô; thao tác giữ ô và cập nhật trạng thái phải atomic hoặc dùng optimistic locking.
 - Event không hợp lệ phải bị từ chối hoặc ghi log.
 - Simulator phải gọi Parking State Service hoặc gửi event cho service.
 - Simulator không nên cập nhật database bằng logic độc lập với Parking State Service.
@@ -511,6 +526,7 @@ Simulator có thể hỗ trợ:
 - Chạy event ngẫu nhiên theo khoảng thời gian.
 - Chạy một kịch bản demo cố định.
 - Cho phép người demo nhấn nút để xe đến hoặc rời đi.
+- Cho phép mô phỏng giữ ô, hủy giữ ô và hết thời hạn giữ chỗ.
 - Reset bãi xe về trạng thái ban đầu.
 
 Đối với demo trước mentor, kịch bản cố định thường ổn định và dễ trình bày hơn random hoàn toàn.
@@ -716,6 +732,8 @@ Tên tool có thể thay đổi theo convention của codebase, nhưng trách nh
 | `list_available_slots` | Lấy danh sách ô `AVAILABLE` theo điều kiện |
 | `get_slot_details` | Lấy thông tin chi tiết của một ô |
 | `recommend_parking_slot` | Lọc, tính điểm và đề xuất ô phù hợp |
+| `reserve_parking_slot` | Chuyển atomic một ô `AVAILABLE` sang `RESERVED` và trả mã tham chiếu cùng thời điểm hết hạn |
+| `cancel_parking_reservation` | Hủy một lần giữ ô hợp lệ và đưa ô về `AVAILABLE` |
 | `get_route` | Tìm đường giữa hai node |
 | `set_user_location` | Xác nhận vị trí người dùng từ QR, text hoặc voice |
 | `get_user_location` | Lấy vị trí đã xác nhận gần nhất |
@@ -775,7 +793,7 @@ Mỗi tool nên:
 | `floorId` | Tầng |
 | `zoneId` | Khu vực |
 | `nodeId` | Node tương ứng trên graph |
-| `status` | `AVAILABLE` hoặc `OCCUPIED` |
+| `status` | `AVAILABLE`, `RESERVED` hoặc `OCCUPIED` |
 | `slotType` | Standard, EV, Accessible hoặc loại khác |
 | `sizeClass` | Kích thước ô |
 | `hasCharger` | Có trạm sạc hay không |
@@ -783,6 +801,9 @@ Mỗi tool nên:
 | `isEnabled` | Ô có đang được sử dụng hay không |
 | `updatedAt` | Thời gian cập nhật gần nhất |
 | `version` | Phiên bản phục vụ kiểm soát cập nhật đồng thời |
+| `reservationReference` | Mã tham chiếu của lần giữ ô; chỉ có khi trạng thái là `RESERVED` |
+| `reservedAt` | Thời điểm bắt đầu giữ ô |
+| `reservationExpiresAt` | Thời điểm giữ ô hết hiệu lực |
 
 ### 16.4. ParkingSession
 
@@ -884,6 +905,8 @@ flowchart TD
 9. Trả về ô có điểm cao nhất.
 10. Agent giải thích lý do đề xuất.
 11. Agent hỏi người dùng có muốn nhận chỉ đường không.
+12. Khi người dùng xác nhận chọn ô, Agent gọi `reserve_parking_slot` trước khi tạo route.
+13. Agent thông báo rõ mã ô và thời điểm giữ ô hết hạn; nếu giữ ô thất bại do conflict thì yêu cầu Recommendation Service chọn lại.
 
 ### Workflow
 
@@ -896,12 +919,13 @@ flowchart TD
     F --> S["Tính điểm và xếp hạng"]
     S --> B["Trả về ô phù hợp nhất"]
     B --> C["Người dùng xác nhận"]
-    C --> R["Tạo route tới ô"]
+    C --> H["Giữ ô có thời hạn qua Parking State Service"]
+    H --> R["Tạo route tới ô"]
 ```
 
 ### Ví dụ phản hồi
 
-> Ô F1-A03 phù hợp nhất. Ô này đang trống, có trạm sạc, cách vị trí hiện tại khoảng 45 mét và nằm gần thang máy. Bạn có muốn tôi hướng dẫn đến ô này không?
+> Ô F1-A03 phù hợp nhất. Ô này đang trống, có trạm sạc, cách vị trí hiện tại khoảng 45 mét và nằm gần thang máy. Nếu bạn xác nhận, tôi sẽ giữ ô tạm thời và hướng dẫn bạn đến đó.
 
 ---
 
@@ -1080,7 +1104,15 @@ Hệ thống cần:
 3. Đề xuất ô khác.
 4. Tạo route mới nếu cần.
 
-### 24.3. Không xác định được vị trí người dùng
+### 24.3. Ô đang được giữ hoặc giữ chỗ hết hạn
+
+- Ô `RESERVED` không được xem là ô trống để đề xuất cho người khác.
+- Nếu mã tham chiếu giữ chỗ không khớp, service phải từ chối xác nhận đỗ.
+- Nếu thời hạn đã hết, Parking State Service chuyển ô về `AVAILABLE` trước khi xử lý yêu cầu tiếp theo. Service phải kiểm tra hết hạn khi đọc hoặc cập nhật slot; có thể bổ sung job dọn dẹp định kỳ nhưng không được phụ thuộc duy nhất vào job này.
+- Hai request giữ cùng một ô phải được xử lý atomic; chỉ một request thành công, request còn lại nhận lỗi conflict.
+- Agent không được tự gia hạn, hủy hoặc đổi chủ thể giữ chỗ nếu tool nghiệp vụ chưa xác nhận.
+
+### 24.4. Không xác định được vị trí người dùng
 
 Hệ thống yêu cầu:
 
@@ -1090,21 +1122,21 @@ Hệ thống yêu cầu:
 
 Không được tự đoán vị trí.
 
-### 24.4. Mã ô không tồn tại
+### 24.5. Mã ô không tồn tại
 
 Nếu người dùng nói một mã không tồn tại:
 
 > Tôi không tìm thấy ô A99. Hãy kiểm tra lại mã ô hoặc quét QR tại vị trí đỗ.
 
-### 24.5. Mã ô không duy nhất
+### 24.6. Mã ô không duy nhất
 
 Nếu `A03` tồn tại ở nhiều tầng, Agent phải hỏi lại tầng hoặc khu vực.
 
-### 24.6. User chưa có vehicle
+### 24.7. User chưa có vehicle
 
 Agent yêu cầu người dùng chọn hoặc thêm phương tiện trước khi tạo Parking Session.
 
-### 24.7. Không có Parking Session đang hoạt động
+### 24.8. Không có Parking Session đang hoạt động
 
 Khi người dùng hỏi vị trí xe nhưng chưa lưu session:
 
@@ -1112,7 +1144,7 @@ Khi người dùng hỏi vị trí xe nhưng chưa lưu session:
 
 Không được tự tạo vị trí xe.
 
-### 24.8. User có nhiều vehicle
+### 24.9. User có nhiều vehicle
 
 Agent phải xác định vehicle cụ thể bằng:
 
@@ -1120,13 +1152,13 @@ Agent phải xác định vehicle cụ thể bằng:
 - Tên xe.
 - Vehicle đang có session active.
 
-### 24.9. Session bị trùng
+### 24.10. Session bị trùng
 
 Một vehicle không nên có nhiều session `ACTIVE` trong cùng thời điểm.
 
 Service phải từ chối hoặc yêu cầu hoàn thành session cũ.
 
-### 24.10. Xung đột cập nhật
+### 24.11. Xung đột cập nhật
 
 Nếu hai request cùng chọn một ô:
 
@@ -1134,7 +1166,7 @@ Nếu hai request cùng chọn một ô:
 - Chỉ một request được xác nhận thành công.
 - Request còn lại nhận lỗi conflict và phải đề xuất ô khác.
 
-### 24.11. Simulator event không hợp lệ
+### 24.12. Simulator event không hợp lệ
 
 Ví dụ:
 
@@ -1145,7 +1177,7 @@ Ví dụ:
 
 Event phải bị từ chối và được ghi log.
 
-### 24.12. Tool timeout hoặc service lỗi
+### 24.13. Tool timeout hoặc service lỗi
 
 Agent phải thông báo trung thực:
 
@@ -1153,7 +1185,7 @@ Agent phải thông báo trung thực:
 
 Không được dùng dữ liệu do LLM tự suy đoán để thay thế.
 
-### 24.13. Không tìm thấy route
+### 24.14. Không tìm thấy route
 
 Nguyên nhân có thể là:
 
@@ -1164,7 +1196,7 @@ Nguyên nhân có thể là:
 
 Agent cần thông báo không tạo được đường đi và không tự sáng tạo route.
 
-### 24.14. STT nhận dạng không chắc chắn
+### 24.15. STT nhận dạng không chắc chắn
 
 Với thông tin quan trọng, Agent hỏi lại:
 
@@ -1181,6 +1213,8 @@ GET  /parking/status
 GET  /parking/slots
 GET  /parking/slots/{slotId}
 POST /parking/slots/recommendations
+POST /parking/reservations
+POST /parking/reservations/{reservationId}/cancel
 
 POST /routes
 POST /locations/confirm
@@ -1207,15 +1241,19 @@ MVP được xem là hoàn thành khi có thể demo end-to-end các tình huố
 - Có dữ liệu tầng, khu vực và ô đỗ.
 - Mỗi ô có trạng thái rõ ràng.
 - Có thể truy vấn các ô `AVAILABLE`.
+- Có thể phân biệt và truy vấn trạng thái `RESERVED`.
 - Parking State Service là nguồn trạng thái duy nhất.
 - Có validation khi cập nhật trạng thái.
+- Có cơ chế hết hạn hoặc hủy để đưa ô `RESERVED` về `AVAILABLE`.
 
 ### 26.2. Simulator
 
 - Có thể mô phỏng xe đỗ.
 - Có thể mô phỏng xe rời đi.
+- Có thể mô phỏng giữ ô và hết hạn hoặc hủy giữ ô.
 - Trạng thái ô thay đổi đúng.
 - Không cho phép hai xe cùng chiếm một ô.
+- Không cho phép hai yêu cầu cùng giữ một ô.
 - Có kịch bản demo hoặc reset dữ liệu.
 
 ### 26.3. Recommendation
@@ -1268,12 +1306,13 @@ Hệ thống demo được chuỗi sau:
 2. Người dùng xác nhận vị trí.
 3. Người dùng yêu cầu tìm ô phù hợp.
 4. Hệ thống đề xuất một ô bằng scoring.
-5. Hệ thống tạo route tới ô.
-6. Người dùng xác nhận đã đỗ.
-7. Parking Session được tạo.
-8. Người dùng rời xe và xác nhận vị trí mới.
-9. Người dùng hỏi vị trí xe.
-10. Hệ thống tìm session và hướng dẫn quay lại xe.
+5. Người dùng xác nhận và hệ thống giữ ô với trạng thái `RESERVED`.
+6. Hệ thống tạo route tới ô.
+7. Người dùng xác nhận đã đỗ; ô chuyển sang `OCCUPIED`.
+8. Parking Session được tạo.
+9. Người dùng rời xe và xác nhận vị trí mới.
+10. Người dùng hỏi vị trí xe.
+11. Hệ thống tìm session và hướng dẫn quay lại xe.
 
 ---
 
@@ -1285,6 +1324,8 @@ Agent tối thiểu cần xử lý các intent:
 GET_PARKING_STATUS
 FIND_AVAILABLE_SLOT
 RECOMMEND_SLOT
+RESERVE_SLOT
+CANCEL_RESERVATION
 GET_ROUTE_TO_SLOT
 CONFIRM_USER_LOCATION
 CONFIRM_PARKING
@@ -1334,7 +1375,7 @@ Bất kỳ AI nào hỗ trợ ParkSmart AI phải tuân thủ các nguyên tắc
 
 ### “Không có camera thì làm sao biết ô nào trống?”
 
-Trong MVP, nhóm sử dụng Parking Simulator để mô phỏng các sự kiện xe vào, đỗ và rời đi. Các event này cập nhật Parking State Service. Parking State Service mới là source of truth về trạng thái `AVAILABLE` hoặc `OCCUPIED`.
+Trong MVP, nhóm sử dụng Parking Simulator để mô phỏng các sự kiện xe vào, giữ ô, đỗ và rời đi. Các event này cập nhật Parking State Service. Parking State Service mới là source of truth về trạng thái `AVAILABLE`, `RESERVED` hoặc `OCCUPIED`.
 
 Khi chuyển sang production, Simulator có thể được thay bằng Camera và Computer Vision mà không phải thay đổi Recommendation, Routing hoặc Agent.
 
@@ -1373,7 +1414,7 @@ Agent hiểu nhu cầu, hỏi thông tin còn thiếu, gọi Recommendation Serv
 - Tạo danh sách slot.
 - Xây Parking State Service.
 - Xây Simulator.
-- Kiểm tra trạng thái `AVAILABLE` và `OCCUPIED`.
+- Kiểm tra trạng thái `AVAILABLE`, `RESERVED` và `OCCUPIED`, bao gồm hủy hoặc hết thời hạn giữ chỗ.
 
 ### Giai đoạn 2 – Recommendation và Routing
 
@@ -1463,7 +1504,7 @@ Nguồn trạng thái trong MVP:
 ```text
 Parking Simulator
 → Parking State Service
-→ AVAILABLE hoặc OCCUPIED
+→ AVAILABLE, RESERVED hoặc OCCUPIED
 ```
 
 Nguồn trạng thái trong production tương lai:
@@ -1472,7 +1513,7 @@ Nguồn trạng thái trong production tương lai:
 Camera
 → Computer Vision
 → Parking State Service
-→ AVAILABLE hoặc OCCUPIED
+→ AVAILABLE, RESERVED hoặc OCCUPIED
 ```
 
 Ba khả năng chính của sản phẩm:
