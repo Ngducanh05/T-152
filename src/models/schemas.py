@@ -101,6 +101,7 @@ class ParkingSlot(ContractModel):
     has_charger: bool
     is_accessible: bool
     version: int = Field(ge=0)
+    occupied_by_vehicle_id: EntityId | None = None
 
 
 class ParkingReservation(ContractModel):
