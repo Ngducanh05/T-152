@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api";
 import { MVP_AGENT_THREAD_STORAGE_KEY } from "@/lib/demo";
 import type { ChatResponse } from "@/lib/types";
+import { activeReservation } from "@/test/fixtures";
 import type { ParkSmartSnapshot } from "./use-parksmart-data";
 
 import { useParkingWorkflow } from "./use-parking-workflow";
@@ -156,6 +157,44 @@ describe("useParkingWorkflow", () => {
     expect(result.current.notice).toContain("hãy chọn một đề xuất còn AVAILABLE");
   });
 
+  it("waits for reservation success before refreshing authoritative UI state", async () => {
+    const { api, data, refresh, slot } = fixture();
+    let resolveReservation!: () => void;
+    const reservationRequest = new Promise<void>((resolve) => {
+      resolveReservation = resolve;
+    });
+    api.createReservation.mockImplementation(async () => {
+      await reservationRequest;
+      return activeReservation;
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      await result.current.requestRecommendations({
+        chargingRequired: true,
+        accessibleRequired: false,
+        nearElevator: true,
+      });
+    });
+    act(() => result.current.selectCandidate("F1-D01"));
+
+    let mutation!: Promise<void>;
+    act(() => {
+      mutation = result.current.reserveSelected();
+    });
+    expect(result.current.pending).toBe("reserve");
+    expect(refresh).not.toHaveBeenCalled();
+    expect(slot.status).toBe("AVAILABLE");
+
+    await act(async () => {
+      resolveReservation();
+      await mutation;
+    });
+
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(result.current.pending).toBeNull();
+  });
+
   it("preserves the explicit selection when a non-conflict mutation fails", async () => {
     const { api, data, refresh, slot } = fixture();
     api.createReservation.mockRejectedValue(
@@ -231,6 +270,7 @@ describe("useParkingWorkflow", () => {
     expect(result.current.recommendedSlotIds).toEqual(["F1-D01"]);
     expect(result.current.recommendedSlotIds).not.toContain("F1-A99");
     expect(result.current.selectedSlotId).toBeNull();
+    expect(result.current.lastToolNames).toEqual(["recommend_parking_slot"]);
     expect(api.createReservation).not.toHaveBeenCalled();
   });
 

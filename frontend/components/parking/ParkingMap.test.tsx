@@ -2,84 +2,17 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type {
-  MapEdge,
-  MapNode,
   ParkingMap as ParkingMapData,
-  ParkingSlot,
-  ParkingStatus,
-  ZoneId,
 } from "@/lib/types";
+import { canonicalMap, parkingStatus } from "@/test/fixtures";
 
 import { ParkingMap } from "./ParkingMap";
-
-const zones: ZoneId[] = ["A", "B", "C", "D"];
 
 afterEach(cleanup);
 
 function fixture() {
-  const slots: ParkingSlot[] = [];
-  const nodes: MapNode[] = [
-    { id: "F1-CP1", floor_id: "F1", type: "CHECKPOINT", x: 15, y: 50 },
-  ];
-  const edges: MapEdge[] = [];
-
-  for (const zoneId of zones) {
-    const north = zoneId === "A" || zoneId === "B";
-    const westX = zoneId === "A" || zoneId === "C" ? 25 : 58;
-    const aisleId = `F1-${zoneId}-W`;
-    nodes.push({
-      id: aisleId,
-      floor_id: "F1",
-      type: "AISLE",
-      x: westX,
-      y: north ? 30 : 70,
-    });
-    for (let index = 1; index <= 10; index += 1) {
-      const id = `F1-${zoneId}${String(index).padStart(2, "0")}`;
-      const status =
-        id === "F1-A01" ? "RESERVED" : id === "F1-B01" ? "OCCUPIED" : "AVAILABLE";
-      slots.push({
-        id,
-        floor_id: "F1",
-        zone_id: zoneId,
-        node_id: aisleId,
-        status,
-        has_charger: (zoneId === "C" || zoneId === "D") && index <= 5,
-        is_accessible: id === "F1-D10",
-        version: 0,
-        occupied_by_vehicle_id: null,
-      });
-      nodes.push({
-        id,
-        floor_id: "F1",
-        type: "SLOT",
-        x: westX + ((index - 1) % 5) * 4.25,
-        y: north ? (index <= 5 ? 22 : 26) : index <= 5 ? 74 : 78,
-      });
-      edges.push({
-        from_node: aisleId,
-        to_node: id,
-        distance_m: 4,
-        bidirectional: true,
-        enabled: true,
-      });
-    }
-  }
-
-  const map: ParkingMapData = { nodes, edges, slots };
-  const status: ParkingStatus = {
-    total: 40,
-    available: 38,
-    reserved: 1,
-    occupied: 1,
-    by_zone: {
-      A: { AVAILABLE: 9, RESERVED: 1, OCCUPIED: 0 },
-      B: { AVAILABLE: 9, RESERVED: 0, OCCUPIED: 1 },
-      C: { AVAILABLE: 10, RESERVED: 0, OCCUPIED: 0 },
-      D: { AVAILABLE: 10, RESERVED: 0, OCCUPIED: 0 },
-    },
-  };
-  return { map, slots, status };
+  const map: ParkingMapData = canonicalMap;
+  return { map, slots: map.slots, status: parkingStatus };
 }
 
 describe("ParkingMap", () => {

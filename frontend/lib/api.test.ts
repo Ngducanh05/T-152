@@ -1,34 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { errorEnvelope, jsonResponse, successEnvelope } from "@/test/fixtures";
 import { ApiError, ParkSmartApiClient, parseApiResponse } from "./api";
-
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
 
 describe("API envelope parsing", () => {
   it("returns data from a success envelope", async () => {
-    const response = jsonResponse({
-      success: true,
-      data: { available: 12 },
-      message: null,
-    });
+    const response = jsonResponse(successEnvelope({ available: 12 }));
 
     await expect(parseApiResponse(response)).resolves.toEqual({ available: 12 });
   });
 
   it("throws typed ApiError for a failure envelope even when HTTP is ok", async () => {
-    const response = jsonResponse({
-      success: false,
-      error: {
-        code: "CURRENT_LOCATION_NOT_FOUND",
-        message: "No confirmed location.",
-        request_id: "request-123",
-      },
-    });
+    const response = jsonResponse(
+      errorEnvelope(
+        "CURRENT_LOCATION_NOT_FOUND",
+        "No confirmed location.",
+        "request-123",
+      ),
+    );
 
     const error = await parseApiResponse(response).catch((caught) => caught);
 
@@ -46,14 +35,11 @@ describe("optional resources", () => {
   it("converts expected 404 responses to null", async () => {
     const fetcher = vi.fn<typeof fetch>(async () =>
       jsonResponse(
-        {
-          success: false,
-          error: {
-            code: "NOT_FOUND",
-            message: "Optional resource does not exist.",
-            request_id: "request-404",
-          },
-        },
+        errorEnvelope(
+          "NOT_FOUND",
+          "Optional resource does not exist.",
+          "request-404",
+        ),
         404,
       ),
     );
