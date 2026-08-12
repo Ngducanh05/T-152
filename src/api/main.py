@@ -1,15 +1,20 @@
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from time import perf_counter
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from langgraph.checkpoint.memory import InMemorySaver
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
+from src.agents.graph import build_graph
 from src.api.routes import api_router
 from src.core.config import Settings, get_settings
 from src.core.logging import configure_logging
@@ -57,14 +62,36 @@ def _error_response(
     )
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    agent_override: Any | None = None,
+) -> FastAPI:
     application_settings = settings or get_settings()
     configure_logging(application_settings.log_level)
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        checkpointer = InMemorySaver()
+        application.state.agent_checkpointer = checkpointer
+        application.state.agent = (
+            agent_override
+            if agent_override is not None
+            else build_graph(checkpointer=checkpointer)
+        )
+        application.state.agent_thread_owners = {}
+        application.state.agent_thread_locks = {}
+        application.state.agent_thread_registry_lock = asyncio.Lock()
+        application.state.agent_chat_timeout_seconds = (
+            application_settings.llm_timeout_seconds
+        )
+        yield
 
     application = FastAPI(
         title=application_settings.app_name,
         version=application_settings.app_version,
         debug=application_settings.debug,
+        lifespan=lifespan,
     )
 
     application.add_middleware(

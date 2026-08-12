@@ -108,3 +108,50 @@ Phase 4 lifecycle endpoints additionally use:
 | 404 | USER_NOT_FOUND, VEHICLE_NOT_FOUND, RESERVATION_NOT_FOUND, ACTIVE_RESERVATION_NOT_FOUND, SESSION_NOT_FOUND, LOCATION_NODE_NOT_FOUND, CURRENT_LOCATION_NOT_FOUND |
 | 409 | RESERVATION_EXPIRED, ACTIVE_SESSION_EXISTS |
 | 422 | INVALID_LOCATION_NODE_TYPE |
+
+## Agent chat
+
+### `POST /api/v1/agent/chat`
+
+The Phase 5 Agent endpoint provides non-streaming, thread-aware chat. Request:
+
+```json
+{
+  "thread_id": "THREAD-DEMO-001",
+  "user_id": "USER-001",
+  "vehicle_id": "VEHICLE-001",
+  "message": "Tìm cho tôi một ô có sạc gần thang máy"
+}
+```
+
+`vehicle_id` is nullable so the Agent can ask the user to select a vehicle. Empty or
+whitespace-only `thread_id` and `message` values are rejected. Unknown fields are rejected.
+
+Success response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "thread_id": "THREAD-DEMO-001",
+    "message": "Tôi tìm thấy các ô phù hợp...",
+    "intent": "RECOMMEND_SLOT",
+    "selected_slot": null,
+    "tool_names": ["recommend_parking_slot"]
+  },
+  "message": null
+}
+```
+
+`tool_names` contains only validated tool names and exists for safe debugging. The response
+never contains analysis, chain-of-thought, system prompts, API keys, raw model metadata, or
+raw exceptions.
+
+Thread checkpoints use the internal namespace `user_id:thread_id`. A public `thread_id` can
+belong to only one user for the lifetime of the process; reuse by another user returns HTTP
+409 with `INVALID_TRANSITION`. Thread memory uses `InMemorySaver`, so it is development/MVP
+memory only: it is lost on process restart and is not shared across multiple workers.
+
+Agent timeout, missing LLM configuration, or unexpected Agent/tool failures return HTTP 503
+with `AGENT_TOOL_UNAVAILABLE` in the standard `ErrorResponse` envelope and include the request
+ID. This endpoint does not provide streaming, WebSocket, voice, or QR behavior.
