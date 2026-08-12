@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from time import monotonic
@@ -33,6 +33,12 @@ class _ThreadLockEntry:
     users: int = 0
 
 
+@dataclass(slots=True)
+class _ThreadDeletion:
+    namespaced_thread_id: str
+    completed: asyncio.Event = field(default_factory=asyncio.Event)
+
+
 def _request_id(request: Request) -> str:
     return str(getattr(request.state, "request_id", "unknown"))
 
@@ -47,63 +53,108 @@ def _service_unavailable(message: str) -> HTTPException:
     )
 
 
-async def _claim_thread(request: Request, thread_id: str, user_id: str) -> str:
-    """Claim a public thread ID and return its user-namespaced checkpoint ID."""
-    async with request.app.state.agent_thread_registry_lock:
-        now = monotonic()
-        expired_threads = [
-            (public_thread_id, owner_id, f"{owner_id}:{public_thread_id}")
-            for public_thread_id, last_access in list(
-                request.app.state.agent_thread_last_access.items()
-            )
-            if now - last_access >= request.app.state.agent_thread_ttl_seconds
-            if (owner_id := request.app.state.agent_thread_owners.get(public_thread_id))
-            is not None
-            if f"{owner_id}:{public_thread_id}"
-            not in request.app.state.agent_thread_locks
-        ]
-        for public_thread_id, _, namespaced_id in expired_threads:
-            await request.app.state.agent_checkpointer.adelete_thread(namespaced_id)
-            request.app.state.agent_thread_owners.pop(public_thread_id, None)
-            request.app.state.agent_thread_last_access.pop(public_thread_id, None)
+async def _delete_expired_thread(
+    request: Request,
+    thread_id: str,
+    user_id: str,
+    deletion: _ThreadDeletion,
+) -> None:
+    deleted = False
+    try:
+        await request.app.state.agent_checkpointer.adelete_thread(
+            deletion.namespaced_thread_id
+        )
+        deleted = True
+    except Exception as error:  # noqa: BLE001 - cleanup must not crash requests
+        logger.warning(
+            "agent_thread_cleanup_failed exception_type=%s",
+            type(error).__name__,
+        )
+    finally:
+        async with request.app.state.agent_thread_registry_lock:
+            current = request.app.state.agent_thread_deletions.get(thread_id)
+            if current is deletion:
+                if deleted:
+                    if request.app.state.agent_thread_owners.get(thread_id) == user_id:
+                        request.app.state.agent_thread_owners.pop(thread_id, None)
+                    request.app.state.agent_thread_last_access.pop(thread_id, None)
+                else:
+                    request.app.state.agent_thread_last_access[thread_id] = monotonic()
+                request.app.state.agent_thread_deletions.pop(thread_id, None)
+                deletion.completed.set()
 
-        owner = request.app.state.agent_thread_owners.get(thread_id)
-        if owner is not None and owner != user_id:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": ErrorCode.INVALID_TRANSITION.value,
-                    "message": "This thread belongs to another user.",
-                },
-            )
-        request.app.state.agent_thread_owners[thread_id] = user_id
-        request.app.state.agent_thread_last_access[thread_id] = now
+
+def _track_cleanup_task(request: Request, coroutine: Awaitable[None]) -> None:
+    task = asyncio.create_task(coroutine)
+    request.app.state.agent_thread_cleanup_tasks.add(task)
+    task.add_done_callback(request.app.state.agent_thread_cleanup_tasks.discard)
+
+
+def _schedule_expired_threads(request: Request, now: float) -> None:
+    for thread_id, last_access in list(
+        request.app.state.agent_thread_last_access.items()
+    ):
+        user_id = request.app.state.agent_thread_owners.get(thread_id)
+        if user_id is None or now - last_access < request.app.state.agent_thread_ttl_seconds:
+            continue
         namespaced_thread_id = f"{user_id}:{thread_id}"
-        return namespaced_thread_id
+        if (
+            namespaced_thread_id in request.app.state.agent_thread_locks
+            or thread_id in request.app.state.agent_thread_deletions
+        ):
+            continue
+        deletion = _ThreadDeletion(namespaced_thread_id)
+        request.app.state.agent_thread_deletions[thread_id] = deletion
+        _track_cleanup_task(
+            request,
+            _delete_expired_thread(request, thread_id, user_id, deletion),
+        )
 
 
 @asynccontextmanager
-async def _thread_lock(
+async def _thread_invocation(
     request: Request,
     thread_id: str,
-    namespaced_thread_id: str,
-) -> AsyncIterator[None]:
-    async with request.app.state.agent_thread_registry_lock:
-        entry = request.app.state.agent_thread_locks.setdefault(
-            namespaced_thread_id, _ThreadLockEntry()
-        )
-        entry.users += 1
+    user_id: str,
+) -> AsyncIterator[str]:
+    """Atomically claim a thread and register its active invocation reference."""
+    entry: _ThreadLockEntry
+    namespaced_thread_id: str
+    while True:
+        deletion: _ThreadDeletion | None
+        async with request.app.state.agent_thread_registry_lock:
+            now = monotonic()
+            _schedule_expired_threads(request, now)
+            deletion = request.app.state.agent_thread_deletions.get(thread_id)
+            if deletion is None:
+                owner = request.app.state.agent_thread_owners.get(thread_id)
+                if owner is not None and owner != user_id:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": ErrorCode.INVALID_TRANSITION.value,
+                            "message": "This thread belongs to another user.",
+                        },
+                    )
+                request.app.state.agent_thread_owners[thread_id] = user_id
+                request.app.state.agent_thread_last_access[thread_id] = now
+                namespaced_thread_id = f"{user_id}:{thread_id}"
+                entry = request.app.state.agent_thread_locks.setdefault(
+                    namespaced_thread_id, _ThreadLockEntry()
+                )
+                entry.users += 1
+                break
+        await deletion.completed.wait()
+
     try:
         async with entry.lock:
-            yield
+            yield namespaced_thread_id
     finally:
         async with request.app.state.agent_thread_registry_lock:
             entry.users -= 1
             request.app.state.agent_thread_last_access[thread_id] = monotonic()
             if entry.users == 0:
                 request.app.state.agent_thread_locks.pop(namespaced_thread_id, None)
-
-
 def _messages_after_current_input(result: dict[str, Any], message_id: str) -> list[Any]:
     messages = result.get("messages", [])
     for index in range(len(messages) - 1, -1, -1):
@@ -151,11 +202,6 @@ async def chat(
     request: Request,
 ) -> SuccessResponse[ChatResponse]:
     request_id = _request_id(request)
-    namespaced_thread_id = await _claim_thread(
-        request,
-        payload.thread_id,
-        payload.user_id,
-    )
     message_id = f"request:{request_id}"
     runtime_context = AgentRuntimeContext(
         user_id=payload.user_id,
@@ -163,8 +209,6 @@ async def chat(
         request_id=request_id,
         session_factory=get_session_factory(),
     )
-    config = {"configurable": {"thread_id": namespaced_thread_id}}
-
     logger.info(
         "agent_chat_started request_id=%s user_id=%s thread_id=%s",
         request_id,
@@ -172,7 +216,10 @@ async def chat(
         payload.thread_id,
     )
     try:
-        async with _thread_lock(request, payload.thread_id, namespaced_thread_id):
+        async with _thread_invocation(
+            request, payload.thread_id, payload.user_id
+        ) as namespaced_thread_id:
+            config = {"configurable": {"thread_id": namespaced_thread_id}}
             async with asyncio.timeout(request.app.state.agent_chat_timeout_seconds):
                 result = await request.app.state.agent.ainvoke(
                     {
