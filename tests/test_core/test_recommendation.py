@@ -1,0 +1,233 @@
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+import pytest
+import pytest_asyncio
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.schema import CreateSchema, DropSchema
+
+from src.core.config import get_settings
+from src.core.db_models import Base, MapEdge, ParkingEvent
+from src.core.parking_state import ParkingStateService
+from src.core.recommendation import RecommendationService
+from src.core.routing import RoutingService
+from src.core.seed import seed_if_missing
+from src.models.schemas import ActorType, RecommendationRequest, SlotStatus
+
+
+@pytest_asyncio.fixture
+async def recommendation_session() -> AsyncGenerator[AsyncSession, None]:
+    database_url = get_settings().database_url
+    schema_name = f"test_recommendation_{uuid4().hex}"
+    admin_engine = create_async_engine(database_url, isolation_level="AUTOCOMMIT")
+    async with admin_engine.connect() as connection:
+        await connection.execute(CreateSchema(schema_name))
+
+    engine = create_async_engine(
+        database_url,
+        connect_args={"server_settings": {"search_path": schema_name}},
+    )
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as seed_session:
+        await seed_if_missing(seed_session)
+
+    try:
+        async with factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
+        async with admin_engine.connect() as connection:
+            await connection.execute(DropSchema(schema_name, cascade=True))
+        await admin_engine.dispose()
+
+
+def _request(**overrides: object) -> RecommendationRequest:
+    values: dict[str, object] = {
+        "user_id": "USER-001",
+        "start_node_id": "F1-ENTRANCE",
+        "charging_required": False,
+        "accessible_required": False,
+        "near_elevator": False,
+        "limit": 40,
+    }
+    values.update(overrides)
+    return RecommendationRequest.model_validate(values)
+
+
+def _service(session: AsyncSession) -> RecommendationService:
+    return RecommendationService(
+        session,
+        ParkingStateService(session),
+        RoutingService(session),
+    )
+
+
+@pytest.mark.asyncio
+async def test_recommendation_returns_only_available(recommendation_session: AsyncSession):
+    state = ParkingStateService(recommendation_session)
+    await state.occupy_slot(
+        "F1-A01",
+        actor_type=ActorType.USER,
+        actor_id="USER-001",
+        vehicle_id="VEHICLE-001",
+    )
+
+    result = await _service(recommendation_session).recommend(_request())
+    statuses = {
+        slot.id: slot.status for slot in await state.list_slots()
+    }
+
+    assert result.recommendations
+    assert all(statuses[item.slot_id] is SlotStatus.AVAILABLE for item in result.recommendations)
+
+
+@pytest.mark.asyncio
+async def test_ev_required_returns_only_charger_slots(recommendation_session: AsyncSession):
+    result = await _service(recommendation_session).recommend(
+        _request(charging_required=True)
+    )
+    slots = {
+        slot.id: slot for slot in await ParkingStateService(recommendation_session).list_slots()
+    }
+
+    assert len(result.recommendations) == 10
+    assert all(slots[item.slot_id].has_charger for item in result.recommendations)
+
+
+@pytest.mark.asyncio
+async def test_reserved_never_recommended(recommendation_session: AsyncSession):
+    state = ParkingStateService(recommendation_session)
+    await state.reserve_slot(
+        "F1-C01",
+        "RESERVATION-001",
+        user_id="USER-001",
+        vehicle_id="VEHICLE-001",
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
+    )
+
+    result = await _service(recommendation_session).recommend(
+        _request(charging_required=True)
+    )
+
+    assert "F1-C01" not in {item.slot_id for item in result.recommendations}
+
+
+@pytest.mark.asyncio
+async def test_occupied_never_recommended(recommendation_session: AsyncSession):
+    await ParkingStateService(recommendation_session).occupy_slot(
+        "F1-D01",
+        actor_type=ActorType.USER,
+        actor_id="USER-001",
+        vehicle_id="VEHICLE-001",
+    )
+
+    result = await _service(recommendation_session).recommend(
+        _request(charging_required=True)
+    )
+
+    assert "F1-D01" not in {item.slot_id for item in result.recommendations}
+
+
+@pytest.mark.asyncio
+async def test_accessible_required_empty_on_baseline(recommendation_session: AsyncSession):
+    result = await _service(recommendation_session).recommend(
+        _request(accessible_required=True)
+    )
+
+    assert result.recommendations == []
+
+
+@pytest.mark.asyncio
+async def test_result_is_deterministic(recommendation_session: AsyncSession):
+    service = _service(recommendation_session)
+
+    results = [
+        await service.recommend(_request(charging_required=True, near_elevator=True, limit=5))
+        for _ in range(3)
+    ]
+
+    assert all(result == results[0] for result in results)
+    assert all(
+        result.model_dump(mode="json") == results[0].model_dump(mode="json")
+        for result in results
+    )
+
+
+@pytest.mark.asyncio
+async def test_tie_breaks_by_distance_then_slot_id(recommendation_session: AsyncSession):
+    result = await _service(recommendation_session).recommend(_request())
+    candidates = result.recommendations
+
+    assert candidates == sorted(
+        candidates,
+        key=lambda item: (-item.score, item.distance_m, item.slot_id),
+    )
+    equal_group = [item.slot_id for item in candidates if item.slot_id.startswith("F1-A0")]
+    assert equal_group == sorted(equal_group)
+
+
+@pytest.mark.asyncio
+async def test_limit(recommendation_session: AsyncSession):
+    result = await _service(recommendation_session).recommend(_request(limit=3))
+
+    assert len(result.recommendations) == 3
+
+
+@pytest.mark.asyncio
+async def test_no_matching_slot_returns_empty_result(recommendation_session: AsyncSession):
+    result = await _service(recommendation_session).recommend(
+        _request(charging_required=True, accessible_required=True)
+    )
+
+    assert result.recommendations == []
+    assert result.parking_state_version == 0
+
+
+@pytest.mark.asyncio
+async def test_unreachable_candidate_is_excluded(recommendation_session: AsyncSession):
+    await recommendation_session.execute(
+        update(MapEdge)
+        .where(MapEdge.to_node == "F1-C01")
+        .values(enabled=False)
+    )
+
+    result = await _service(recommendation_session).recommend(
+        _request(charging_required=True)
+    )
+
+    recommended_ids = {item.slot_id for item in result.recommendations}
+    assert recommended_ids
+    assert "F1-C01" not in recommended_ids
+
+
+@pytest.mark.asyncio
+async def test_recommendation_does_not_mutate_state(recommendation_session: AsyncSession):
+    state = ParkingStateService(recommendation_session)
+    before = {
+        slot.id: (slot.status, slot.version, slot.occupied_by_vehicle_id)
+        for slot in await state.list_slots()
+    }
+    before_events = await recommendation_session.scalar(
+        select(func.count()).select_from(ParkingEvent)
+    )
+
+    result = await _service(recommendation_session).recommend(
+        _request(charging_required=True, near_elevator=True)
+    )
+
+    after = {
+        slot.id: (slot.status, slot.version, slot.occupied_by_vehicle_id)
+        for slot in await state.list_slots()
+    }
+    after_events = await recommendation_session.scalar(
+        select(func.count()).select_from(ParkingEvent)
+    )
+    assert result.parking_state_version == sum(version for _, version, _ in before.values())
+    assert after == before
+    assert after_events == before_events
+    assert not recommendation_session.dirty
+    assert not recommendation_session.new

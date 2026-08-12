@@ -2,7 +2,14 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+)
 
 EntityId = Annotated[str, Field(min_length=1)]
 FloorId = Literal["F1"]
@@ -59,6 +66,7 @@ class ErrorCode(StrEnum):
     INVALID_TRANSITION = "INVALID_TRANSITION"
     SLOT_NOT_FOUND = "SLOT_NOT_FOUND"
     ROUTE_NODE_NOT_FOUND = "ROUTE_NODE_NOT_FOUND"
+    ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND"
     ACTIVE_SESSION_NOT_FOUND = "ACTIVE_SESSION_NOT_FOUND"
     SLOT_NOT_AVAILABLE = "SLOT_NOT_AVAILABLE"
     ACTIVE_RESERVATION_EXISTS = "ACTIVE_RESERVATION_EXISTS"
@@ -144,6 +152,37 @@ class MapEdge(ContractModel):
     distance_m: float = Field(gt=0)
     bidirectional: bool = True
     enabled: bool = True
+
+
+class RouteResult(ContractModel):
+    path: list[FloorScopedId]
+    distance_m: float = Field(ge=0)
+    polyline: list[tuple[float, float]]
+
+
+class RecommendationRequest(ContractModel):
+    user_id: EntityId
+    start_node_id: FloorScopedId
+    charging_required: bool = False
+    accessible_required: bool = False
+    near_elevator: bool = False
+    limit: int = Field(default=3, gt=0)
+
+
+class RecommendationCandidate(ContractModel):
+    slot_id: FloorScopedId
+    score: float = Field(ge=0, le=100)
+    distance_m: float = Field(ge=0)
+    reasons: list[str]
+
+    @field_serializer("score", when_used="json")
+    def serialize_score(self, score: float) -> float:
+        return round(score, 2)
+
+
+class RecommendationResult(ContractModel):
+    recommendations: list[RecommendationCandidate]
+    parking_state_version: int = Field(ge=0)
 
 
 class ParkingEvent(ContractModel):
