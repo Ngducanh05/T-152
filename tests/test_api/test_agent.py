@@ -86,6 +86,26 @@ class UnavailableAgent:
         }
 
 
+class ConcurrentAgent:
+    def __init__(self) -> None:
+        self.active = 0
+        self.max_active = 0
+
+    async def ainvoke(self, input_state, config, *, context):
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            await asyncio.sleep(0.01)
+            return {
+                "messages": [
+                    *input_state["messages"],
+                    AIMessage(content="Đã xử lý."),
+                ]
+            }
+        finally:
+            self.active -= 1
+
+
 @pytest_asyncio.fixture
 async def agent_api():
     fake_agent = FakeAgent()
@@ -190,6 +210,49 @@ async def test_two_users_cannot_share_public_thread(agent_api):
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "INVALID_TRANSITION"
     assert len(fake_agent.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_thread_lock_serializes_waiters_and_is_pruned_after_use():
+    agent = ConcurrentAgent()
+    application = create_app(
+        Settings(_env_file=None, llm_api_key=None),
+        agent_override=agent,
+    )
+    async with application.router.lifespan_context(application):
+        async with AsyncClient(
+            transport=ASGITransport(app=application),
+            base_url="http://test",
+        ) as client:
+            responses = await asyncio.gather(
+                client.post("/api/v1/agent/chat", json=_payload(message="Lượt một")),
+                client.post("/api/v1/agent/chat", json=_payload(message="Lượt hai")),
+            )
+
+        assert [response.status_code for response in responses] == [200, 200]
+        assert agent.max_active == 1
+        assert application.state.agent_thread_locks == {}
+
+
+@pytest.mark.asyncio
+async def test_expired_thread_checkpoint_and_owner_are_reclaimed(agent_api):
+    application, client, _ = agent_api
+    first = await client.post(
+        "/api/v1/agent/chat",
+        json=_payload(user_id="USER-001", message="Xin chào"),
+    )
+    assert first.status_code == 200
+
+    application.state.agent_thread_ttl_seconds = 0.01
+    application.state.agent_thread_last_access["THREAD-DEMO-001"] -= 1
+    reclaimed = await client.post(
+        "/api/v1/agent/chat",
+        json=_payload(user_id="USER-002", message="Xin chào"),
+    )
+
+    assert reclaimed.status_code == 200
+    assert application.state.agent_thread_owners["THREAD-DEMO-001"] == "USER-002"
+    assert application.state.agent_thread_locks == {}
 
 
 @pytest.mark.asyncio
