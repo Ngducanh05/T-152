@@ -70,7 +70,6 @@ class ErrorCode(StrEnum):
     ACTIVE_SESSION_NOT_FOUND = "ACTIVE_SESSION_NOT_FOUND"
     SLOT_NOT_AVAILABLE = "SLOT_NOT_AVAILABLE"
     ACTIVE_RESERVATION_EXISTS = "ACTIVE_RESERVATION_EXISTS"
-    INVALID_QR_PAYLOAD = "INVALID_QR_PAYLOAD"
     AGENT_TOOL_UNAVAILABLE = "AGENT_TOOL_UNAVAILABLE"
 
 
@@ -130,12 +129,6 @@ class ParkingSession(ContractModel):
     status: ParkingSessionStatus
     parked_at: AwareDatetime
     completed_at: AwareDatetime | None = None
-
-
-class LocationCheckpoint(ContractModel):
-    id: FloorScopedId
-    node_id: FloorScopedId
-    qr_payload: str
 
 
 class MapNode(ContractModel):

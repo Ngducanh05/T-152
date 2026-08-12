@@ -34,7 +34,7 @@ const initialSlots: Slot[] = [
   { id: "F1-C06", zone: "C", status: "OCCUPIED", type: "STANDARD", elevator: false },
 ];
 
-const checkpoints = ["Cổng vào · F1", "Checkpoint A · F1", "Thang máy · F1"];
+const locationIds = ["F1-ENTRANCE", "F1-CP1", "F1-CP2", "F1-CP3", "F1-ELEVATOR"];
 
 const zoneGeometry = {
   A: { leftAisle: 2, rightAisle: 34, targets: [9, 18, 27] },
@@ -100,12 +100,12 @@ export default function Home() {
   const [slots, setSlots] = useState(initialSlots);
   const [selectedId, setSelectedId] = useState("F1-A03");
   const [view, setView] = useState<"map" | "list">("map");
-  const [location, setLocation] = useState(checkpoints[0]);
+  const [location, setLocation] = useState(locationIds[0]);
   const [needEv, setNeedEv] = useState(true);
   const [nearElevator, setNearElevator] = useState(true);
   const [showRoute, setShowRoute] = useState(false);
   const [sessionSlot, setSessionSlot] = useState<string | null>(null);
-  const [showQr, setShowQr] = useState(false);
+  const [showLocationConfirm, setShowLocationConfirm] = useState(false);
   const [showSimulator, setShowSimulator] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [input, setInput] = useState("");
@@ -167,7 +167,7 @@ export default function Home() {
 
   function findMyCar() {
     if (!sessionSlot) {
-      addAgent("Tôi chưa có thông tin vị trí xe của bạn. Hãy xác nhận ô đỗ hoặc quét QR tại vị trí xe.");
+      addAgent("Tôi chưa có thông tin vị trí xe của bạn. Hãy xác nhận ô đỗ bằng ID.");
       return;
     }
     setSelectedId(sessionSlot);
@@ -239,7 +239,7 @@ export default function Home() {
         <header className="topbar">
           <div><p className="eyebrow">BÃI XE VINCOM CENTER · TẦNG 1</p><h1>Chào buổi sáng, Minh</h1></div>
           <div className="top-actions">
-            <button className="location-button" onClick={() => setShowQr(true)}><span className="location-icon">⌖</span><span><small>Vị trí của bạn</small><b>{location}</b></span><span>⌄</span></button>
+            <button className="location-button" onClick={() => setShowLocationConfirm(true)}><span className="location-icon">⌖</span><span><small>Vị trí của bạn</small><b>{location}</b></span><span>⌄</span></button>
             <button className="icon-button" aria-label="Thông báo">◔<span className="notification-dot" /></button>
           </div>
         </header>
@@ -327,7 +327,7 @@ export default function Home() {
               <div className="date-separator"><span />HÔM NAY<span /></div>
               {messages.map((message, index) => <div key={index} className={`message ${message.role}`}><p>{message.text}</p><small>{message.role === "agent" ? "ParkSmart AI" : "Bạn"} · vừa xong</small></div>)}
             </div>
-            <div className="quick-actions"><button onClick={handleRecommend}>⚡ Tìm ô có sạc</button><button onClick={findMyCar}>⌖ Xe của tôi ở đâu?</button><button onClick={() => setShowQr(true)}>▦ Quét mã QR</button></div>
+            <div className="quick-actions"><button onClick={handleRecommend}>⚡ Tìm ô có sạc</button><button onClick={findMyCar}>⌖ Xe của tôi ở đâu?</button><button onClick={() => setShowLocationConfirm(true)}>⌖ Xác nhận vị trí</button></div>
             <form className="chat-input" onSubmit={sendMessage}>
               <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Hỏi ParkSmart AI..." aria-label="Tin nhắn cho ParkSmart AI" />
               <button type="button" onClick={() => { setIsListening(!isListening); if (!isListening) setInput("Tìm cho tôi ô có sạc gần thang máy"); }} className={isListening ? "listening" : ""} aria-label="Nhập bằng giọng nói">{isListening ? "■" : "◉"}</button>
@@ -338,7 +338,7 @@ export default function Home() {
         </div>
       </section>
 
-      {showQr && <div className="modal-backdrop" onClick={() => setShowQr(false)}><div className="modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowQr(false)}>×</button><p className="eyebrow green">XÁC NHẬN VỊ TRÍ</p><h2>Quét mã QR checkpoint</h2><p>Đưa mã QR vào khung để ParkSmart xác thực vị trí chính thức.</p><div className="qr-frame"><span /><span /><span /><span /><div className="fake-qr">▦</div><i /></div><label>Hoặc chọn vị trí demo<select value={location} onChange={(event) => setLocation(event.target.value)}>{checkpoints.map((item) => <option key={item}>{item}</option>)}</select></label><button className="primary-button" onClick={() => { setShowQr(false); addAgent(`Đã xác nhận vị trí: ${location}.`); }}>Xác nhận vị trí</button></div></div>}
+      {showLocationConfirm && <div className="modal-backdrop" onClick={() => setShowLocationConfirm(false)}><div className="modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowLocationConfirm(false)}>×</button><p className="eyebrow green">XÁC NHẬN VỊ TRÍ</p><h2>Chọn ID vị trí hiện tại</h2><p>ParkSmart sẽ kiểm tra ID trên backend trước khi cập nhật vị trí của bạn.</p><label>ID node<select value={location} onChange={(event) => setLocation(event.target.value)}>{locationIds.map((item) => <option key={item}>{item}</option>)}</select></label><button className="primary-button" onClick={() => { setShowLocationConfirm(false); addAgent(`Đã xác nhận vị trí: ${location}.`); }}>Xác nhận vị trí</button></div></div>}
 
       {showSimulator && <div className="modal-backdrop" onClick={() => setShowSimulator(false)}><div className="simulator-panel" onClick={(event) => event.stopPropagation()}><div className="sim-header"><div><p className="eyebrow green">PARKING SIMULATOR</p><h2>Điều khiển dữ liệu demo</h2><p>Event được gửi qua Parking State Service.</p></div><button onClick={() => setShowSimulator(false)}>×</button></div><div className="sim-slots">{slots.map((slot) => <button key={slot.id} disabled={sessionSlot === slot.id} onClick={() => toggleSimulatedSlot(slot.id)}><span className={slot.status.toLowerCase()} /><b>{slot.id}</b><small>{slot.status}</small></button>)}</div><button className="secondary-button full" onClick={resetDemo}>↻ Đặt lại kịch bản demo</button><div className="event-log"><h3>Nhật ký sự kiện</h3>{events.map((event, index) => <p key={index}><span />{event}</p>)}</div></div></div>}
     </main>

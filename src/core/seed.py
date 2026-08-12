@@ -6,7 +6,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.db_models import (
-    LocationCheckpoint,
     MapEdge,
     MapNode,
     ParkingSlot,
@@ -20,7 +19,6 @@ DEMO_VEHICLE_ID = "VEHICLE-001"
 DEMO_DISPLAY_NAME = "Demo User"
 DEMO_PLATE_NUMBER = "51A-00001"
 DEMO_START_NODE_ID = "F1-ENTRANCE"
-CHECKPOINT_IDS = ("F1-CP1", "F1-CP2", "F1-CP3")
 
 
 class SeedValidationError(ValueError):
@@ -32,7 +30,6 @@ class SeedResult:
     nodes_created: int = 0
     edges_created: int = 0
     slots_created: int = 0
-    checkpoints_created: int = 0
     users_created: int = 0
     vehicles_created: int = 0
 
@@ -43,7 +40,6 @@ class SeedResult:
                 self.nodes_created,
                 self.edges_created,
                 self.slots_created,
-                self.checkpoints_created,
                 self.users_created,
                 self.vehicles_created,
             )
@@ -196,41 +192,12 @@ async def _seed_if_missing(session: AsyncSession) -> SeedResult:
     ]
     session.add_all(missing_slots)
 
-    canonical_checkpoints = {
-        checkpoint_id: (checkpoint_id, f"PARKSMART:LOCATION:{checkpoint_id}")
-        for checkpoint_id in CHECKPOINT_IDS
-    }
-    existing_checkpoints = {
-        checkpoint.id: checkpoint
-        for checkpoint in await session.scalars(select(LocationCheckpoint))
-    }
-    _require(
-        set(existing_checkpoints) <= set(canonical_checkpoints),
-        "existing location_checkpoints contain IDs outside the canonical F1 contract",
-    )
-    for checkpoint_id, existing in existing_checkpoints.items():
-        _require(
-            (existing.node_id, existing.qr_payload) == canonical_checkpoints[checkpoint_id],
-            f"existing location checkpoint {checkpoint_id} does not match the contract",
-        )
-
-    missing_checkpoints = [
-        LocationCheckpoint(
-            id=checkpoint_id,
-            node_id=node_id,
-            qr_payload=qr_payload,
-        )
-        for checkpoint_id, (node_id, qr_payload) in canonical_checkpoints.items()
-        if checkpoint_id not in existing_checkpoints
-    ]
-    session.add_all(missing_checkpoints)
     await session.flush()
 
     return SeedResult(
         nodes_created=len(missing_nodes),
         edges_created=len(missing_edges),
         slots_created=len(missing_slots),
-        checkpoints_created=len(missing_checkpoints),
         users_created=int(demo_user is None),
         vehicles_created=int(demo_vehicle is None),
     )
@@ -250,7 +217,6 @@ async def seed_if_missing(session: AsyncSession) -> SeedResult:
 
 
 __all__ = [
-    "CHECKPOINT_IDS",
     "DEMO_START_NODE_ID",
     "DEMO_USER_ID",
     "DEMO_VEHICLE_ID",

@@ -26,7 +26,6 @@ graph TB
     subgraph Client["Frontend"]
         UI[Web / Mobile UI]
         Voice[Voice Input / Output]
-        QR[QR Scanner]
     end
 
     subgraph Backend["Backend API"]
@@ -52,7 +51,6 @@ graph TB
 
     UI --> API
     Voice --> API
-    QR --> API
 
     API --> Router
     Router --> Tools
@@ -74,7 +72,7 @@ graph TB
 
 ### Vai trò các tầng
 
-**Frontend** nhận text, voice hoặc QR từ người dùng và hiển thị kết quả.
+**Frontend** nhận text hoặc voice từ người dùng, cho phép chọn ID vị trí và hiển thị kết quả.
 
 **Backend API** xử lý business logic, quản lý trạng thái bãi xe, recommendation, routing và parking session.
 

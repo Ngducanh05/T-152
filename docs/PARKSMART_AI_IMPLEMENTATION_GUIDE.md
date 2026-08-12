@@ -25,7 +25,7 @@ Nguyên tắc kiểm soát phạm vi:
 - `RESERVED` chỉ là giữ chỗ tạm thời sau khi người dùng chấp nhận đề xuất, không phải hệ thống đặt chỗ từ xa hoặc thanh toán online.
 - Bãi xe chỉ có một tầng (`F1`). Không triển khai điều hướng liên tầng.
 - Simulator thay cho cảm biến trong MVP; không mô phỏng vật lý hoặc chuyển động 3D.
-- Voice, QR và giao diện quản trị simulator là phần hoàn thiện tuần 2, không được làm chậm luồng MVP tuần 1.
+- Voice và giao diện quản trị simulator là phần hoàn thiện tuần 2, không được làm chậm luồng MVP tuần 1.
 
 ### Tiêu chí thành công cuối Ngày 7
 
@@ -84,7 +84,7 @@ flowchart LR
 
 | Thành phần | Được làm | Không được làm |
 |---|---|---|
-| Next.js | Hiển thị map, slot, route, chat, QR, voice; gọi API | Tự quyết định slot hoặc tự sửa trạng thái |
+| Next.js | Hiển thị map, slot, route, chat, voice và form chọn ID vị trí; gọi API | Tự quyết định slot hoặc tự sửa trạng thái |
 | FastAPI | Xác thực input, dependency, gọi Agent/Core, trả response | Chứa thuật toán recommendation/routing |
 | LangGraph Agent | Nhận diện intent, hỏi bổ sung, gọi tool | Chọn slot, tính đường, sửa DB |
 | Agent Tools | Chuyển schema Agent sang lời gọi Core | Chứa business rule |
@@ -108,7 +108,6 @@ flowchart LR
 | Simulation | Python simulation engine trong Core |
 | Cập nhật UI | Polling 2 giây cho tuần 1; SSE/WebSocket chỉ khi còn thời gian |
 | Voice | Browser Speech API hoặc STT/TTS provider |
-| QR | Camera/QR scanner trong Next.js |
 | Backend test | pytest |
 | Frontend test | Vitest/Jest và Testing Library; Playwright cho smoke flow nếu kịp |
 | Đóng gói | Docker, Docker Compose |
@@ -201,7 +200,6 @@ frontend/
 │   ├── ChatPanel.tsx
 │   ├── StatusLegend.tsx
 │   ├── SimulatorPanel.tsx
-│   ├── QrScanner.tsx
 │   └── VoiceButton.tsx
 ├── lib/
 │   ├── api.ts
@@ -262,7 +260,7 @@ Ký hiệu:
 - `═`: trục đường chính có thể định tuyến hai chiều.
 - `─` và `│`: đường nhánh vào khu.
 - `⚡`: slot có bộ sạc EV.
-- `CP1`, `CP2`, `CP3`: các điểm xác nhận vị trí qua text hoặc QR.
+- `CP1`, `CP2`, `CP3`: các điểm xác nhận vị trí bằng ID qua text, voice hoặc nút UI.
 - Elevator nằm ở góc dưới trung tâm giữa khu C và D, tách khỏi trục đường chính CP1–CP2–CP3. Lối đi bộ nối Elevator với hai aisle phía trong là `F1-C-E` và `F1-D-W`; vì chỉ có một tầng nên không tạo cạnh dọc sang tầng khác.
 
 ### 5.3 Danh mục slot
@@ -381,7 +379,6 @@ Vehicle
 ParkingSlot
 ParkingReservation
 ParkingSession
-LocationCheckpoint
 MapNode
 MapEdge
 ParkingEvent
@@ -396,7 +393,6 @@ Các field tối thiểu:
 | `ParkingSession` | id, user_id, vehicle_id, slot_id, status, parked_at, completed_at |
 | `MapNode` | id, floor_id, type, x, y |
 | `MapEdge` | from_node, to_node, distance_m, bidirectional, enabled |
-| `LocationCheckpoint` | id, node_id, qr_payload |
 | `ParkingEvent` | id, event_type, slot_id, actor_type, actor_id, old_status, new_status, created_at, metadata |
 | `User` | id, display_name, current_node_id |
 | `Vehicle` | id, user_id, plate_number, requires_charging |
@@ -452,7 +448,6 @@ Quy tắc MVP:
 | 404 | `ACTIVE_SESSION_NOT_FOUND` | Không có phiên đỗ xe đang hoạt động |
 | 409 | `SLOT_NOT_AVAILABLE` | Slot vừa bị giữ hoặc bị chiếm |
 | 409 | `ACTIVE_RESERVATION_EXISTS` | User đã có reservation active |
-| 422 | `INVALID_QR_PAYLOAD` | QR sai format hoặc ID không hợp lệ |
 | 503 | `AGENT_TOOL_UNAVAILABLE` | Tool/service tạm thời không dùng được |
 
 ---
@@ -547,7 +542,6 @@ Response:
 | POST | `/api/v1/sessions/{id}/complete` | Xác nhận rời bãi |
 | POST | `/api/v1/locations/confirm` | Cập nhật current node |
 | GET | `/api/v1/locations/current?user_id=...` | Lấy vị trí hiện tại |
-| POST | `/api/v1/locations/validate-qr` | Kiểm tra QR và resolve node/slot |
 
 ### 7.4 Simulator và Agent
 
@@ -692,19 +686,7 @@ confirm parking
 
 File: `src/core/location.py`
 
-Tuần 1 chấp nhận xác nhận vị trí bằng text hoặc nút UI. Tuần 2 thêm QR.
-
-QR hợp lệ:
-
-```text
-PARKSMART:LOCATION:F1-CP1
-PARKSMART:LOCATION:F1-CP2
-PARKSMART:LOCATION:F1-CP3
-PARKSMART:LOCATION:F1-ENTRANCE
-PARKSMART:SLOT:F1-C03
-```
-
-Không tin ID từ QR chỉ vì đúng format; luôn kiểm tra ID trong database và loại node/slot không hợp lệ.
+Xác nhận vị trí bằng `node_id` hoặc `slot_id` do người dùng chọn/nhập qua UI, text hoặc voice. Backend phải truy vấn `MapNode` hoặc `ParkingSlot` để kiểm tra ID tồn tại và đúng loại trước khi cập nhật `current_node_id`; không tin ID chỉ vì đúng format.
 
 ### 8.7 Simulator Service
 
@@ -786,7 +768,6 @@ Tuần 2 bổ sung nếu cần:
 ```text
 cancel_reservation
 complete_parking_session
-validate_qr_location
 ```
 
 ### 9.4 LangGraph flow
@@ -864,7 +845,7 @@ Mã màu không được là tín hiệu duy nhất; luôn có icon hoặc label
 ### 10.3 Tuần 2
 
 - Trang `/simulator` cho reset, park, leave và chạy fixed scenario.
-- QR scanner cập nhật location hoặc xác nhận slot sau validation server.
+- Form chọn ID cập nhật location hoặc xác nhận slot sau validation server.
 - Voice chỉ chuyển speech ↔ text; vẫn đi qua endpoint Agent như chat text.
 - Thêm loading, empty state, retry và thông báo lỗi có thể hành động.
 
@@ -1062,12 +1043,12 @@ Definition of Done:
 - Không sửa DB thủ công trong lúc demo.
 - Có log đủ để tìm nguyên nhân nếu một bước thất bại.
 
-### Ngày 8 — QR location
+### Ngày 8 — Location confirmation bằng ID
 
-- Tạo QR cho Entrance, CP1–CP3 và các slot cần demo.
-- Validate payload trên server.
-- Scan location QR để cập nhật vị trí.
-- Scan slot QR để gợi ý xác nhận đỗ, không tự động đổi trạng thái khi chưa có xác nhận.
+- Tạo form chọn/nhập ID cho Entrance, CP1–CP3, Elevator và các slot cần demo.
+- Validate ID trên server bằng dữ liệu `MapNode`/`ParkingSlot`.
+- Cập nhật vị trí hiện tại sau khi người dùng xác nhận.
+- Khi chọn ID slot, chỉ gợi ý xác nhận đỗ; không tự động đổi trạng thái khi chưa có xác nhận.
 
 ### Ngày 9 — Voice
 
@@ -1088,7 +1069,7 @@ Hoàn thiện các tình huống:
 - Hết slot thường hoặc hết slot EV.
 - Slot được đề xuất vừa bị user khác giữ.
 - Reservation hết hạn.
-- Slot/QR/node không hợp lệ.
+- Slot/node ID không hợp lệ.
 - Chưa xác nhận location.
 - Không có active session.
 - Không tìm được route.
@@ -1099,7 +1080,7 @@ Hoàn thiện các tình huống:
 - Hoàn thiện unit/integration tests ở Mục 12.
 - Chạy Agent eval tiếng Việt.
 - Thêm structured log: request ID, user ID đã mask, tool name, latency, outcome.
-- Không log raw API key, token hoặc toàn bộ nội dung QR nếu chứa dữ liệu nhạy cảm.
+- Không log raw API key hoặc token.
 
 ### Ngày 13 — Docker Compose và deployment
 
@@ -1128,7 +1109,7 @@ Hoàn thiện các tình huống:
 | 5 | Agent + tools | Chat gọi đúng service |
 | 6 | Next.js | Sản phẩm dùng được |
 | **7** | **Integration** | **Basic MVP end-to-end** |
-| 8 | QR | Xác nhận vị trí qua QR |
+| 8 | Location | Xác nhận vị trí bằng ID |
 | 9 | Voice | STT/TTS dùng cùng Agent |
 | 10 | Simulator UI | Demo trạng thái động |
 | 11 | Error handling | Các nhánh lỗi an toàn |
@@ -1187,8 +1168,8 @@ test_confirm_parking_creates_active_session
 test_user_has_at_most_one_active_session
 test_find_vehicle_uses_active_session
 test_complete_session_releases_slot
-test_validate_known_checkpoint_qr
-test_reject_unknown_qr_id
+test_confirm_known_location_id
+test_reject_unknown_location_id
 ```
 
 Simulator:
@@ -1249,7 +1230,7 @@ test_fixed_scenario_is_repeatable
 10. Routing trả `ENTRANCE → CP1 → CP2 → D-W → D01`; UI vẽ route.
 11. Người dùng: “Tôi đã đỗ ở D01.”
 12. Reservation `CONFIRMED`, slot `OCCUPIED`, Parking Session `ACTIVE`.
-13. Xác nhận người dùng đang ở `F1-CP3` bằng nút hoặc QR.
+13. Xác nhận người dùng đang ở `F1-CP3` bằng ID trên UI, text hoặc voice.
 14. Người dùng: “Xe của tôi ở đâu và chỉ đường tới xe.”
 15. Agent tìm active session, lấy `F1-D01`, gọi routing từ `F1-CP3` và UI vẽ đường.
 
@@ -1316,7 +1297,7 @@ Seed phải idempotent: chạy lại không tạo trùng node, edge hoặc slot.
 | Core Backend | DB, state machine, reservation, session, simulator |
 | Algorithm/Map | Seed map, recommendation, routing |
 | AI | LangGraph, tools, intent eval |
-| Product | Next.js, map SVG, QR, voice, simulator dashboard |
+| Product | Next.js, map SVG, form chọn ID vị trí, voice, simulator dashboard |
 | Integration/Lead | Contract, review, tests, deployment, demo |
 
 Nếu nhóm ít người, một người có thể giữ hai workstream. Tuy nhiên mỗi module chỉ nên có một owner cuối cùng và mọi thay đổi contract phải được integration lead duyệt trước khi merge.
@@ -1365,7 +1346,7 @@ UI và Agent có thể dựng skeleton sớm, nhưng tích hợp thật phải d
 
 ### Cuối tuần 2 — Final MVP
 
-- [ ] QR được validate ở backend.
+- [ ] ID vị trí được validate ở backend trước khi cập nhật.
 - [ ] Voice dùng cùng Agent flow với text và có fallback.
 - [ ] Simulator dashboard chạy fixed scenario.
 - [ ] Các error case chính có thông báo an toàn.
@@ -1402,4 +1383,4 @@ Trục kỹ thuật của dự án là:
 Map/Data → Parking State → Simulation/Services → Agent Tools → Agent/API → Next.js
 ```
 
-Nếu nhóm giữ đúng thứ tự này, ParkSmart AI có thể đạt một Basic MVP thật sự vào cuối tuần 1: có dữ liệu động, đề xuất có thể giải thích, giữ chỗ an toàn, chỉ đường trên graph và tìm lại xe. Tuần 2 dành cho QR, voice, simulator dashboard, độ bền, kiểm thử và đóng gói—không thay đổi kiến trúc cốt lõi đã được chứng minh ở Ngày 7.
+Nếu nhóm giữ đúng thứ tự này, ParkSmart AI có thể đạt một Basic MVP thật sự vào cuối tuần 1: có dữ liệu động, đề xuất có thể giải thích, giữ chỗ an toàn, chỉ đường trên graph và tìm lại xe. Tuần 2 dành cho xác nhận vị trí bằng ID, voice, simulator dashboard, độ bền, kiểm thử và đóng gói—không thay đổi kiến trúc cốt lõi đã được chứng minh ở Ngày 7.

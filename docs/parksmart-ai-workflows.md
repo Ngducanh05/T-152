@@ -2,7 +2,7 @@
 
 ## 1. Mục tiêu hệ thống
 
-ParkSmart AI hỗ trợ người dùng trong bãi đỗ xe thông qua ba hình thức tương tác: **văn bản, giọng nói và mã QR**. Hệ thống tập trung giải quyết các nhu cầu chính:
+ParkSmart AI hỗ trợ người dùng trong bãi đỗ xe thông qua **văn bản, giọng nói và thao tác chọn ID vị trí trên giao diện**. Hệ thống tập trung giải quyết các nhu cầu chính:
 
 - Tìm ô đỗ còn trống.
 - Lưu vị trí xe sau khi đỗ.
@@ -18,7 +18,7 @@ Trong phiên bản MVP, **Parking Simulator** được dùng để mô phỏng d
 ```mermaid
 flowchart LR
     A[Parking Simulator] --> B[Trạng thái bãi đỗ]
-    C[Người dùng] --> D[Text / Voice / QR]
+    C[Người dùng] --> D[Text / Voice / chọn ID vị trí]
     D --> E[AI Agent]
     B --> E
     E --> F[Parking Services]
@@ -65,11 +65,8 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A[Người dùng đã đỗ xe] --> B{Cách xác nhận vị trí}
-    B -->|Quét QR| C[QR tại ô đỗ]
-    B -->|Text / Voice| D[Thông báo mã ô đỗ]
-    C --> E[AI Agent / Backend]
-    D --> E
+    A[Người dùng đã đỗ xe] --> B[Xác nhận ID ô đỗ]
+    B -->|UI / Text / Voice| E[AI Agent / Backend]
     E --> F[Lưu xe và mã ô đỗ]
     F --> G[Xác nhận đã lưu vị trí]
 ```
@@ -84,7 +81,7 @@ flowchart LR
 flowchart LR
     A[Người dùng yêu cầu tìm xe] --> B[AI Agent]
     B --> C[Tra cứu vị trí xe đã lưu]
-    D[QR/text/voice vị trí hiện tại] --> E[Xác định vị trí người dùng]
+    D[ID vị trí từ UI/text/voice] --> E[Xác định vị trí người dùng]
     C --> F[Tạo lộ trình đến xe]
     E --> F
     F --> G[Hiển thị bản đồ và chỉ dẫn]
@@ -140,7 +137,7 @@ flowchart LR
     B --> C[Phát hiện ô trống hoặc có xe]
     C --> D[Cập nhật Parking State]
     D --> E[AI Agent và Parking Services]
-    E --> F[Web / Voice / QR]
+    E --> F[Web / Voice]
     F --> G[Người dùng]
 ```
 

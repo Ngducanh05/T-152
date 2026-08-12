@@ -91,4 +91,4 @@ When concurrent transactions try to reserve the same `AVAILABLE` slot, the row l
 - Payment, pricing, billing, tickets, or guaranteed commercial booking.
 - Implementing SQLAlchemy parking models, migrations, seed data, services, APIs, Simulator behavior, Recommendation logic, or background expiry jobs in this ADR.
 - Parking Session behavior beyond identifying the valid `RESERVED -> OCCUPIED` boundary.
-- QR, voice, LangGraph Agent, routing algorithms, frontend work, or changes to existing auth/template code.
+- Voice, LangGraph Agent, routing algorithms, frontend work, or changes to existing auth/template code.

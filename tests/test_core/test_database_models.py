@@ -20,7 +20,6 @@ EXPECTED_TABLES = {
     "parking_slots",
     "parking_reservations",
     "parking_sessions",
-    "location_checkpoints",
     "parking_events",
 }
 
@@ -43,9 +42,13 @@ def test_parking_migration_follows_profiles_revision():
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
     parking_revision = scripts.get_revision("20260811_0002")
 
-    assert scripts.get_current_head() == "20260811_0002"
+    location_cleanup_revision = scripts.get_revision("20260812_0003")
+
+    assert scripts.get_current_head() == "20260812_0003"
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
+    assert location_cleanup_revision is not None
+    assert location_cleanup_revision.down_revision == "20260811_0002"
 
 
 def test_cold_start_sql_creates_profile_enum_once():

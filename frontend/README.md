@@ -14,7 +14,7 @@ Mở `http://localhost:3000`.
 
 ## Luồng demo gợi ý
 
-1. Chọn **Quét mã QR** để xác nhận checkpoint hiện tại.
+1. Chọn **Vị trí của bạn**, chọn một `node_id` và xác nhận vị trí hiện tại.
 2. Chọn tiêu chí EV/thang máy và nhấn **Tìm ô tốt nhất**.
 3. Nhấn **Hiện đường đi**, sau đó **Xác nhận đã đỗ**.
 4. Chọn **Xe của tôi ở đâu?** để tạo đường quay lại xe.

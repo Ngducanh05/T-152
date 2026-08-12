@@ -263,17 +263,6 @@ class ParkingSession(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class LocationCheckpoint(Base):
-    __tablename__ = "location_checkpoints"
-    __table_args__ = (CheckConstraint("id LIKE 'F1-%'", name="ck_checkpoints_id_f1"),)
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    node_id: Mapped[str] = mapped_column(
-        ForeignKey("map_nodes.id", ondelete="CASCADE"), nullable=False, unique=True
-    )
-    qr_payload: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-
-
 class ParkingEvent(Base):
     __tablename__ = "parking_events"
     __table_args__ = (Index("ix_parking_events_slot_created", "slot_id", "created_at"),)
@@ -309,7 +298,6 @@ __all__ = [
     "ActorType",
     "AppRoleEnum",
     "Base",
-    "LocationCheckpoint",
     "MapEdge",
     "MapNode",
     "ParkingEvent",

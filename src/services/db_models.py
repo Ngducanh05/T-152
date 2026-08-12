@@ -6,7 +6,6 @@ The canonical declarative base and models live in :mod:`src.core.db_models`.
 from src.core.db_models import (
     AppRoleEnum,
     Base,
-    LocationCheckpoint,
     MapEdge,
     MapNode,
     ParkingEvent,
@@ -21,7 +20,6 @@ from src.core.db_models import (
 __all__ = [
     "AppRoleEnum",
     "Base",
-    "LocationCheckpoint",
     "MapEdge",
     "MapNode",
     "ParkingEvent",

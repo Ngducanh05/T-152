@@ -49,7 +49,7 @@ Người dùng có thể tương tác với hệ thống bằng:
 
 - Văn bản.
 - Giọng nói.
-- Quét mã QR tại các checkpoint hoặc khu vực trong bãi xe.
+- Chọn ID vị trí trên giao diện.
 
 Trong MVP, dự án không có bãi đỗ xe thật, camera thật hoặc dữ liệu indoor thực tế. Vì vậy, trạng thái bãi xe được tạo và cập nhật bởi một **Parking Simulator**.
 
@@ -219,25 +219,19 @@ Hệ thống sử dụng:
 
 ### 6.6. Xác nhận vị trí người dùng
 
-Vì MVP không có indoor GPS chính xác, vị trí người dùng được xác nhận thông qua:
-
-- Quét QR tại checkpoint.
-- Người dùng nhập vị trí bằng text.
-- Người dùng nói vị trí bằng voice.
-- Vị trí ban đầu mặc định tại cổng vào trong một số demo flow.
+Vì MVP không có indoor GPS chính xác, người dùng xác nhận `node_id` hiện tại bằng nút chọn trên UI, text hoặc voice. Trong một số demo flow, vị trí ban đầu mặc định là `F1-ENTRANCE`.
 
 Ví dụ:
 
 - “Tôi đang ở checkpoint F1-C03.”
 - “Tôi đang ở tầng 2, gần thang máy.”
-- Quét QR có nội dung `LOCATION:F2-CHECKPOINT-04`.
+- Chọn `F1-CP3` trên giao diện xác nhận vị trí.
 
 ### 6.7. Lưu vị trí xe
 
 Sau khi đỗ xe, người dùng có thể:
 
-- Quét QR tại ô đỗ.
-- Nhập mã ô.
+- Chọn hoặc nhập ID ô.
 - Nói “Tôi đã đỗ ở ô A03”.
 - Xác nhận ô do hệ thống đã đề xuất.
 
@@ -423,7 +417,7 @@ flowchart LR
 
 | Thành phần | Trách nhiệm |
 |---|---|
-| Web/Mobile UI | Hiển thị trạng thái, bản đồ, route, text chat, nút voice và QR scanner |
+| Web/Mobile UI | Hiển thị trạng thái, bản đồ, route, text chat, nút voice và form chọn ID vị trí |
 | STT | Chuyển giọng nói của người dùng thành văn bản |
 | AI Agent | Hiểu intent, trích xuất thông tin, gọi tool và diễn đạt kết quả |
 | Agent Tools | Cung cấp interface an toàn giữa Agent và service nghiệp vụ |
@@ -706,7 +700,7 @@ Ví dụ:
   "vehicleId": "VEHICLE-001",
   "slotId": "F1-A03",
   "status": "ACTIVE",
-  "confirmationMethod": "QR",
+  "confirmationMethod": "UI",
   "parkedAt": "2026-08-09T10:30:00Z"
 }
 ```
@@ -735,13 +729,12 @@ Tên tool có thể thay đổi theo convention của codebase, nhưng trách nh
 | `reserve_parking_slot` | Chuyển atomic một ô `AVAILABLE` sang `RESERVED` và trả mã tham chiếu cùng thời điểm hết hạn |
 | `cancel_parking_reservation` | Hủy một lần giữ ô hợp lệ và đưa ô về `AVAILABLE` |
 | `get_route` | Tìm đường giữa hai node |
-| `set_user_location` | Xác nhận vị trí người dùng từ QR, text hoặc voice |
+| `set_user_location` | Xác nhận vị trí người dùng từ ID nhận qua UI, text hoặc voice |
 | `get_user_location` | Lấy vị trí đã xác nhận gần nhất |
 | `confirm_parking` | Xác nhận người dùng đã đỗ tại một ô |
 | `get_active_parking_session` | Lấy session đỗ xe đang hoạt động |
 | `find_parked_vehicle` | Lấy vị trí xe từ Parking Session |
 | `complete_parking_session` | Kết thúc session khi xe rời bãi |
-| `process_qr_payload` | Parse và kiểm tra QR checkpoint hoặc QR slot |
 | `simulate_vehicle_parked` | Tạo event xe mô phỏng đỗ vào ô |
 | `simulate_vehicle_left` | Tạo event xe mô phỏng rời khỏi ô |
 
@@ -814,22 +807,11 @@ Mỗi tool nên:
 | `vehicleId` | Phương tiện |
 | `slotId` | Ô đã đỗ |
 | `status` | `ACTIVE`, `COMPLETED` hoặc `CANCELLED` |
-| `confirmationMethod` | QR, TEXT, VOICE hoặc SYSTEM |
+| `confirmationMethod` | UI, TEXT, VOICE hoặc SYSTEM |
 | `parkedAt` | Thời điểm đỗ |
 | `completedAt` | Thời điểm kết thúc |
 
-### 16.5. LocationCheckpoint
-
-| Field | Ý nghĩa |
-|---|---|
-| `id` | ID checkpoint |
-| `code` | Mã QR hoặc mã hiển thị |
-| `floorId` | Tầng |
-| `zoneId` | Khu vực |
-| `nodeId` | Node trên graph |
-| `description` | Mô tả vị trí |
-
-### 16.6. ParkingEvent
+### 16.5. ParkingEvent
 
 | Field | Ý nghĩa |
 |---|---|
@@ -841,7 +823,7 @@ Mỗi tool nên:
 | `timestamp` | Thời gian xảy ra |
 | `payload` | Metadata bổ sung |
 
-### 16.7. MapNode
+### 16.6. MapNode
 
 | Field | Ý nghĩa |
 |---|---|
@@ -851,7 +833,7 @@ Mỗi tool nên:
 | `x`, `y` | Tọa độ mô phỏng |
 | `label` | Tên hiển thị |
 
-### 16.8. MapEdge
+### 16.7. MapEdge
 
 | Field | Ý nghĩa |
 |---|---|
@@ -897,7 +879,7 @@ flowchart TD
    - Gần thang máy.
    - Cần trạm sạc.
 3. Kiểm tra vị trí hiện tại.
-4. Nếu chưa có vị trí, yêu cầu người dùng quét QR hoặc cung cấp checkpoint.
+4. Nếu chưa có vị trí, yêu cầu người dùng cung cấp hoặc chọn ID checkpoint.
 5. Gọi `recommend_parking_slot`.
 6. Recommendation Service lấy các ô `AVAILABLE`.
 7. Loại các ô không có charger.
@@ -947,22 +929,20 @@ flowchart TD
 
 Nếu vị trí người dùng chưa rõ:
 
-> Tôi chưa xác định được vị trí hiện tại của bạn. Hãy quét mã QR gần nhất hoặc cho tôi biết mã checkpoint.
+> Tôi chưa xác định được vị trí hiện tại của bạn. Hãy chọn hoặc cho tôi biết ID checkpoint gần nhất.
 
 ---
 
 ## 20. User Flow 3 – Xác nhận đã đỗ xe
 
-### Trường hợp quét QR
+### Trường hợp chọn ID trên UI
 
-1. Người dùng quét QR tại ô F1-A03.
-2. Hệ thống parse QR.
-3. Kiểm tra QR có hợp lệ không.
-4. Kiểm tra slot có tồn tại không.
-5. Kiểm tra vehicle và user.
-6. Tạo Parking Session.
-7. Cập nhật trạng thái thông qua Parking State Service.
-8. Xác nhận với người dùng.
+1. Người dùng chọn ô `F1-A03` và nhấn xác nhận.
+2. Backend kiểm tra slot có tồn tại không.
+3. Backend kiểm tra vehicle, user và reservation liên quan.
+4. Tạo Parking Session.
+5. Cập nhật trạng thái thông qua Parking State Service.
+6. Xác nhận với người dùng.
 
 ### Trường hợp text hoặc voice
 
@@ -1042,44 +1022,37 @@ flowchart LR
 
 ---
 
-## 23. QR Location và Position Confirmation
+## 23. Location và Position Confirmation bằng ID
 
-QR có thể đại diện cho:
-
-- Cổng vào.
-- Checkpoint.
-- Tầng.
-- Khu vực.
-- Thang máy.
-- Ô đỗ.
-
-Ví dụ payload:
+Người dùng xác nhận vị trí bằng ID chuẩn của cổng vào, checkpoint, thang máy hoặc ô đỗ. Ví dụ:
 
 ```text
-PARKSMART:LOCATION:F1-CHECKPOINT-03
+F1-ENTRANCE
+F1-CP3
+F1-ELEVATOR
+F1-A03
 ```
 
-Hoặc:
+Request cập nhật vị trí chỉ cần định danh người dùng và ID node:
 
 ```json
 {
-  "type": "PARKING_LOCATION",
-  "locationId": "F1-CHECKPOINT-03"
+  "user_id": "USER-001",
+  "node_id": "F1-CP3"
 }
 ```
 
-QR payload phải được validate:
+Backend phải validate:
 
-- Đúng định dạng.
-- Đúng loại.
-- Location tồn tại.
-- Location đang được kích hoạt.
-- Không tin các thuộc tính vị trí do client tự thêm.
-- Nên dùng ID để truy vấn thông tin chính thức từ hệ thống.
+- ID đúng format của map hiện tại.
+- `MapNode` tồn tại trong database.
+- Loại node được phép xác nhận làm vị trí người dùng.
+- Không tin nhãn, tọa độ hoặc thuộc tính vị trí do client tự thêm.
+- Khi người dùng xác nhận đã đỗ, `slot_id` phải tồn tại và khớp reservation/session của họ.
 
-Nếu QR không hợp lệ:
+Nếu ID không hợp lệ:
 
-> Mã QR này không thuộc hệ thống ParkSmart hoặc đã bị vô hiệu hóa. Hãy quét mã tại checkpoint gần nhất.
+> Tôi không tìm thấy vị trí này trong hệ thống ParkSmart. Hãy chọn ID tại checkpoint hoặc ô đỗ gần nhất.
 
 ---
 
@@ -1116,7 +1089,6 @@ Hệ thống cần:
 
 Hệ thống yêu cầu:
 
-- Quét QR checkpoint.
 - Nhập mã vị trí.
 - Chọn vị trí trên bản đồ.
 
@@ -1126,7 +1098,7 @@ Không được tự đoán vị trí.
 
 Nếu người dùng nói một mã không tồn tại:
 
-> Tôi không tìm thấy ô A99. Hãy kiểm tra lại mã ô hoặc quét QR tại vị trí đỗ.
+> Tôi không tìm thấy ô A99. Hãy kiểm tra lại hoặc chọn ID ô đỗ trên bản đồ.
 
 ### 24.6. Mã ô không duy nhất
 
@@ -1218,7 +1190,6 @@ POST /parking/reservations/{reservationId}/cancel
 
 POST /routes
 POST /locations/confirm
-POST /qr/resolve
 
 POST /parking-sessions
 GET  /parking-sessions/active
@@ -1291,12 +1262,11 @@ MVP được xem là hoàn thành khi có thể demo end-to-end các tình huố
 - Xử lý được thiếu dữ liệu và lỗi tool.
 - Trả lời có giải thích ngắn gọn, rõ ràng.
 
-### 26.7. Voice và QR
+### 26.7. Voice và xác nhận vị trí
 
 - Có thể demo pipeline voice hoặc ít nhất mô phỏng STT/TTS rõ ràng.
-- Có thể nhận vị trí từ QR.
-- Có thể xác nhận vị trí bằng text hoặc voice.
-- QR không hợp lệ được xử lý an toàn.
+- Có thể xác nhận vị trí bằng ID từ UI, text hoặc voice.
+- ID không tồn tại hoặc sai loại được xử lý an toàn.
 
 ### 26.8. Demo flow tối thiểu
 
@@ -1358,7 +1328,7 @@ Bất kỳ AI nào hỗ trợ ParkSmart AI phải tuân thủ các nguyên tắc
 13. Agent phải gọi tool để đọc hoặc thay đổi dữ liệu nghiệp vụ.
 14. Agent không được truy cập hoặc sửa database trực tiếp.
 15. Các tool ghi dữ liệu phải có validation.
-16. Vị trí người dùng phải được xác nhận bằng QR, text, voice hoặc nguồn vị trí hợp lệ.
+16. Vị trí người dùng phải được xác nhận bằng ID từ UI, text, voice hoặc nguồn vị trí hợp lệ.
 17. Khi thiếu vị trí, Agent phải hỏi lại, không được đoán.
 18. Khi dữ liệu không chắc chắn, Agent phải yêu cầu xác nhận.
 19. Không bịa dữ liệu khi tool lỗi.
@@ -1393,7 +1363,7 @@ Bãi xe được biểu diễn thành graph. Routing Service sử dụng A* ho�
 
 ### “Hệ thống nhớ xe bằng cách nào?”
 
-Parking Session lưu mapping giữa user, vehicle và slot. Vị trí đỗ được xác nhận bằng QR, text, voice hoặc xác nhận ô do hệ thống đề xuất.
+Parking Session lưu mapping giữa user, vehicle và slot. Vị trí đỗ được xác nhận bằng `slot_id` qua UI, text, voice hoặc xác nhận ô do hệ thống đề xuất.
 
 ### “Tại sao cần AI Agent?”
 
@@ -1431,10 +1401,10 @@ Agent hiểu nhu cầu, hỏi thông tin còn thiếu, gọi Recommendation Serv
 - Thêm validation.
 - Tích hợp Agent với tool.
 
-### Giai đoạn 4 – UI, Voice, QR và Demo
+### Giai đoạn 4 – UI, Voice và Demo
 
 - Tạo giao diện chat hoặc dashboard đơn giản.
-- Thêm QR location.
+- Thêm form xác nhận vị trí bằng ID.
 - Tích hợp hoặc mô phỏng STT/TTS.
 - Chuẩn bị kịch bản demo.
 - Kiểm tra các error case quan trọng.
@@ -1473,7 +1443,7 @@ Nếu chưa được cung cấp, AI có thể hỏi nhóm về:
 - Cấu trúc repository hiện tại.
 - Authentication có thuộc MVP hay không.
 - Số tầng và số slot cần mô phỏng.
-- Format QR.
+- Quy ước ID vị trí người dùng được phép xác nhận.
 - Cách biểu diễn parking map.
 - Tiêu chí và trọng số recommendation.
 - Kịch bản demo chính thức.
