@@ -148,8 +148,10 @@ never contains analysis, chain-of-thought, system prompts, API keys, raw model m
 raw exceptions.
 
 Thread checkpoints use the internal namespace `user_id:thread_id`. A public `thread_id` can
-belong to only one user for the lifetime of the process; reuse by another user returns HTTP
-409 with `INVALID_TRANSITION`. Thread memory uses `InMemorySaver`, so it is development/MVP
+belong to only one user while its checkpoint is retained; reuse by another user returns HTTP
+409 with `INVALID_TRANSITION`. Idle threads expire after `AGENT_THREAD_TTL_SECONDS` (one hour
+by default). Expiry removes the owner, checkpoint, and idle lock entry before that public ID
+can start a new isolated thread. Thread memory uses `InMemorySaver`, so it is development/MVP
 memory only: it is lost on process restart and is not shared across multiple workers.
 
 Agent timeout, missing LLM configuration, or unexpected Agent/tool failures return HTTP 503

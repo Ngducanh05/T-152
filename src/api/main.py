@@ -81,7 +81,11 @@ def create_app(
         )
         application.state.agent_thread_owners = {}
         application.state.agent_thread_locks = {}
+        application.state.agent_thread_last_access = {}
         application.state.agent_thread_registry_lock = asyncio.Lock()
+        application.state.agent_thread_ttl_seconds = (
+            application_settings.agent_thread_ttl_seconds
+        )
         application.state.agent_chat_timeout_seconds = (
             application_settings.llm_timeout_seconds
         )
