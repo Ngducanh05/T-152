@@ -51,7 +51,7 @@ it("prevents overlapping polls and aborts requests and timers on unmount", async
     }
     if (url.includes("/parking/slots")) {
       slotCalls += 1;
-      return neverResolve();
+      return slotCalls === 1 ? success([]) : neverResolve();
     }
     return optional404();
   });
@@ -75,18 +75,18 @@ it("prevents overlapping polls and aborts requests and timers on unmount", async
     vi.advanceTimersByTime(PARKING_POLL_INTERVAL_MS);
     await Promise.resolve();
   });
-  expect(slotCalls).toBe(1);
+  expect(slotCalls).toBe(2);
 
   await act(async () => {
     vi.advanceTimersByTime(PARKING_POLL_INTERVAL_MS * 3);
     await Promise.resolve();
   });
-  expect(slotCalls).toBe(1);
+  expect(slotCalls).toBe(2);
 
   unmount();
   expect(signals.every((signal) => signal.aborted)).toBe(true);
   expect(vi.getTimerCount()).toBe(0);
 
   vi.advanceTimersByTime(PARKING_POLL_INTERVAL_MS * 2);
-  expect(slotCalls).toBe(1);
+  expect(slotCalls).toBe(2);
 });

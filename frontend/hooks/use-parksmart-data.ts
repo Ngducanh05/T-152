@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, parkSmartApi, type ParkSmartApiClient } from "@/lib/api";
+import { MVP_DEMO_USER_ID } from "@/lib/demo";
 import type {
   ActiveParkingSession,
   Location,
@@ -12,8 +13,16 @@ import type {
   ParkingStatus,
 } from "@/lib/types";
 
-export const DEMO_USER_ID = "USER-001";
 export const PARKING_POLL_INTERVAL_MS = 2_000;
+
+export interface ParkSmartSnapshot {
+  map: ParkingMap;
+  status: ParkingStatus;
+  slots: ParkingSlot[];
+  currentLocation: Location | null;
+  activeReservation: ParkingReservation | null;
+  activeSession: ActiveParkingSession | null;
+}
 
 export interface ParkSmartDataState {
   map: ParkingMap | null;
@@ -23,7 +32,12 @@ export interface ParkSmartDataState {
   activeReservation: ParkingReservation | null;
   activeSession: ActiveParkingSession | null;
   loading: boolean;
+  refreshing: boolean;
   error: ApiError | null;
+}
+
+export interface ParkSmartData extends ParkSmartDataState {
+  refresh: () => Promise<ParkSmartSnapshot>;
 }
 
 const initialState: ParkSmartDataState = {
@@ -34,103 +48,123 @@ const initialState: ParkSmartDataState = {
   activeReservation: null,
   activeSession: null,
   loading: true,
+  refreshing: false,
   error: null,
 };
 
+function asApiError(error: unknown, message: string) {
+  return error instanceof ApiError
+    ? error
+    : new ApiError({ code: "NETWORK_ERROR", message, status: 0 });
+}
+
+export async function loadAuthoritativeState(
+  api: ParkSmartApiClient,
+  userId: string,
+  signal?: AbortSignal,
+): Promise<ParkSmartSnapshot> {
+  const [map, slots, status, currentLocation, activeReservation, activeSession] =
+    await Promise.all([
+      api.getMap(signal),
+      api.getSlots({}, signal),
+      api.getParkingStatus(signal),
+      api.getCurrentLocation(userId, signal),
+      api.getActiveReservation(userId, signal),
+      api.getActiveSession(userId, signal),
+    ]);
+  return { map, slots, status, currentLocation, activeReservation, activeSession };
+}
+
 export function useParkSmartData(
   api: ParkSmartApiClient = parkSmartApi,
-  userId = DEMO_USER_ID,
-): ParkSmartDataState {
+  userId = MVP_DEMO_USER_ID,
+): ParkSmartData {
   const [state, setState] = useState<ParkSmartDataState>(initialState);
+  const mountedRef = useRef(false);
+  const lifecycleControllerRef = useRef<AbortController | null>(null);
+  const pollControllerRef = useRef<AbortController | null>(null);
+  const refreshPromiseRef = useRef<Promise<ParkSmartSnapshot> | null>(null);
+
+  const refresh = useCallback((): Promise<ParkSmartSnapshot> => {
+    if (refreshPromiseRef.current) return refreshPromiseRef.current;
+    pollControllerRef.current?.abort();
+    setState((current) => ({ ...current, refreshing: true }));
+    const signal = lifecycleControllerRef.current?.signal;
+    const promise = loadAuthoritativeState(api, userId, signal)
+      .then((snapshot) => {
+        if (mountedRef.current) {
+          setState({
+            ...snapshot,
+            loading: false,
+            refreshing: false,
+            error: null,
+          });
+        }
+        return snapshot;
+      })
+      .catch((error: unknown) => {
+        if (mountedRef.current && !signal?.aborted) {
+          setState((current) => ({
+            ...current,
+            loading: false,
+            refreshing: false,
+            error: asApiError(error, "Unable to refresh ParkSmart data."),
+          }));
+        }
+        throw error;
+      })
+      .finally(() => {
+        refreshPromiseRef.current = null;
+      });
+    refreshPromiseRef.current = promise;
+    return promise;
+  }, [api, userId]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    let disposed = false;
-    let initialLoadFinished = false;
-    let pollInFlight = false;
-
-    async function loadInitial() {
-      try {
-        const [map, status, currentLocation, activeReservation, activeSession] =
-          await Promise.all([
-            api.getMap(controller.signal),
-            api.getParkingStatus(controller.signal),
-            api.getCurrentLocation(userId, controller.signal),
-            api.getActiveReservation(userId, controller.signal),
-            api.getActiveSession(userId, controller.signal),
-          ]);
-        if (disposed) return;
-        setState({
-          map,
-          status,
-          slots: map.slots,
-          currentLocation,
-          activeReservation,
-          activeSession,
-          loading: false,
-          error: null,
-        });
-      } catch (error) {
-        if (disposed || controller.signal.aborted) return;
-        setState((current) => ({
-          ...current,
-          loading: false,
-          error:
-            error instanceof ApiError
-              ? error
-              : new ApiError({
-                  code: "NETWORK_ERROR",
-                  message: "Unable to load ParkSmart data.",
-                  status: 0,
-                }),
-        }));
-      } finally {
-        initialLoadFinished = true;
-      }
-    }
+    mountedRef.current = true;
+    lifecycleControllerRef.current = new AbortController();
+    void refresh().catch(() => undefined);
 
     async function pollParking() {
-      if (disposed || !initialLoadFinished || pollInFlight) return;
-      pollInFlight = true;
+      if (refreshPromiseRef.current || pollControllerRef.current) return;
+      const controller = new AbortController();
+      pollControllerRef.current = controller;
       try {
         const [slots, status] = await Promise.all([
           api.getSlots({}, controller.signal),
           api.getParkingStatus(controller.signal),
         ]);
-        if (!disposed) {
+        if (mountedRef.current) {
           setState((current) => ({ ...current, slots, status, error: null }));
         }
       } catch (error) {
-        if (!disposed && !controller.signal.aborted) {
+        if (mountedRef.current && !controller.signal.aborted) {
           setState((current) => ({
             ...current,
-            error:
-              error instanceof ApiError
-                ? error
-                : new ApiError({
-                    code: "NETWORK_ERROR",
-                    message: "Unable to refresh parking data.",
-                    status: 0,
-                  }),
+            error: asApiError(error, "Unable to refresh parking data."),
           }));
         }
       } finally {
-        pollInFlight = false;
+        if (pollControllerRef.current === controller) {
+          pollControllerRef.current = null;
+        }
       }
     }
 
-    void loadInitial();
     const timer = window.setInterval(
       () => void pollParking(),
       PARKING_POLL_INTERVAL_MS,
     );
 
     return () => {
-      disposed = true;
+      mountedRef.current = false;
       window.clearInterval(timer);
-      controller.abort();
+      pollControllerRef.current?.abort();
+      lifecycleControllerRef.current?.abort();
+      pollControllerRef.current = null;
+      lifecycleControllerRef.current = null;
     };
-  }, [api, userId]);
+  }, [api, refresh]);
 
-  return state;
+  return { ...state, refresh };
 }
