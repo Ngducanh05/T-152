@@ -164,6 +164,12 @@ button { color: inherit; }
 .workflow-actions { padding: 0 20px 17px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .workflow-stack { padding: 0 20px 17px; display: grid; gap: 8px; }
 .workflow-actions button:disabled, .workflow-stack button:disabled, .reservation-banner button:disabled, .session-banner button:disabled { opacity: .48; cursor: not-allowed; }
+.chat-loading { margin: 4px 0 12px; display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 8px; }
+.chat-loading i { width: 5px; height: 5px; background: var(--green); border-radius: 50%; animation: chat-pulse .8s ease-in-out infinite alternate; }.chat-loading i:nth-child(2) { animation-delay: .15s; }.chat-loading i:nth-child(3) { animation-delay: .3s; }.chat-loading span { margin-left: 4px; }
+@keyframes chat-pulse { to { opacity: .3; transform: translateY(-2px); } }
+.tool-summary { padding: 7px 13px; overflow-wrap: anywhere; color: #617169; background: #f5f8f6; border-top: 1px solid var(--line); font-size: 7px; }
+.agent-retry { margin: 8px 13px 0; padding: 8px 10px; border: 1px solid #e2a72f; border-radius: 8px; color: #6c4800; background: #fff7e5; font-size: 9px; font-weight: 800; cursor: pointer; }
+.agent-retry:disabled { opacity: .5; cursor: not-allowed; }
 
 @media (max-width: 680px) {
   .parking-summary { grid-template-columns: repeat(2, 1fr); }
