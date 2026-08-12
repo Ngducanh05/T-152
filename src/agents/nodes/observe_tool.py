@@ -4,8 +4,12 @@ import json
 from typing import Any
 
 from langchain_core.messages import ToolMessage
+from pydantic import TypeAdapter, ValidationError
 
 from src.agents.state import AgentState
+from src.models.schemas import FloorScopedId, RouteResult
+
+_FLOOR_SCOPED_ID_ADAPTER = TypeAdapter(FloorScopedId)
 
 
 def _tool_messages(state: AgentState) -> list[ToolMessage]:
@@ -83,11 +87,30 @@ def _apply_success(
     if tool_name == "recommend_parking_slot":
         recommendations = data.get("recommendations", [])
         if isinstance(recommendations, list):
-            update["recommended_slot_ids"] = [
-                candidate["slot_id"]
-                for candidate in recommendations
-                if isinstance(candidate, dict) and isinstance(candidate.get("slot_id"), str)
-            ]
+            slot_ids: list[str] = []
+            for candidate in recommendations:
+                if not isinstance(candidate, dict):
+                    continue
+                try:
+                    slot_id = _FLOOR_SCOPED_ID_ADAPTER.validate_python(
+                        candidate.get("slot_id")
+                    )
+                except ValidationError:
+                    continue
+                slot_ids.append(slot_id)
+            update["recommended_slot_ids"] = slot_ids
+    elif tool_name == "get_route":
+        try:
+            update["route"] = RouteResult.model_validate(
+                {
+                    "path": data.get("path"),
+                    "distance_m": data.get("distance_m"),
+                    "polyline": data.get("polyline"),
+                }
+            )
+        except ValidationError:
+            # An invalid success payload is not safe structured output.
+            pass
     elif tool_name == "reserve_parking_slot":
         if isinstance(data.get("slot_id"), str):
             update["selected_slot"] = data["slot_id"]

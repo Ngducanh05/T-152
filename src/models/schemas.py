@@ -225,3 +225,6 @@ class ChatResponse(BaseModel):
     intent: str | None = None
     selected_slot: str | None = None
     tool_names: list[str] = Field(default_factory=list)
+    current_location: FloorScopedId | None = None
+    recommended_slot_ids: list[FloorScopedId] = Field(default_factory=list)
+    route: RouteResult | None = None

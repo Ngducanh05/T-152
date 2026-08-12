@@ -185,6 +185,8 @@ async def test_full_agent_core_tool_flow(agent_flow: AgentFlow):
     )
     reservation_id = state["active_reservation_id"]
     assert state["selected_slot"] == recommended_slot
+    assert state["recommended_slot_ids"] == []
+    assert state["route"] is None
 
     state = await agent_flow.turn(
         "Chỉ đường tới đó.",
@@ -198,6 +200,7 @@ async def test_full_agent_core_tool_flow(agent_flow: AgentFlow):
     )
     assert state["tool_result"]["data"]["start_node_id"] == "F1-ENTRANCE"
     assert state["tool_result"]["data"]["path"][-1] == recommended_slot
+    assert state["route"].path[-1] == recommended_slot
 
     state = await agent_flow.turn(
         "Tôi đã đỗ.",
@@ -210,6 +213,7 @@ async def test_full_agent_core_tool_flow(agent_flow: AgentFlow):
         ],
     )
     session_id = state["active_session_id"]
+    assert state["route"] is None
 
     state = await agent_flow.turn(
         "Tôi ở CP3, chỉ đường tới xe.",
@@ -380,7 +384,7 @@ async def test_missing_location_vehicle_and_active_session_use_stable_errors(
         "CURRENT_LOCATION_NOT_FOUND"
     )
     assert "current_location" in missing_location["missing_fields"]
-    assert "recommended_slot_ids" not in missing_location
+    assert missing_location["recommended_slot_ids"] == []
 
     missing_vehicle = await agent_flow.turn(
         "Tôi chọn D08.",

@@ -66,7 +66,11 @@ async def get_route(destination_node_id: str) -> dict[str, object]:
     return _record(
         "get_route",
         {"destination_node_id": destination_node_id},
-        {"path": ["F1-CP3", destination_node_id], "distance_m": 10},
+        {
+            "path": ["F1-CP3", destination_node_id],
+            "distance_m": 10,
+            "polyline": [[85, 50], [58, 70]],
+        },
     )
 
 
@@ -243,6 +247,8 @@ async def test_each_intent_routes_to_exact_tool(message, tool_name, arguments):
     assert [name for name, _ in TOOL_CALLS] == [tool_name]
     assert tool_name in model.bound_tool_names
     assert result["messages"][-1].content == "Đã xử lý an toàn."
+    if tool_name == "get_route":
+        assert result["route"].path == ["F1-CP3", "F1-C03"]
 
 
 @pytest.mark.asyncio
