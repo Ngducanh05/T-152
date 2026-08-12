@@ -173,6 +173,7 @@ class RecommendationCandidate(ContractModel):
     slot_id: FloorScopedId
     score: float = Field(ge=0, le=100)
     distance_m: float = Field(ge=0)
+    reasons: list[str]
 
     @field_serializer("score", when_used="json")
     def serialize_score(self, score: float) -> float:
