@@ -2,14 +2,14 @@
 
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.db_models import MapEdge, MapNode, ParkingUser
+from src.core.db_models import ParkingUser
 from src.core.parking_state import ParkingStateService
-from src.core.routing import RoutingError, RoutingService
+from src.core.routing import RoutingError, RoutingGraph, RoutingNode, RoutingService
 from src.models.schemas import (
     ErrorCode,
+    ParkingSlot,
     RecommendationCandidate,
     RecommendationRequest,
     RecommendationResult,
@@ -44,6 +44,16 @@ class _ScoredCandidate:
     reasons: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _ReachableCandidate:
+    slot_id: str
+    has_charger: bool
+    is_accessible: bool
+    distance_m: float
+    exit_distance_m: float
+    elevator_distance_m: float | None
+
+
 class RecommendationService:
     """Filter one parking-state snapshot and score reachable available slots."""
 
@@ -59,31 +69,27 @@ class RecommendationService:
 
     async def recommend(self, request: RecommendationRequest) -> RecommendationResult:
         await self._validate_user(request.user_id)
-        start_node = await self._get_start_node(request.start_node_id)
+        graph = await self.routing.load_graph()
+        start_node = self._get_start_node(graph, request.start_node_id)
         slots = await self.parking_state.list_slots()
         parking_state_version = sum(slot.version for slot in slots)
-        max_distance = await self._enabled_graph_distance_bound()
-
-        scored: list[_ScoredCandidate] = []
-        for slot in slots:
-            if slot.status is not SlotStatus.AVAILABLE:
-                continue
-            if slot.floor_id != start_node.floor_id:
-                continue
-            if request.charging_required and not slot.has_charger:
-                continue
-            if request.accessible_required and not slot.is_accessible:
-                continue
-
-            candidate = await self._score_candidate(
-                slot.id,
-                has_charger=slot.has_charger,
-                is_accessible=slot.is_accessible,
-                request=request,
-                max_distance=max_distance,
+        eligible_slots = [
+            slot
+            for slot in slots
+            if slot.status is SlotStatus.AVAILABLE
+            and slot.floor_id == start_node.floor_id
+            and (not request.charging_required or slot.has_charger)
+            and (not request.accessible_required or slot.is_accessible)
+        ]
+        if not eligible_slots:
+            return RecommendationResult(
+                recommendations=[],
+                parking_state_version=parking_state_version,
             )
-            if candidate is not None:
-                scored.append(candidate)
+
+        reachable = self._reachable_candidates(graph, eligible_slots, request)
+        max_distance = self._max_relevant_distance(reachable)
+        scored = [self._score_candidate(candidate, request, max_distance) for candidate in reachable]
 
         scored.sort(
             key=lambda candidate: (
@@ -105,54 +111,81 @@ class RecommendationService:
             parking_state_version=parking_state_version,
         )
 
-    async def _score_candidate(
+    def _reachable_candidates(
         self,
-        slot_id: str,
-        *,
-        has_charger: bool,
-        is_accessible: bool,
+        graph: RoutingGraph,
+        slots: list[ParkingSlot],
         request: RecommendationRequest,
-        max_distance: float,
-    ) -> _ScoredCandidate | None:
-        if max_distance <= 0:
-            return None
+    ) -> list[_ReachableCandidate]:
         try:
-            distance = (
-                await self.routing.get_route(request.start_node_id, slot_id)
-            ).distance_m
-            exit_distance = (
-                await self.routing.get_route(slot_id, EXIT_NODE_ID)
-            ).distance_m
-            elevator_distance = None
-            if request.near_elevator:
-                elevator_distance = (
-                    await self.routing.get_route(slot_id, ELEVATOR_NODE_ID)
-                ).distance_m
+            from_start = self.routing.shortest_distances(
+                graph,
+                request.start_node_id,
+            )
+            to_exit = self.routing.shortest_distances(
+                graph,
+                EXIT_NODE_ID,
+                reverse=True,
+            )
+            to_elevator = (
+                self.routing.shortest_distances(
+                    graph,
+                    ELEVATOR_NODE_ID,
+                    reverse=True,
+                )
+                if request.near_elevator
+                else None
+            )
         except RoutingError as error:
-            if error.code is ErrorCode.ROUTE_NOT_FOUND:
-                return None
             raise RecommendationError(error.code, error.message, details=error.details) from error
 
-        distance_score = self._normalized_score(distance, max_distance)
-        exit_score = self._normalized_score(exit_distance, max_distance)
-        if request.near_elevator:
-            assert elevator_distance is not None
-            elevator_score = self._normalized_score(elevator_distance, max_distance)
-            raw_score = 100 * (
-                0.50 * distance_score
-                + 0.30 * elevator_score
-                + 0.20 * exit_score
+        reachable: list[_ReachableCandidate] = []
+        for slot in slots:
+            slot_id = slot.id
+            distance = from_start.get(slot_id)
+            exit_distance = to_exit.get(slot_id)
+            elevator_distance = to_elevator.get(slot_id) if to_elevator is not None else None
+            if distance is None or exit_distance is None:
+                continue
+            if request.near_elevator and elevator_distance is None:
+                continue
+            reachable.append(
+                _ReachableCandidate(
+                    slot_id=slot_id,
+                    has_charger=slot.has_charger,
+                    is_accessible=slot.is_accessible,
+                    distance_m=distance,
+                    exit_distance_m=exit_distance,
+                    elevator_distance_m=elevator_distance,
+                )
             )
+        return reachable
+
+    def _score_candidate(
+        self,
+        candidate: _ReachableCandidate,
+        request: RecommendationRequest,
+        max_distance: float,
+    ) -> _ScoredCandidate:
+        distance_score = self._normalized_score(candidate.distance_m, max_distance)
+        exit_score = self._normalized_score(candidate.exit_distance_m, max_distance)
+        if request.near_elevator:
+            assert candidate.elevator_distance_m is not None
+            elevator_score = self._normalized_score(
+                candidate.elevator_distance_m,
+                max_distance,
+            )
+            raw_score = 100 * (0.50 * distance_score + 0.30 * elevator_score + 0.20 * exit_score)
         else:
             raw_score = 100 * (0.75 * distance_score + 0.25 * exit_score)
 
         return _ScoredCandidate(
-            slot_id=slot_id,
+            slot_id=candidate.slot_id,
             raw_score=raw_score,
-            distance_m=distance,
+            distance_m=candidate.distance_m,
             reasons=self._candidate_reasons(
-                has_charger=has_charger,
-                is_accessible=is_accessible,
+                has_charger=candidate.has_charger,
+                is_accessible=candidate.is_accessible,
                 near_elevator=request.near_elevator,
             ),
         )
@@ -165,8 +198,9 @@ class RecommendationService:
                 details={"user_id": user_id},
             )
 
-    async def _get_start_node(self, start_node_id: str) -> MapNode:
-        node = await self.session.get(MapNode, start_node_id)
+    @staticmethod
+    def _get_start_node(graph: RoutingGraph, start_node_id: str) -> RoutingNode:
+        node = graph.nodes.get(start_node_id)
         if node is None:
             raise RecommendationError(
                 ErrorCode.ROUTE_NODE_NOT_FOUND,
@@ -175,18 +209,24 @@ class RecommendationService:
             )
         return node
 
-    async def _enabled_graph_distance_bound(self) -> float:
-        return float(
-            await self.session.scalar(
-                select(func.coalesce(func.sum(MapEdge.distance_m), 0.0)).where(
-                    MapEdge.enabled.is_(True)
-                )
+    @staticmethod
+    def _max_relevant_distance(candidates: list[_ReachableCandidate]) -> float:
+        distances = [
+            distance
+            for candidate in candidates
+            for distance in (
+                candidate.distance_m,
+                candidate.exit_distance_m,
+                candidate.elevator_distance_m,
             )
-            or 0.0
-        )
+            if distance is not None
+        ]
+        return max(distances, default=0.0)
 
     @staticmethod
     def _normalized_score(distance: float, max_distance: float) -> float:
+        if max_distance <= 0:
+            return 1.0
         return 1.0 - min(distance / max_distance, 1.0)
 
     @staticmethod
