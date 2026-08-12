@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -253,6 +253,84 @@ async def test_expired_thread_checkpoint_and_owner_are_reclaimed(agent_api):
     assert reclaimed.status_code == 200
     assert application.state.agent_thread_owners["THREAD-DEMO-001"] == "USER-002"
     assert application.state.agent_thread_locks == {}
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_cleanup_does_not_block_a_different_thread(agent_api):
+    application, client, _ = agent_api
+    first = await client.post(
+        "/api/v1/agent/chat",
+        json=_payload(thread_id="THREAD-EXPIRED", message="Xin chào"),
+    )
+    assert first.status_code == 200
+    application.state.agent_thread_ttl_seconds = 0.01
+    application.state.agent_thread_last_access["THREAD-EXPIRED"] -= 1
+
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
+    async def delayed_delete(thread_id: str) -> None:
+        assert thread_id == "USER-001:THREAD-EXPIRED"
+        cleanup_started.set()
+        await release_cleanup.wait()
+
+    with patch.object(
+        application.state.agent_checkpointer,
+        "adelete_thread",
+        AsyncMock(side_effect=delayed_delete),
+    ):
+        response = await asyncio.wait_for(
+            client.post(
+                "/api/v1/agent/chat",
+                json=_payload(thread_id="THREAD-OTHER", message="Xin chào"),
+            ),
+            timeout=0.2,
+        )
+        await asyncio.wait_for(cleanup_started.wait(), timeout=0.2)
+        assert response.status_code == 200
+        assert not release_cleanup.is_set()
+        release_cleanup.set()
+
+
+@pytest.mark.asyncio
+async def test_same_thread_waits_until_checkpoint_cleanup_finishes(agent_api):
+    application, client, _ = agent_api
+    first = await client.post(
+        "/api/v1/agent/chat",
+        json=_payload(user_id="USER-001", message="Xin chào"),
+    )
+    assert first.status_code == 200
+    application.state.agent_thread_ttl_seconds = 0.01
+    application.state.agent_thread_last_access["THREAD-DEMO-001"] -= 1
+
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
+    async def delayed_delete(thread_id: str) -> None:
+        assert thread_id == "USER-001:THREAD-DEMO-001"
+        cleanup_started.set()
+        await release_cleanup.wait()
+
+    with patch.object(
+        application.state.agent_checkpointer,
+        "adelete_thread",
+        AsyncMock(side_effect=delayed_delete),
+    ):
+        request_task = asyncio.create_task(
+            client.post(
+                "/api/v1/agent/chat",
+                json=_payload(user_id="USER-002", message="Xin chào"),
+            )
+        )
+        await asyncio.wait_for(cleanup_started.wait(), timeout=0.2)
+        await asyncio.sleep(0)
+        assert not request_task.done()
+
+        release_cleanup.set()
+        response = await asyncio.wait_for(request_task, timeout=0.2)
+
+    assert response.status_code == 200
+    assert application.state.agent_thread_owners["THREAD-DEMO-001"] == "USER-002"
 
 
 @pytest.mark.asyncio
