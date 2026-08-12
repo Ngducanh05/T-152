@@ -27,3 +27,4 @@ class AgentState(TypedDict, total=False):
     tool_result: dict[str, Any]
     error: str
     tool_call_count: int
+    agent_step_count: int
