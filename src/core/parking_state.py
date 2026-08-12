@@ -272,7 +272,9 @@ class ParkingStateService:
         actor_id: str | None,
         vehicle_id: str,
         expected_version: int | None = None,
+        now: datetime | None = None,
     ) -> ParkingSlot:
+        current_time = _utc_now(now)
         slot = await self._lock_slot(slot_id)
         self._check_expected_version(slot, expected_version)
         if slot.status is not SlotStatus.OCCUPIED:
@@ -294,6 +296,7 @@ class ParkingStateService:
             actor_type=actor_type,
             actor_id=actor_id,
             event_metadata={"vehicle_id": vehicle_id},
+            now=current_time,
         )
         await self.session.flush()
         return slot
@@ -580,6 +583,7 @@ async def release_slot(
     actor_id: str | None,
     vehicle_id: str,
     expected_version: int | None = None,
+    now: datetime | None = None,
 ) -> ParkingSlot:
     return await ParkingStateService(session).release_slot(
         slot_id,
@@ -587,6 +591,7 @@ async def release_slot(
         actor_id=actor_id,
         vehicle_id=vehicle_id,
         expected_version=expected_version,
+        now=now,
     )
 
 
