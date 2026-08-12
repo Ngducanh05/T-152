@@ -37,7 +37,7 @@ export default function Home() {
   function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const message = input.trim();
-    if (!message) return;
+    if (!message || !workflow.threadId || workflow.pending === "chat") return;
     setInput("");
     void workflow.sendAgentMessage(message);
   }
@@ -66,7 +66,7 @@ export default function Home() {
           <div className="top-actions">
             <button className="location-button" onClick={() => setShowLocationConfirm(true)}>
               <span className="location-icon">⌖</span>
-              <span><small>Vị trí đã xác nhận</small><b>{data.currentLocation?.node_id ?? "Chưa xác nhận"}</b></span>
+              <span><small>Vị trí đã xác nhận</small><b>{workflow.currentLocationId ?? "Chưa xác nhận"}</b></span>
               <span>⌄</span>
             </button>
           </div>
@@ -103,7 +103,7 @@ export default function Home() {
                 selectedSlotId={workflow.selectedSlotId}
                 activeReservationSlotId={data.activeReservation?.slot_id}
                 parkedVehicleSlotId={data.activeSession?.slot_id}
-                currentLocationNodeId={data.currentLocation?.node_id}
+                currentLocationNodeId={workflow.currentLocationId}
                 route={workflow.activeRoute}
                 onSelectSlot={workflow.selectCandidate}
               />
@@ -151,16 +151,19 @@ export default function Home() {
           </section>
 
           <aside className="assistant-card card">
-            <div className="assistant-header"><div className="agent-avatar">AI<span className="online" /></div><div><h2>Trợ lý ParkSmart</h2><p><span /> Thread {workflow.threadId.slice(-8)}</p></div></div>
+            <div className="assistant-header"><div className="agent-avatar">AI<span className="online" /></div><div><h2>Trợ lý ParkSmart</h2><p><span /> Thread {workflow.threadId?.slice(-8) ?? "đang tạo"}</p></div></div>
             <div className="conversation" aria-live="polite">
               <div className="date-separator"><span />HÔM NAY<span /></div>
               {workflow.messages.length === 0 && <div className="message agent"><p>Hãy dùng các nút trực tiếp cho luồng đỗ xe hoặc gửi yêu cầu cho Agent.</p></div>}
               {workflow.messages.map((message, index) => <div key={`${message.role}-${index}`} className={`message ${message.role}`}><p>{message.text}</p><small>{message.role === "agent" ? "ParkSmart AI" : "Bạn"} · vừa xong</small></div>)}
+              {workflow.pending === "chat" && <div className="chat-loading" role="status"><i /><i /><i /><span>ParkSmart đang xử lý…</span></div>}
             </div>
+            {workflow.lastToolNames.length > 0 && <div className="tool-summary" aria-label="Công cụ Agent đã dùng">Tools: {workflow.lastToolNames.join(" · ")}</div>}
+            {workflow.retryMessage && <button className="agent-retry" onClick={() => void workflow.retryAgentMessage()} disabled={workflow.pending === "chat"}>Thử gửi lại</button>}
             <div className="quick-actions"><button onClick={requestRecommendations}>⚡ Tìm ô có sạc</button><button onClick={() => void workflow.findVehicleAndRoute()}>⌖ Xe của tôi</button><button onClick={() => setShowLocationConfirm(true)}>⌖ Xác nhận vị trí</button></div>
             <form className="chat-input" onSubmit={sendMessage}>
-              <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Hỏi ParkSmart AI..." aria-label="Tin nhắn cho ParkSmart AI" />
-              <button type="submit" disabled={workflow.pending === "chat"} aria-label="Gửi tin nhắn">↑</button>
+              <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Hỏi ParkSmart AI..." aria-label="Tin nhắn cho ParkSmart AI" disabled={!workflow.threadId || workflow.pending === "chat"} />
+              <button type="submit" disabled={!workflow.threadId || workflow.pending === "chat"} aria-label="Gửi tin nhắn">{workflow.pending === "chat" ? "…" : "↑"}</button>
             </form>
             <p className="agent-note"><span>✓</span> Mọi mutation chờ backend thành công rồi tải lại trạng thái authoritative.</p>
           </aside>

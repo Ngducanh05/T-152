@@ -184,7 +184,7 @@ export interface ChatResponse {
   thread_id: string;
   message: string;
   intent: string | null;
-  selected_slot: string | null;
+  selected_slot: FloorScopedId | null;
   tool_names: string[];
   current_location: FloorScopedId | null;
   recommended_slot_ids: FloorScopedId[];

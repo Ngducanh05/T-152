@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { ParkSmartData, ParkSmartSnapshot } from "@/hooks/use-parksmart-data";
 import { ApiError, parkSmartApi, type ParkSmartApiClient } from "@/lib/api";
 import {
-  createDemoThreadId,
+  getOrCreateDemoThreadId,
   MVP_DEMO_USER_ID,
   MVP_DEMO_VEHICLE_ID,
+  rotateDemoThreadId,
 } from "@/lib/demo";
 import type {
   FloorScopedId,
@@ -54,10 +55,13 @@ export interface ParkingWorkflow {
   recommendedSlotIds: FloorScopedId[];
   selectedSlotId: FloorScopedId | null;
   activeRoute: RouteResult | null;
+  currentLocationId: FloorScopedId | null;
+  lastToolNames: string[];
   messages: WorkflowMessage[];
-  threadId: string;
+  threadId: string | null;
   pending: WorkflowAction | null;
   notice: string | null;
+  retryMessage: string | null;
   selectCandidate: (slotId: FloorScopedId) => void;
   clearRoute: () => void;
   confirmLocation: (nodeId: FloorScopedId) => Promise<boolean>;
@@ -73,6 +77,7 @@ export interface ParkingWorkflow {
   completeSession: () => Promise<void>;
   resetDemo: () => Promise<void>;
   sendAgentMessage: (message: string) => Promise<void>;
+  retryAgentMessage: () => Promise<void>;
 }
 
 function vietnameseError(error: unknown) {
@@ -85,17 +90,40 @@ function isSlotConflict(error: unknown) {
   return error instanceof ApiError && error.code === "SLOT_NOT_AVAILABLE";
 }
 
+const AUTHORITATIVE_REFRESH_TOOLS = new Set([
+  "get_parking_status",
+  "reserve_parking_slot",
+  "set_user_location",
+  "confirm_parking",
+  "find_parked_vehicle",
+  "cancel_reservation",
+  "complete_parking_session",
+]);
+
 export function useParkingWorkflow(
   data: WorkflowData,
   api: WorkflowApi = parkSmartApi,
 ): ParkingWorkflow {
   const [candidates, setCandidates] = useState<RecommendationCandidate[]>([]);
+  const [recommendedSlotIds, setRecommendedSlotIds] = useState<FloorScopedId[]>([]);
   const [selectedSlotId, setSelectedSlotId] = useState<FloorScopedId | null>(null);
   const [activeRoute, setActiveRoute] = useState<RouteResult | null>(null);
+  const [agentCurrentLocationId, setAgentCurrentLocationId] =
+    useState<FloorScopedId | null>(null);
+  const [lastToolNames, setLastToolNames] = useState<string[]>([]);
   const [messages, setMessages] = useState<WorkflowMessage[]>([]);
-  const [threadId, setThreadId] = useState(createDemoThreadId);
+  const [threadId, setThreadId] = useState<string | null>(null);
   const [pending, setPending] = useState<WorkflowAction | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [retryMessage, setRetryMessage] = useState<string | null>(null);
+  const chatInFlightRef = useRef(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setThreadId(getOrCreateDemoThreadId());
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   async function refreshQuietly() {
     try {
@@ -119,7 +147,7 @@ export function useParkingWorkflow(
   }
 
   function selectCandidate(slotId: FloorScopedId) {
-    if (!candidates.some((candidate) => candidate.slot_id === slotId)) return;
+    if (!recommendedSlotIds.includes(slotId)) return;
     setSelectedSlotId(slotId);
     setActiveRoute(null);
     setNotice(null);
@@ -131,6 +159,7 @@ export function useParkingWorkflow(
     try {
       await api.confirmLocation({ user_id: MVP_DEMO_USER_ID, node_id: nodeId });
       await data.refresh();
+      setAgentCurrentLocationId(null);
       setActiveRoute(null);
       return true;
     } catch (error) {
@@ -163,6 +192,9 @@ export function useParkingWorkflow(
         limit: 3,
       });
       setCandidates(result.recommendations);
+      setRecommendedSlotIds(
+        result.recommendations.map((candidate) => candidate.slot_id),
+      );
       // Recommendation is read-only. The user must choose a candidate before
       // reservation, and no slot status is changed locally.
       setSelectedSlotId(null);
@@ -176,7 +208,7 @@ export function useParkingWorkflow(
 
   async function reserveSelected() {
     const slot = data.slots.find((candidate) => candidate.id === selectedSlotId);
-    if (!slot || !candidates.some((candidate) => candidate.slot_id === slot.id)) {
+    if (!slot || !recommendedSlotIds.includes(slot.id)) {
       setNotice("Hãy chọn rõ một ô trong danh sách đề xuất trước khi giữ chỗ.");
       return;
     }
@@ -301,10 +333,14 @@ export function useParkingWorkflow(
     try {
       await api.resetDemo();
       setCandidates([]);
+      setRecommendedSlotIds([]);
       setSelectedSlotId(null);
       setActiveRoute(null);
       setMessages([]);
-      setThreadId(createDemoThreadId());
+      setAgentCurrentLocationId(null);
+      setLastToolNames([]);
+      setRetryMessage(null);
+      setThreadId(rotateDemoThreadId());
       await data.refresh();
     } catch (error) {
       await handleMutationFailure(error);
@@ -313,12 +349,16 @@ export function useParkingWorkflow(
     }
   }
 
-  async function sendAgentMessage(message: string) {
+  async function sendAgentMessage(message: string, appendUserMessage = true) {
     const trimmed = message.trim();
-    if (!trimmed) return;
-    setMessages((current) => [...current, { role: "user", text: trimmed }]);
+    if (!trimmed || !threadId || chatInFlightRef.current) return;
+    chatInFlightRef.current = true;
+    if (appendUserMessage) {
+      setMessages((current) => [...current, { role: "user", text: trimmed }]);
+    }
     setPending("chat");
     setNotice(null);
+    setRetryMessage(null);
     try {
       const response = await api.chat({
         thread_id: threadId,
@@ -326,37 +366,59 @@ export function useParkingWorkflow(
         vehicle_id: MVP_DEMO_VEHICLE_ID,
         message: trimmed,
       });
-      await data.refresh();
+      if (
+        response.tool_names.some((toolName) =>
+          AUTHORITATIVE_REFRESH_TOOLS.has(toolName),
+        )
+      ) {
+        await refreshQuietly();
+      }
       setMessages((current) => [
         ...current,
         { role: "agent", text: response.message },
       ]);
-      setCandidates(
-        response.recommended_slot_ids.map((slot_id) => ({
-          slot_id,
-          score: 0,
-          distance_m: 0,
-          reasons: [],
-        })),
-      );
+      setCandidates([]);
+      setRecommendedSlotIds(response.recommended_slot_ids);
       setSelectedSlotId(response.selected_slot);
       setActiveRoute(response.route);
+      setAgentCurrentLocationId(response.current_location);
+      setLastToolNames(response.tool_names);
     } catch (error) {
-      setNotice(vietnameseError(error));
+      if (
+        error instanceof ApiError &&
+        error.status === 503 &&
+        error.code === "AGENT_TOOL_UNAVAILABLE"
+      ) {
+        setNotice(
+          "Trợ lý ParkSmart đang tạm thời không khả dụng. Bạn có thể thử gửi lại yêu cầu này.",
+        );
+        setRetryMessage(trimmed);
+      } else {
+        setNotice(vietnameseError(error));
+      }
     } finally {
+      chatInFlightRef.current = false;
       setPending(null);
     }
   }
 
+  async function retryAgentMessage() {
+    if (!retryMessage) return;
+    await sendAgentMessage(retryMessage, false);
+  }
+
   return {
     candidates,
-    recommendedSlotIds: candidates.map((candidate) => candidate.slot_id),
+    recommendedSlotIds,
     selectedSlotId,
     activeRoute,
+    currentLocationId: agentCurrentLocationId ?? data.currentLocation?.node_id ?? null,
+    lastToolNames,
     messages,
     threadId,
     pending,
     notice,
+    retryMessage,
     selectCandidate,
     clearRoute: () => setActiveRoute(null),
     confirmLocation,
@@ -368,5 +430,6 @@ export function useParkingWorkflow(
     completeSession,
     resetDemo,
     sendAgentMessage,
+    retryAgentMessage,
   };
 }
