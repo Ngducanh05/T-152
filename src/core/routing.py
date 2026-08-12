@@ -121,28 +121,50 @@ class RoutingService:
         start_node_id: str,
         destination_node_id: str,
     ) -> tuple[float, tuple[str, ...] | None]:
-        start_path = (start_node_id,)
-        best: dict[str, tuple[float, tuple[str, ...]]] = {
-            start_node_id: (0.0, start_path)
-        }
-        queue: list[tuple[float, tuple[str, ...], str]] = [
-            (0.0, start_path, start_node_id)
-        ]
+        distances = {start_node_id: 0.0}
+        predecessors: dict[str, str] = {}
+        queue: list[tuple[float, str]] = [(0.0, start_node_id)]
 
         while queue:
-            distance, path, current = heappop(queue)
-            if best.get(current) != (distance, path):
+            distance, current = heappop(queue)
+            if distance != distances.get(current):
                 continue
             if current == destination_node_id:
-                return distance, path
+                return distance, RoutingService._reconstruct_path(
+                    predecessors,
+                    start_node_id,
+                    destination_node_id,
+                )
 
             for neighbor, edge_distance in adjacency[current]:
-                candidate = (distance + edge_distance, (*path, neighbor))
-                if neighbor not in best or candidate < best[neighbor]:
-                    best[neighbor] = candidate
-                    heappush(queue, (candidate[0], candidate[1], neighbor))
+                candidate_distance = distance + edge_distance
+                known_distance = distances.get(neighbor)
+                known_predecessor = predecessors.get(neighbor)
+                is_shorter = known_distance is None or candidate_distance < known_distance
+                is_alphabetical_tie = (
+                    candidate_distance == known_distance
+                    and known_predecessor is not None
+                    and current < known_predecessor
+                )
+                if is_shorter or is_alphabetical_tie:
+                    distances[neighbor] = candidate_distance
+                    predecessors[neighbor] = current
+                    heappush(queue, (candidate_distance, neighbor))
 
         return 0.0, None
+
+    @staticmethod
+    def _reconstruct_path(
+        predecessors: dict[str, str],
+        start_node_id: str,
+        destination_node_id: str,
+    ) -> tuple[str, ...]:
+        reversed_path = [destination_node_id]
+        current = destination_node_id
+        while current != start_node_id:
+            current = predecessors[current]
+            reversed_path.append(current)
+        return tuple(reversed(reversed_path))
 
 
 async def get_route(
