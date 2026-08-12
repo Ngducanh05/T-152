@@ -36,6 +36,7 @@ class ReservationService:
         vehicle_id: str,
         slot_id: str,
         *,
+        expected_version: int | None = None,
         now: datetime | None = None,
     ) -> ParkingReservation:
         current_time = _utc_now(now)
@@ -59,6 +60,7 @@ class ReservationService:
                 user_id=user_id,
                 vehicle_id=vehicle_id,
                 expires_at=expires_at,
+                expected_version=expected_version,
                 now=current_time,
             )
         except IntegrityError as error:
@@ -76,11 +78,22 @@ class ReservationService:
         now: datetime | None = None,
     ) -> ParkingReservation | None:
         current_time = _utc_now(now)
+        await self._validate_user_exists(user_id)
         reservation = await self._find_active_reservation(user_id=user_id)
         if reservation is None:
             return None
         if await self.expire_reservation_if_needed(reservation, now=current_time):
             return None
+        return reservation
+
+    async def get_reservation(self, reservation_id: str) -> ParkingReservation:
+        reservation = await self.session.get(ParkingReservation, reservation_id)
+        if reservation is None:
+            raise ParkingStateError(
+                ErrorCode.INVALID_TRANSITION,
+                f"Reservation {reservation_id} was not found",
+                details={"reservation_id": reservation_id},
+            )
         return reservation
 
     async def cancel_reservation(
@@ -98,6 +111,7 @@ class ReservationService:
                 f"Reservation {reservation_id} was not found",
                 details={"reservation_id": reservation_id},
             )
+        await self._validate_user_exists(user_id)
         if reservation.user_id != user_id:
             raise ParkingStateError(
                 ErrorCode.INVALID_TRANSITION,
@@ -163,6 +177,14 @@ class ReservationService:
                 ErrorCode.INVALID_TRANSITION,
                 f"Vehicle {vehicle_id} is not owned by user {user_id}",
                 details={"user_id": user_id, "vehicle_id": vehicle_id},
+            )
+
+    async def _validate_user_exists(self, user_id: str) -> None:
+        if await self.session.get(ParkingUser, user_id) is None:
+            raise ParkingStateError(
+                ErrorCode.INVALID_TRANSITION,
+                f"Parking user {user_id} was not found",
+                details={"user_id": user_id},
             )
 
     async def _find_active_reservation(self, *, user_id: str) -> ParkingReservation | None:
@@ -233,12 +255,14 @@ async def create_reservation(
     *,
     parking_state: ParkingStateService | None = None,
     settings: Settings | None = None,
+    expected_version: int | None = None,
     now: datetime | None = None,
 ) -> ParkingReservation:
     return await ReservationService(session, parking_state, settings).create_reservation(
         user_id,
         vehicle_id,
         slot_id,
+        expected_version=expected_version,
         now=now,
     )
 
@@ -254,6 +278,13 @@ async def get_active_reservation(
         user_id,
         now=now,
     )
+
+
+async def get_reservation(
+    session: AsyncSession,
+    reservation_id: str,
+) -> ParkingReservation:
+    return await ReservationService(session).get_reservation(reservation_id)
 
 
 async def cancel_reservation(
@@ -290,4 +321,5 @@ __all__ = [
     "create_reservation",
     "expire_reservation_if_needed",
     "get_active_reservation",
+    "get_reservation",
 ]

@@ -8,7 +8,7 @@ from uuid import uuid4
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.db_models import ParkingReservation, ParkingSession, ParkingUser
+from src.core.db_models import ParkingReservation, ParkingSession, ParkingUser, Vehicle
 from src.core.parking_state import ParkingStateService
 from src.models.schemas import (
     ActorType,
@@ -65,14 +65,18 @@ class ParkingSessionService:
     ) -> ParkingSession:
         current_time = self._utc_now()
         reservation = await self._lock_reservation(reservation_id)
-        self._validate_reservation(
+        self._validate_reservation_state(
             reservation,
-            user_id=user_id,
-            vehicle_id=vehicle_id,
             now=current_time,
         )
 
         await self._lock_user(user_id)
+        await self._lock_vehicle(vehicle_id)
+        self._validate_reservation_owner(
+            reservation,
+            user_id=user_id,
+            vehicle_id=vehicle_id,
+        )
         existing = await self.session.scalar(
             select(ParkingSession).where(
                 ParkingSession.status == ParkingSessionStatus.ACTIVE,
@@ -113,6 +117,8 @@ class ParkingSessionService:
         return parking_session
 
     async def get_active_session(self, user_id: str) -> ParkingSession | None:
+        if await self.session.get(ParkingUser, user_id) is None:
+            self._raise_user_not_found(user_id)
         return await self.session.scalar(
             select(ParkingSession).where(
                 ParkingSession.user_id == user_id,
@@ -140,9 +146,11 @@ class ParkingSessionService:
         session_id: str,
         *,
         user_id: str,
+        expected_version: int | None = None,
     ) -> ParkingSession:
         current_time = self._utc_now()
         parking_session = await self._lock_session(session_id)
+        await self._lock_user(user_id)
         if parking_session.user_id != user_id:
             raise ParkingSessionError(
                 ErrorCode.INVALID_TRANSITION,
@@ -161,6 +169,7 @@ class ParkingSessionService:
             actor_type=ActorType.USER,
             actor_id=user_id,
             vehicle_id=parking_session.vehicle_id,
+            expected_version=expected_version,
             now=current_time,
         )
         parking_session.status = ParkingSessionStatus.COMPLETED
@@ -187,10 +196,17 @@ class ParkingSessionService:
             select(ParkingUser).where(ParkingUser.id == user_id).with_for_update()
         )
         if user is None:
+            self._raise_user_not_found(user_id)
+
+    async def _lock_vehicle(self, vehicle_id: str) -> None:
+        vehicle = await self.session.scalar(
+            select(Vehicle).where(Vehicle.id == vehicle_id).with_for_update()
+        )
+        if vehicle is None:
             raise ParkingSessionError(
                 ErrorCode.INVALID_TRANSITION,
-                f"Parking user {user_id} was not found",
-                details={"user_id": user_id},
+                f"Vehicle {vehicle_id} was not found",
+                details={"vehicle_id": vehicle_id},
             )
 
     async def _lock_session(self, session_id: str) -> ParkingSession:
@@ -208,11 +224,9 @@ class ParkingSessionService:
         return parking_session
 
     @staticmethod
-    def _validate_reservation(
+    def _validate_reservation_state(
         reservation: ParkingReservation,
         *,
-        user_id: str,
-        vehicle_id: str,
         now: datetime,
     ) -> None:
         if reservation.status is not ReservationStatus.ACTIVE:
@@ -221,18 +235,34 @@ class ParkingSessionService:
                 "Reservation is not active",
                 details={"reservation_id": reservation.id},
             )
-        if reservation.user_id != user_id or reservation.vehicle_id != vehicle_id:
-            raise ParkingSessionError(
-                ErrorCode.INVALID_TRANSITION,
-                "User or vehicle does not own this reservation",
-                details={"reservation_id": reservation.id},
-            )
         if reservation.expires_at <= now:
             raise ParkingSessionError(
                 ErrorCode.INVALID_TRANSITION,
                 "Reservation has expired",
                 details={"reservation_id": reservation.id},
             )
+
+    @staticmethod
+    def _validate_reservation_owner(
+        reservation: ParkingReservation,
+        *,
+        user_id: str,
+        vehicle_id: str,
+    ) -> None:
+        if reservation.user_id != user_id or reservation.vehicle_id != vehicle_id:
+            raise ParkingSessionError(
+                ErrorCode.INVALID_TRANSITION,
+                "User or vehicle does not own this reservation",
+                details={"reservation_id": reservation.id},
+            )
+
+    @staticmethod
+    def _raise_user_not_found(user_id: str) -> None:
+        raise ParkingSessionError(
+            ErrorCode.INVALID_TRANSITION,
+            f"Parking user {user_id} was not found",
+            details={"user_id": user_id},
+        )
 
     def _utc_now(self) -> datetime:
         current_time = self.clock()
@@ -280,11 +310,13 @@ async def complete_session(
     session_id: str,
     *,
     user_id: str,
+    expected_version: int | None = None,
     parking_state: ParkingStateService | None = None,
 ) -> ParkingSession:
     return await ParkingSessionService(session, parking_state).complete_session(
         session_id,
         user_id=user_id,
+        expected_version=expected_version,
     )
 
 
