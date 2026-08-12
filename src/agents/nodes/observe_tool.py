@@ -48,6 +48,28 @@ def _remove_missing(fields: list[str], field: str) -> list[str]:
     return [value for value in fields if value != field]
 
 
+def _intent_for_tool(
+    tool_name: str | None,
+    state: AgentState,
+    update: dict[str, object],
+) -> str | None:
+    if tool_name == "get_route":
+        active_session_id = update.get("active_session_id") or state.get(
+            "active_session_id"
+        )
+        return "GET_ROUTE_TO_CAR" if active_session_id else "GET_ROUTE_TO_SLOT"
+    return {
+        "get_parking_status": "GET_PARKING_STATUS",
+        "recommend_parking_slot": "RECOMMEND_SLOT",
+        "reserve_parking_slot": "RESERVE_SLOT",
+        "set_user_location": "CONFIRM_USER_LOCATION",
+        "confirm_parking": "CONFIRM_PARKING",
+        "find_parked_vehicle": "FIND_MY_CAR",
+        "cancel_reservation": "CANCEL_RESERVATION",
+        "complete_parking_session": "COMPLETE_PARKING_SESSION",
+    }.get(tool_name)
+
+
 def _apply_success(
     update: dict[str, object],
     tool_name: str | None,
@@ -103,6 +125,9 @@ def observe_tool_result(state: AgentState) -> dict[str, object]:
     for message in messages:
         result = _parse_tool_content(message.content)
         update["tool_result"] = result
+        intent = _intent_for_tool(message.name, state, update)
+        if intent is not None:
+            update["intent"] = intent
         if result.get("ok") is True:
             update["error"] = ""
             missing_fields = _apply_success(
