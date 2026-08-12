@@ -5,6 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from time import monotonic
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -21,6 +25,12 @@ logger = logging.getLogger(__name__)
 
 _SAFE_TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _REGISTERED_TOOL_NAMES = frozenset(agent_tool.name for agent_tool in PARKING_TOOLS)
+
+
+@dataclass(slots=True)
+class _ThreadLockEntry:
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    users: int = 0
 
 
 def _request_id(request: Request) -> str:
@@ -40,6 +50,23 @@ def _service_unavailable(message: str) -> HTTPException:
 async def _claim_thread(request: Request, thread_id: str, user_id: str) -> str:
     """Claim a public thread ID and return its user-namespaced checkpoint ID."""
     async with request.app.state.agent_thread_registry_lock:
+        now = monotonic()
+        expired_threads = [
+            (public_thread_id, owner_id, f"{owner_id}:{public_thread_id}")
+            for public_thread_id, last_access in list(
+                request.app.state.agent_thread_last_access.items()
+            )
+            if now - last_access >= request.app.state.agent_thread_ttl_seconds
+            if (owner_id := request.app.state.agent_thread_owners.get(public_thread_id))
+            is not None
+            if f"{owner_id}:{public_thread_id}"
+            not in request.app.state.agent_thread_locks
+        ]
+        for public_thread_id, _, namespaced_id in expired_threads:
+            await request.app.state.agent_checkpointer.adelete_thread(namespaced_id)
+            request.app.state.agent_thread_owners.pop(public_thread_id, None)
+            request.app.state.agent_thread_last_access.pop(public_thread_id, None)
+
         owner = request.app.state.agent_thread_owners.get(thread_id)
         if owner is not None and owner != user_id:
             raise HTTPException(
@@ -50,16 +77,31 @@ async def _claim_thread(request: Request, thread_id: str, user_id: str) -> str:
                 },
             )
         request.app.state.agent_thread_owners[thread_id] = user_id
+        request.app.state.agent_thread_last_access[thread_id] = now
         namespaced_thread_id = f"{user_id}:{thread_id}"
         return namespaced_thread_id
 
 
-async def _thread_lock(request: Request, namespaced_thread_id: str) -> asyncio.Lock:
+@asynccontextmanager
+async def _thread_lock(
+    request: Request,
+    thread_id: str,
+    namespaced_thread_id: str,
+) -> AsyncIterator[None]:
     async with request.app.state.agent_thread_registry_lock:
-        return request.app.state.agent_thread_locks.setdefault(
-            namespaced_thread_id,
-            asyncio.Lock(),
+        entry = request.app.state.agent_thread_locks.setdefault(
+            namespaced_thread_id, _ThreadLockEntry()
         )
+        entry.users += 1
+    try:
+        async with entry.lock:
+            yield
+    finally:
+        async with request.app.state.agent_thread_registry_lock:
+            entry.users -= 1
+            request.app.state.agent_thread_last_access[thread_id] = monotonic()
+            if entry.users == 0:
+                request.app.state.agent_thread_locks.pop(namespaced_thread_id, None)
 
 
 def _messages_after_current_input(result: dict[str, Any], message_id: str) -> list[Any]:
@@ -114,7 +156,6 @@ async def chat(
         payload.thread_id,
         payload.user_id,
     )
-    invocation_lock = await _thread_lock(request, namespaced_thread_id)
     message_id = f"request:{request_id}"
     runtime_context = AgentRuntimeContext(
         user_id=payload.user_id,
@@ -131,7 +172,7 @@ async def chat(
         payload.thread_id,
     )
     try:
-        async with invocation_lock:
+        async with _thread_lock(request, payload.thread_id, namespaced_thread_id):
             async with asyncio.timeout(request.app.state.agent_chat_timeout_seconds):
                 result = await request.app.state.agent.ainvoke(
                     {

@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     )
     llm_timeout_seconds: float = Field(default=30.0, gt=0.0)
     llm_max_retries: int = Field(default=2, ge=0, le=5)
+    agent_thread_ttl_seconds: float = Field(default=3600.0, gt=0.0)
 
     cors_origins: str = Field(
         default="http://localhost:3000",

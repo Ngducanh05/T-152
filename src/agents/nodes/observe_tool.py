@@ -75,6 +75,7 @@ def _apply_success(
     tool_name: str | None,
     data: object,
     missing_fields: list[str],
+    resolved_fields: set[str],
 ) -> list[str]:
     if not isinstance(data, dict):
         return missing_fields
@@ -95,6 +96,7 @@ def _apply_success(
     elif tool_name == "set_user_location":
         if isinstance(data.get("node_id"), str):
             update["current_location"] = data["node_id"]
+            resolved_fields.add("current_location")
             missing_fields = _remove_missing(missing_fields, "current_location")
     elif tool_name == "confirm_parking":
         if isinstance(data.get("id"), str):
@@ -122,6 +124,8 @@ def observe_tool_result(state: AgentState) -> dict[str, object]:
         "agent_step_count": state.get("agent_step_count", 0) + len(messages),
     }
     missing_fields = list(state.get("missing_fields", []))
+    resolved_fields: set[str] = set()
+    reported_errors: list[tuple[str, str]] = []
     for message in messages:
         result = _parse_tool_content(message.content)
         update["tool_result"] = result
@@ -129,12 +133,12 @@ def observe_tool_result(state: AgentState) -> dict[str, object]:
         if intent is not None:
             update["intent"] = intent
         if result.get("ok") is True:
-            update["error"] = ""
             missing_fields = _apply_success(
                 update,
                 message.name,
                 result.get("data"),
                 missing_fields,
+                resolved_fields,
             )
             continue
 
@@ -145,11 +149,25 @@ def observe_tool_result(state: AgentState) -> dict[str, object]:
         else:
             code = "AGENT_TOOL_UNAVAILABLE"
             message_text = "Tool request failed."
-        update["error"] = f"{code}: {message_text}"
+        reported_errors.append((code, message_text))
         if code == "CURRENT_LOCATION_NOT_FOUND":
             missing_fields.append("current_location")
         elif code == "VEHICLE_NOT_FOUND":
             missing_fields.append("vehicle_id")
 
-    update["missing_fields"] = list(dict.fromkeys(missing_fields))
+    error_fields = {
+        "CURRENT_LOCATION_NOT_FOUND": "current_location",
+        "VEHICLE_NOT_FOUND": "vehicle_id",
+    }
+    effective_errors = {
+        f"{code}: {message_text}"
+        for code, message_text in reported_errors
+        if error_fields.get(code) not in resolved_fields
+    }
+    update["error"] = " | ".join(sorted(effective_errors))
+    update["missing_fields"] = [
+        field
+        for field in dict.fromkeys(missing_fields)
+        if field not in resolved_fields
+    ]
     return update

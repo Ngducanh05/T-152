@@ -383,6 +383,61 @@ async def test_cancel_calls_reservation_service_and_commits():
 
 
 @pytest.mark.asyncio
+async def test_cancel_already_expired_reservation_returns_stable_error():
+    runtime, session_factory = _runtime()
+    with (
+        patch.object(
+            ReservationService,
+            "get_reservation",
+            AsyncMock(return_value=_reservation(status=ReservationStatus.EXPIRED)),
+        ),
+        patch.object(
+            ReservationService,
+            "cancel_reservation",
+            AsyncMock(),
+        ) as core_call,
+    ):
+        result = await _invoke(
+            cancel_reservation,
+            runtime,
+            reservation_id="RESERVATION-001",
+        )
+
+    core_call.assert_not_awaited()
+    assert session_factory.sessions[0].commits == 1
+    assert result["error"]["code"] == "RESERVATION_EXPIRED"
+    json.dumps(result)
+
+
+@pytest.mark.asyncio
+async def test_cancel_reservation_expiring_during_core_call_returns_stable_error():
+    runtime, session_factory = _runtime()
+    expired = _reservation(status=ReservationStatus.EXPIRED)
+    with (
+        patch.object(
+            ReservationService,
+            "get_reservation",
+            AsyncMock(return_value=_reservation()),
+        ),
+        patch.object(
+            ReservationService,
+            "cancel_reservation",
+            AsyncMock(return_value=expired),
+        ) as core_call,
+    ):
+        result = await _invoke(
+            cancel_reservation,
+            runtime,
+            reservation_id="RESERVATION-001",
+        )
+
+    core_call.assert_awaited_once_with("RESERVATION-001", user_id="USER-001")
+    assert session_factory.sessions[0].commits == 1
+    assert result["error"]["code"] == "RESERVATION_EXPIRED"
+    json.dumps(result)
+
+
+@pytest.mark.asyncio
 async def test_complete_calls_session_service_and_commits():
     runtime, session_factory = _runtime()
     completed = _parking_session(status=ParkingSessionStatus.COMPLETED)
