@@ -44,7 +44,7 @@ The canonical Pydantic definitions live in src/models/schemas.py.
 | MapEdge | from_node, to_node, distance_m, bidirectional, enabled |
 | RouteResult | path, distance_m, polyline |
 | RecommendationRequest | user_id, start_node_id, charging_required, accessible_required, near_elevator, limit |
-| RecommendationCandidate | slot_id, score, distance_m |
+| RecommendationCandidate | slot_id, score, distance_m, reasons |
 | RecommendationResult | recommendations, parking_state_version |
 | ParkingEvent | id, event_type, slot_id, actor_type, actor_id, old_status, new_status, created_at, metadata |
 

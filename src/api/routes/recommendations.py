@@ -1,0 +1,55 @@
+"""Parking recommendation API backed by the deterministic core service."""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.database import get_db_session
+from src.core.parking_state import ParkingStateService
+from src.core.recommendation import RecommendationError, RecommendationService
+from src.core.routing import RoutingService
+from src.models.common import ErrorResponse, SuccessResponse
+from src.models.schemas import ErrorCode, RecommendationRequest, RecommendationResult
+
+router = APIRouter(prefix="/recommendations", tags=["Recommendations"])
+SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
+
+
+def _domain_error(error: RecommendationError) -> HTTPException:
+    status_code = {
+        ErrorCode.ROUTE_NODE_NOT_FOUND: 404,
+        ErrorCode.ROUTE_NOT_FOUND: 422,
+        ErrorCode.INVALID_TRANSITION: 400,
+    }.get(error.code, 422)
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": error.code.value, "message": error.message},
+    )
+
+
+@router.post(
+    "",
+    response_model=SuccessResponse[RecommendationResult],
+    responses={
+        400: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
+async def recommend_parking(
+    request: RecommendationRequest,
+    session: SessionDependency,
+) -> SuccessResponse[RecommendationResult]:
+    try:
+        result = await RecommendationService(
+            session,
+            ParkingStateService(session),
+            RoutingService(session),
+        ).recommend(request)
+    except RecommendationError as error:
+        raise _domain_error(error) from error
+    return SuccessResponse(data=result)
+
+
+__all__ = ["router"]

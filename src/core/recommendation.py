@@ -41,6 +41,7 @@ class _ScoredCandidate:
     slot_id: str
     raw_score: float
     distance_m: float
+    reasons: tuple[str, ...]
 
 
 class RecommendationService:
@@ -76,6 +77,8 @@ class RecommendationService:
 
             candidate = await self._score_candidate(
                 slot.id,
+                has_charger=slot.has_charger,
+                is_accessible=slot.is_accessible,
                 request=request,
                 max_distance=max_distance,
             )
@@ -95,6 +98,7 @@ class RecommendationService:
                     slot_id=candidate.slot_id,
                     score=candidate.raw_score,
                     distance_m=candidate.distance_m,
+                    reasons=list(candidate.reasons),
                 )
                 for candidate in scored[: request.limit]
             ],
@@ -105,6 +109,8 @@ class RecommendationService:
         self,
         slot_id: str,
         *,
+        has_charger: bool,
+        is_accessible: bool,
         request: RecommendationRequest,
         max_distance: float,
     ) -> _ScoredCandidate | None:
@@ -144,6 +150,11 @@ class RecommendationService:
             slot_id=slot_id,
             raw_score=raw_score,
             distance_m=distance,
+            reasons=self._candidate_reasons(
+                has_charger=has_charger,
+                is_accessible=is_accessible,
+                near_elevator=request.near_elevator,
+            ),
         )
 
     async def _validate_user(self, user_id: str) -> None:
@@ -177,6 +188,22 @@ class RecommendationService:
     @staticmethod
     def _normalized_score(distance: float, max_distance: float) -> float:
         return 1.0 - min(distance / max_distance, 1.0)
+
+    @staticmethod
+    def _candidate_reasons(
+        *,
+        has_charger: bool,
+        is_accessible: bool,
+        near_elevator: bool,
+    ) -> tuple[str, ...]:
+        reasons = ["Slot is available"]
+        if has_charger:
+            reasons.append("EV charging is available")
+        if is_accessible:
+            reasons.append("Accessible parking requirement is satisfied")
+        if near_elevator:
+            reasons.append("Elevator proximity is included in the score")
+        return tuple(reasons)
 
 
 async def recommend_parking_slots(
