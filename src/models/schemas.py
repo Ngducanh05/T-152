@@ -59,6 +59,7 @@ class ErrorCode(StrEnum):
     INVALID_TRANSITION = "INVALID_TRANSITION"
     SLOT_NOT_FOUND = "SLOT_NOT_FOUND"
     ROUTE_NODE_NOT_FOUND = "ROUTE_NODE_NOT_FOUND"
+    ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND"
     ACTIVE_SESSION_NOT_FOUND = "ACTIVE_SESSION_NOT_FOUND"
     SLOT_NOT_AVAILABLE = "SLOT_NOT_AVAILABLE"
     ACTIVE_RESERVATION_EXISTS = "ACTIVE_RESERVATION_EXISTS"
@@ -144,6 +145,12 @@ class MapEdge(ContractModel):
     distance_m: float = Field(gt=0)
     bidirectional: bool = True
     enabled: bool = True
+
+
+class RouteResult(ContractModel):
+    path: list[FloorScopedId]
+    distance_m: float = Field(ge=0)
+    polyline: list[tuple[float, float]]
 
 
 class ParkingEvent(ContractModel):

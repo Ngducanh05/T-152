@@ -26,7 +26,7 @@ ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 | MapNodeType | ENTRANCE, EXIT, CHECKPOINT, ELEVATOR, AISLE, SLOT |
 | ActorType | USER, SIMULATOR, CAMERA, SYSTEM |
 | ParkingEventType | VEHICLE_ENTERED, SLOT_RESERVED, RESERVATION_CANCELLED, RESERVATION_EXPIRED, VEHICLE_PARKED, VEHICLE_LEFT_SLOT, VEHICLE_EXITED |
-| ErrorCode | INVALID_TRANSITION, SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND, SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS, INVALID_QR_PAYLOAD, AGENT_TOOL_UNAVAILABLE |
+| ErrorCode | INVALID_TRANSITION, SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ROUTE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND, SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS, INVALID_QR_PAYLOAD, AGENT_TOOL_UNAVAILABLE |
 
 ## Data schemas
 
@@ -42,6 +42,7 @@ The canonical Pydantic definitions live in src/models/schemas.py.
 | LocationCheckpoint | id, node_id, qr_payload |
 | MapNode | id, floor_id, type, x, y |
 | MapEdge | from_node, to_node, distance_m, bidirectional, enabled |
+| RouteResult | path, distance_m, polyline |
 | ParkingEvent | id, event_type, slot_id, actor_type, actor_id, old_status, new_status, created_at, metadata |
 
 Nullable fields are User.current_node_id, ParkingSlot.occupied_by_vehicle_id,
@@ -94,7 +95,7 @@ HTTP status codes and stable error codes follow the implementation guide:
 | HTTP | Error code |
 |---:|---|
 | 400 | INVALID_TRANSITION |
-| 404 | SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND |
+| 404 | SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ROUTE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND |
 | 409 | SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS |
 | 422 | INVALID_QR_PAYLOAD |
 | 503 | AGENT_TOOL_UNAVAILABLE |
