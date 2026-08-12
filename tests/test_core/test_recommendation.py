@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -9,12 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from src.core.config import get_settings
-from src.core.db_models import Base, MapEdge, ParkingEvent
+from src.core.db_models import Base, MapEdge, MapNode, ParkingEvent
 from src.core.parking_state import ParkingStateService
 from src.core.recommendation import RecommendationService
 from src.core.routing import RoutingService
 from src.core.seed import seed_if_missing
-from src.models.schemas import ActorType, RecommendationRequest, SlotStatus
+from src.models.schemas import (
+    ActorType,
+    MapNodeType,
+    RecommendationRequest,
+    SlotStatus,
+)
 
 
 @pytest_asyncio.fixture
@@ -77,9 +83,7 @@ async def test_recommendation_returns_only_available(recommendation_session: Asy
     )
 
     result = await _service(recommendation_session).recommend(_request())
-    statuses = {
-        slot.id: slot.status for slot in await state.list_slots()
-    }
+    statuses = {slot.id: slot.status for slot in await state.list_slots()}
 
     assert result.recommendations
     assert all(statuses[item.slot_id] is SlotStatus.AVAILABLE for item in result.recommendations)
@@ -87,12 +91,8 @@ async def test_recommendation_returns_only_available(recommendation_session: Asy
 
 @pytest.mark.asyncio
 async def test_ev_required_returns_only_charger_slots(recommendation_session: AsyncSession):
-    result = await _service(recommendation_session).recommend(
-        _request(charging_required=True)
-    )
-    slots = {
-        slot.id: slot for slot in await ParkingStateService(recommendation_session).list_slots()
-    }
+    result = await _service(recommendation_session).recommend(_request(charging_required=True))
+    slots = {slot.id: slot for slot in await ParkingStateService(recommendation_session).list_slots()}
 
     assert len(result.recommendations) == 10
     assert all(slots[item.slot_id].has_charger for item in result.recommendations)
@@ -109,9 +109,7 @@ async def test_reserved_never_recommended(recommendation_session: AsyncSession):
         expires_at=datetime.now(UTC) + timedelta(minutes=5),
     )
 
-    result = await _service(recommendation_session).recommend(
-        _request(charging_required=True)
-    )
+    result = await _service(recommendation_session).recommend(_request(charging_required=True))
 
     assert "F1-C01" not in {item.slot_id for item in result.recommendations}
 
@@ -125,18 +123,14 @@ async def test_occupied_never_recommended(recommendation_session: AsyncSession):
         vehicle_id="VEHICLE-001",
     )
 
-    result = await _service(recommendation_session).recommend(
-        _request(charging_required=True)
-    )
+    result = await _service(recommendation_session).recommend(_request(charging_required=True))
 
     assert "F1-D01" not in {item.slot_id for item in result.recommendations}
 
 
 @pytest.mark.asyncio
 async def test_accessible_required_empty_on_baseline(recommendation_session: AsyncSession):
-    result = await _service(recommendation_session).recommend(
-        _request(accessible_required=True)
-    )
+    result = await _service(recommendation_session).recommend(_request(accessible_required=True))
 
     assert result.recommendations == []
 
@@ -145,16 +139,10 @@ async def test_accessible_required_empty_on_baseline(recommendation_session: Asy
 async def test_result_is_deterministic(recommendation_session: AsyncSession):
     service = _service(recommendation_session)
 
-    results = [
-        await service.recommend(_request(charging_required=True, near_elevator=True, limit=5))
-        for _ in range(3)
-    ]
+    results = [await service.recommend(_request(charging_required=True, near_elevator=True, limit=5)) for _ in range(3)]
 
     assert all(result == results[0] for result in results)
-    assert all(
-        result.model_dump(mode="json") == results[0].model_dump(mode="json")
-        for result in results
-    )
+    assert all(result.model_dump(mode="json") == results[0].model_dump(mode="json") for result in results)
 
 
 @pytest.mark.asyncio
@@ -189,15 +177,9 @@ async def test_no_matching_slot_returns_empty_result(recommendation_session: Asy
 
 @pytest.mark.asyncio
 async def test_unreachable_candidate_is_excluded(recommendation_session: AsyncSession):
-    await recommendation_session.execute(
-        update(MapEdge)
-        .where(MapEdge.to_node == "F1-C01")
-        .values(enabled=False)
-    )
+    await recommendation_session.execute(update(MapEdge).where(MapEdge.to_node == "F1-C01").values(enabled=False))
 
-    result = await _service(recommendation_session).recommend(
-        _request(charging_required=True)
-    )
+    result = await _service(recommendation_session).recommend(_request(charging_required=True))
 
     recommended_ids = {item.slot_id for item in result.recommendations}
     assert recommended_ids
@@ -207,27 +189,84 @@ async def test_unreachable_candidate_is_excluded(recommendation_session: AsyncSe
 @pytest.mark.asyncio
 async def test_recommendation_does_not_mutate_state(recommendation_session: AsyncSession):
     state = ParkingStateService(recommendation_session)
-    before = {
-        slot.id: (slot.status, slot.version, slot.occupied_by_vehicle_id)
-        for slot in await state.list_slots()
-    }
-    before_events = await recommendation_session.scalar(
-        select(func.count()).select_from(ParkingEvent)
-    )
+    before = {slot.id: (slot.status, slot.version, slot.occupied_by_vehicle_id) for slot in await state.list_slots()}
+    before_events = await recommendation_session.scalar(select(func.count()).select_from(ParkingEvent))
 
-    result = await _service(recommendation_session).recommend(
-        _request(charging_required=True, near_elevator=True)
-    )
+    result = await _service(recommendation_session).recommend(_request(charging_required=True, near_elevator=True))
 
-    after = {
-        slot.id: (slot.status, slot.version, slot.occupied_by_vehicle_id)
-        for slot in await state.list_slots()
-    }
-    after_events = await recommendation_session.scalar(
-        select(func.count()).select_from(ParkingEvent)
-    )
+    after = {slot.id: (slot.status, slot.version, slot.occupied_by_vehicle_id) for slot in await state.list_slots()}
+    after_events = await recommendation_session.scalar(select(func.count()).select_from(ParkingEvent))
     assert result.parking_state_version == sum(version for _, version, _ in before.values())
     assert after == before
     assert after_events == before_events
     assert not recommendation_session.dirty
     assert not recommendation_session.new
+
+
+@pytest.mark.asyncio
+async def test_recommendation_uses_one_graph_snapshot_and_three_sssp(
+    recommendation_session: AsyncSession,
+):
+    routing = RoutingService(recommendation_session)
+    service = RecommendationService(
+        recommendation_session,
+        ParkingStateService(recommendation_session),
+        routing,
+    )
+
+    with (
+        patch.object(routing, "load_graph", wraps=routing.load_graph) as load_graph,
+        patch.object(
+            routing,
+            "shortest_distances",
+            wraps=routing.shortest_distances,
+        ) as shortest_distances,
+        patch.object(routing, "get_route", wraps=routing.get_route) as get_route,
+    ):
+        result = await service.recommend(_request(charging_required=True, near_elevator=True))
+
+    assert result.recommendations
+    assert load_graph.await_count == 1
+    assert shortest_distances.call_count == 3
+    assert get_route.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_disconnected_edges_do_not_change_normalization(
+    recommendation_session: AsyncSession,
+):
+    request = _request(charging_required=True, near_elevator=True, limit=10)
+    before = await _service(recommendation_session).recommend(request)
+    recommendation_session.add_all(
+        [
+            MapNode(
+                id="F1-ISOLATED-A",
+                floor_id="F1",
+                type=MapNodeType.AISLE,
+                x=1000,
+                y=1000,
+            ),
+            MapNode(
+                id="F1-ISOLATED-B",
+                floor_id="F1",
+                type=MapNodeType.AISLE,
+                x=2000,
+                y=2000,
+            ),
+        ]
+    )
+    await recommendation_session.flush()
+    recommendation_session.add(
+        MapEdge(
+            from_node="F1-ISOLATED-A",
+            to_node="F1-ISOLATED-B",
+            distance_m=1_000_000,
+            bidirectional=True,
+            enabled=True,
+        )
+    )
+    await recommendation_session.flush()
+
+    after = await _service(recommendation_session).recommend(request)
+
+    assert after == before

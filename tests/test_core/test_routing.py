@@ -90,10 +90,7 @@ async def test_same_start_and_destination(routing_session: AsyncSession):
 async def test_result_is_deterministic(routing_session: AsyncSession):
     service = RoutingService(routing_session)
 
-    results = [
-        await service.get_route("F1-ELEVATOR", "F1-CP2")
-        for _ in range(5)
-    ]
+    results = [await service.get_route("F1-ELEVATOR", "F1-CP2") for _ in range(5)]
 
     assert all(result == results[0] for result in results)
     assert results[0].path == ["F1-ELEVATOR", "F1-C-E", "F1-CP2"]
@@ -131,10 +128,7 @@ async def test_no_route_when_edges_disabled(routing_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_polyline_matches_path(routing_session: AsyncSession):
     route = await RoutingService(routing_session).get_route("F1-ENTRANCE", "F1-C01")
-    nodes = {
-        node.id: node
-        for node in await routing_session.scalars(select(MapNode))
-    }
+    nodes = {node.id: node for node in await routing_session.scalars(select(MapNode))}
 
     assert route.polyline == [(nodes[node_id].x, nodes[node_id].y) for node_id in route.path]
 
@@ -160,3 +154,16 @@ async def test_bidirectional_edge(routing_session: AsyncSession):
     with pytest.raises(RoutingError) as error:
         await RoutingService(routing_session).get_route("F1-CP1", "F1-ENTRANCE")
     assert error.value.code is ErrorCode.ROUTE_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_sssp_reuses_loaded_graph(routing_session: AsyncSession):
+    service = RoutingService(routing_session)
+    graph = await service.load_graph()
+
+    from_entrance = service.shortest_distances(graph, "F1-ENTRANCE")
+    to_exit = service.shortest_distances(graph, "F1-EXIT", reverse=True)
+    route = service.route_on_graph(graph, "F1-ENTRANCE", "F1-C01")
+
+    assert from_entrance["F1-C01"] == route.distance_m
+    assert to_exit["F1-C01"] > 0

@@ -627,17 +627,37 @@ score giảm dần → distance tăng dần → slot_id theo alphabet
 
 Vì vậy cùng input và cùng parking state luôn cho cùng kết quả.
 
+Hiệu năng và chuẩn hóa khoảng cách:
+
+1. Mỗi recommendation load đúng một graph snapshot gồm toàn bộ `MapNode` và
+   `MapEdge.enabled == true`.
+2. Chạy SSSP Dijkstra tối đa ba lần: từ start trên graph thuận, từ Exit trên
+   graph đảo chiều, và từ Elevator trên graph đảo chiều khi
+   `near_elevator == true`.
+3. Tra khoảng cách cho từng slot từ các bảng SSSP; không gọi Dijkstra riêng cho
+   từng candidate.
+4. `MAX_DISTANCE` là khoảng cách hữu hạn lớn nhất thực sự dùng để chấm các
+   candidate đã qua hard filter và reachable. Không dùng tổng trọng số edge,
+   magic number, hoặc edge thuộc component rời rạc không liên quan.
+
+Cách này giữ scoring deterministic, giảm recommendation từ `2N`/`3N` lần tìm
+đường xuống còn hai hoặc ba lần, và tránh việc graph rời rạc làm score co cụm.
+
 ### 8.3 Routing Service
 
 Files: `src/core/parking_map.py`, `src/core/routing.py`
 
 Quy trình:
 
-1. Load graph từ `MapNode` và `MapEdge` đang enabled.
+1. Load graph snapshot từ `MapNode` và `MapEdge` đang enabled; dựng cả adjacency
+   thuận và đảo chiều, đồng thời tôn trọng `bidirectional`.
 2. Validate start và destination.
 3. Chạy Dijkstra với `distance_m`.
 4. Trả node path, tổng khoảng cách và tọa độ polyline.
-5. Cache graph tĩnh nếu cần; invalidate khi map thay đổi.
+5. Cho phép tái sử dụng graph snapshot và kết quả SSSP trong phạm vi một request.
+6. Chỉ cache graph xuyên request khi đã có topology version hoặc cơ chế
+   invalidation đáng tin cậy. Nếu chưa có, mỗi request phải load snapshot mới để
+   edge vừa enable/disable có hiệu lực ngay.
 
 Test quan trọng nhất là route không đi xuyên qua slot khác và không trả node không tồn tại.
 
