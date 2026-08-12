@@ -52,6 +52,31 @@ def _unavailable(call_id: str) -> ToolMessage:
     )
 
 
+def _route_result(call_id: str, *, ok: bool = True) -> ToolMessage:
+    content = (
+        {
+            "ok": True,
+            "data": {
+                "start_node_id": "F1-CP3",
+                "destination_node_id": "F1-D01",
+                "path": ["F1-CP3", "F1-D01"],
+                "distance_m": 10,
+                "polyline": [[85, 50], [58, 70]],
+            },
+        }
+        if ok
+        else {
+            "ok": False,
+            "error": {"code": "ROUTE_NOT_FOUND", "message": "No route."},
+        }
+    )
+    return ToolMessage(
+        content=json.dumps(content),
+        tool_call_id=call_id,
+        name="get_route",
+    )
+
+
 @pytest.mark.parametrize(
     "messages",
     [
@@ -83,3 +108,62 @@ def test_unresolved_tool_error_is_kept_regardless_of_result_order(messages):
     result = observe_tool_result({"messages": messages, "missing_fields": []})
 
     assert result["error"].startswith("AGENT_TOOL_UNAVAILABLE:")
+
+
+def test_successful_route_is_validated_and_stored_without_tool_envelope():
+    result = observe_tool_result({"messages": [_route_result("route-1")]})
+
+    assert result["route"].model_dump(mode="json") == {
+        "path": ["F1-CP3", "F1-D01"],
+        "distance_m": 10.0,
+        "polyline": [[85.0, 50.0], [58.0, 70.0]],
+    }
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        _route_result("route-failed", ok=False),
+        ToolMessage(
+            content=json.dumps(
+                {
+                    "ok": True,
+                    "data": {
+                        "path": ["invented"],
+                        "distance_m": -1,
+                        "polyline": [],
+                    },
+                }
+            ),
+            tool_call_id="route-invalid",
+            name="get_route",
+        ),
+    ],
+)
+def test_failed_or_invalid_route_has_no_structured_result(message):
+    result = observe_tool_result({"messages": [message]})
+
+    assert "route" not in result
+
+
+def test_recommendations_only_use_valid_ids_from_structured_tool_data():
+    message = ToolMessage(
+        content=json.dumps(
+            {
+                "ok": True,
+                "data": {
+                    "recommendations": [
+                        {"slot_id": "F1-C03"},
+                        {"slot_id": "not-canonical"},
+                        "F1-D01 appears in prose",
+                    ]
+                },
+            }
+        ),
+        tool_call_id="recommend-valid",
+        name="recommend_parking_slot",
+    )
+
+    result = observe_tool_result({"messages": [message]})
+
+    assert result["recommended_slot_ids"] == ["F1-C03"]

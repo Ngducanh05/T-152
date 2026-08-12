@@ -322,7 +322,7 @@ async def test_tool_exception_does_not_create_fake_slot_or_route():
     assert result["tool_result"]["error"]["code"] == "AGENT_TOOL_UNAVAILABLE"
     assert result["messages"][-1].content == safe_text
     assert "selected_slot" not in result
-    assert "recommended_slot_ids" not in result
+    assert result["recommended_slot_ids"] == []
     assert "path" not in result["tool_result"]
 
 

@@ -29,6 +29,10 @@ def prepare_context(
         "user_id": context.user_id,
         "vehicle_id": context.vehicle_id or "",
         "missing_fields": list(dict.fromkeys(missing_fields)),
+        # Structured tool output is scoped to this invocation. Conversation
+        # context such as the confirmed location remains durable.
+        "recommended_slot_ids": [],
+        "route": None,
         "agent_step_count": 0,
         "error": "",
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -52,7 +53,10 @@ class FakeAgent:
                         ],
                     ),
                     ToolMessage(
-                        content='{"ok": true}',
+                        content=(
+                            '{"ok": true, "data": {"recommendations": '
+                            '[{"slot_id": "F1-C03"}]}}'
+                        ),
                         tool_call_id=call_id,
                         name="recommend_parking_slot",
                     ),
@@ -64,6 +68,11 @@ class FakeAgent:
             "messages": list(history),
             "intent": "RECOMMEND_SLOT" if "tìm" in user_text.lower() else "CHAT",
             "selected_slot": "F1-C03" if "chọn" in user_text.lower() else "",
+            "current_location": "F1-CP3",
+            "recommended_slot_ids": (
+                ["F1-C03"] if "tìm" in user_text.lower() else []
+            ),
+            "route": None,
         }
 
 
@@ -83,6 +92,57 @@ class UnavailableAgent:
         return {
             "messages": [*input_state["messages"], AIMessage(content="internal fallback")],
             "error": "AGENT_TOOL_UNAVAILABLE: LLM_API_KEY is not configured",
+        }
+
+
+class StructuredRouteAgent:
+    def __init__(self, *, ok: bool = True) -> None:
+        self.ok = ok
+
+    async def ainvoke(self, input_state, config, *, context):
+        call_id = "route-call"
+        tool_content = (
+            {
+                "ok": True,
+                "data": {
+                    "path": ["F1-CP3", "F1-D01"],
+                    "distance_m": 10,
+                    "polyline": [[85, 50], [58, 70]],
+                },
+            }
+            if self.ok
+            else {
+                "ok": False,
+                "error": {"code": "ROUTE_NOT_FOUND", "message": "No route."},
+            }
+        )
+        return {
+            "messages": [
+                *input_state["messages"],
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "get_route",
+                            "args": {"destination_node_id": "F1-D01"},
+                            "id": call_id,
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                ToolMessage(
+                    content=json.dumps(tool_content),
+                    tool_call_id=call_id,
+                    name="get_route",
+                ),
+                AIMessage(content="Đã xử lý tuyến đường."),
+            ],
+            "route": {
+                "path": ["F1-CP3", "F1-D01"],
+                "distance_m": 10,
+                "polyline": [[85, 50], [58, 70]],
+            },
+            "tool_result": {"secret": "must-not-be-public"},
         }
 
 
@@ -156,6 +216,9 @@ async def test_happy_chat_response(agent_api):
             "intent": "RECOMMEND_SLOT",
             "selected_slot": None,
             "tool_names": ["recommend_parking_slot"],
+            "current_location": "F1-CP3",
+            "recommended_slot_ids": ["F1-C03"],
+            "route": None,
         },
         "message": None,
     }
@@ -177,6 +240,8 @@ async def test_two_turns_same_thread_keep_context(agent_api):
     assert first.json()["data"]["message"] == "Lượt 1 của thread."
     assert second.json()["data"]["message"] == "Lượt 2 của thread."
     assert [call["history_size"] for call in fake_agent.calls] == [1, 3]
+    assert first.json()["data"]["recommended_slot_ids"] == []
+    assert second.json()["data"]["recommended_slot_ids"] == []
 
 
 @pytest.mark.asyncio
@@ -392,6 +457,28 @@ async def test_missing_api_key_state_returns_standard_503():
 
 
 @pytest.mark.asyncio
+async def test_successful_current_turn_route_is_exposed_as_safe_structure():
+    response = await _request_with_agent(StructuredRouteAgent())
+
+    assert response.status_code == 200
+    assert response.json()["data"]["route"] == {
+        "path": ["F1-CP3", "F1-D01"],
+        "distance_m": 10.0,
+        "polyline": [[85.0, 50.0], [58.0, 70.0]],
+    }
+    assert "tool_result" not in response.json()["data"]
+    assert "must-not-be-public" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_failed_current_turn_route_does_not_expose_stale_state_route():
+    response = await _request_with_agent(StructuredRouteAgent(ok=False))
+
+    assert response.status_code == 200
+    assert response.json()["data"]["route"] is None
+
+
+@pytest.mark.asyncio
 async def test_real_graph_missing_api_key_does_not_call_network_or_crash_app():
     application = create_app(Settings(_env_file=None, llm_api_key=None))
     missing_key_settings = SimpleNamespace(llm_api_key=None)
@@ -432,3 +519,8 @@ def test_agent_router_appears_in_openapi():
     assert operation["responses"]["200"]
     response_schema = application.openapi()["components"]["schemas"]["ChatResponse"]
     assert "analysis" not in response_schema["properties"]
+    assert {
+        "current_location",
+        "recommended_slot_ids",
+        "route",
+    } <= response_schema["properties"].keys()
