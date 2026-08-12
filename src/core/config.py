@@ -51,6 +51,8 @@ class Settings(BaseSettings):
             "OPENAI_TEMPERATURE",
         ),
     )
+    llm_timeout_seconds: float = Field(default=30.0, gt=0.0)
+    llm_max_retries: int = Field(default=2, ge=0, le=5)
 
     cors_origins: str = Field(
         default="http://localhost:3000",
