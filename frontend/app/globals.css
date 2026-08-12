@@ -151,6 +151,19 @@ button { color: inherit; }
 .location-choice-grid { max-height: 320px; margin-top: 18px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; overflow: auto; }
 .location-choice-grid button { padding: 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: #f8faf9; font-size: 8px; cursor: pointer; }
 .location-choice-grid button:hover, .location-choice-grid button:focus-visible { border-color: var(--green); background: var(--green-soft); }
+.reservation-banner { min-height: 58px; padding: 9px 12px; display: flex; align-items: center; gap: 11px; color: #4f3500; background: #fff5dc; border: 1px solid #efd18a; border-radius: 14px; box-shadow: 0 8px 22px #805b1020; }
+.reservation-banner .session-icon { color: #fff; background: #d99008; }
+.reservation-banner div { flex: 1; }.reservation-banner small, .reservation-banner b { display: block; }.reservation-banner small { color: #8d6b25; font-size: 7px; letter-spacing: .8px; }.reservation-banner b { margin-top: 4px; font-size: 11px; }
+.reservation-banner button { padding: 8px 10px; border: 0; color: #fff; background: #b77400; border-radius: 7px; font-size: 9px; font-weight: 800; cursor: pointer; }
+.three-options { grid-template-columns: repeat(3, 1fr); }
+.candidate-list { min-height: 64px; margin: 13px 20px; display: grid; gap: 6px; }
+.candidate-list > p { padding: 12px; color: var(--muted); background: #f7faf8; border-radius: 9px; font-size: 8px; line-height: 1.5; }
+.candidate-list button { padding: 9px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fafcfb; text-align: left; cursor: pointer; }
+.candidate-list button.selected { border-color: var(--green); background: var(--green-soft); box-shadow: 0 0 0 2px #168a5b1c; }
+.candidate-list b { font-size: 9px; }.candidate-list span { color: var(--muted); font-size: 7px; }
+.workflow-actions { padding: 0 20px 17px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.workflow-stack { padding: 0 20px 17px; display: grid; gap: 8px; }
+.workflow-actions button:disabled, .workflow-stack button:disabled, .reservation-banner button:disabled, .session-banner button:disabled { opacity: .48; cursor: not-allowed; }
 
 @media (max-width: 680px) {
   .parking-summary { grid-template-columns: repeat(2, 1fr); }
@@ -158,4 +171,6 @@ button { color: inherit; }
   .api-parking-map { height: 500px; padding: 0; }
   .map-legend { justify-content: flex-start; }
   .location-choice-grid { grid-template-columns: repeat(2, 1fr); }
+  .three-options { grid-template-columns: 1fr; }
+  .reservation-banner { flex-wrap: wrap; }
 }
