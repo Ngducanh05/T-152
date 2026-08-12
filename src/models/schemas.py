@@ -201,9 +201,27 @@ class ParkingEvent(ContractModel):
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=5000, description="Tin nhắn từ user")
+    model_config = ConfigDict(extra="forbid")
+
+    thread_id: str = Field(min_length=1, max_length=128)
+    user_id: EntityId
+    vehicle_id: EntityId | None = None
+    message: str = Field(min_length=1, max_length=5000, description="Tin nhắn từ user")
+
+    @field_validator("thread_id", "message")
+    @classmethod
+    def text_must_not_be_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("value must not be blank")
+        return stripped
 
 
 class ChatResponse(BaseModel):
-    response: str = Field(..., description="Phản hồi từ agent")
-    analysis: str = Field(default="", description="Phân tích nội bộ")
+    model_config = ConfigDict(extra="forbid")
+
+    thread_id: str
+    message: str = Field(description="Phản hồi công khai từ agent")
+    intent: str | None = None
+    selected_slot: str | None = None
+    tool_names: list[str] = Field(default_factory=list)

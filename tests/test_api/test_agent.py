@@ -1,0 +1,293 @@
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import patch
+from uuid import uuid4
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from langchain_core.messages import AIMessage, ToolMessage
+
+from src.api.main import REQUEST_ID_HEADER, create_app
+from src.core.config import Settings
+
+
+class FakeAgent:
+    """Checkpoint-like fake Agent used without a model or network."""
+
+    def __init__(self) -> None:
+        self.threads: dict[str, list[Any]] = {}
+        self.calls: list[dict[str, Any]] = []
+
+    async def ainvoke(self, input_state, config, *, context):
+        thread_id = config["configurable"]["thread_id"]
+        history = self.threads.setdefault(thread_id, [])
+        incoming = input_state["messages"]
+        history.extend(incoming)
+        user_text = incoming[-1].content
+        self.calls.append(
+            {
+                "thread_id": thread_id,
+                "context": context,
+                "history_size": len(history),
+            }
+        )
+
+        if "tìm" in user_text.lower():
+            call_id = f"tool-{len(self.calls)}"
+            history.extend(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "recommend_parking_slot",
+                                "args": {},
+                                "id": call_id,
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    ToolMessage(
+                        content='{"ok": true}',
+                        tool_call_id=call_id,
+                        name="recommend_parking_slot",
+                    ),
+                ]
+            )
+        answer = f"Lượt {sum(message.type == 'human' for message in history)} của thread."
+        history.append(AIMessage(content=answer))
+        return {
+            "messages": list(history),
+            "intent": "RECOMMEND_SLOT" if "tìm" in user_text.lower() else "CHAT",
+            "selected_slot": "F1-C03" if "chọn" in user_text.lower() else "",
+        }
+
+
+class SlowAgent:
+    async def ainvoke(self, input_state, config, *, context):
+        await asyncio.sleep(1)
+        return {"messages": [AIMessage(content="too late")]}
+
+
+class FailingAgent:
+    async def ainvoke(self, input_state, config, *, context):
+        raise RuntimeError("secret database exception")
+
+
+class UnavailableAgent:
+    async def ainvoke(self, input_state, config, *, context):
+        return {
+            "messages": [*input_state["messages"], AIMessage(content="internal fallback")],
+            "error": "AGENT_TOOL_UNAVAILABLE: LLM_API_KEY is not configured",
+        }
+
+
+@pytest_asyncio.fixture
+async def agent_api():
+    fake_agent = FakeAgent()
+    application = create_app(
+        Settings(_env_file=None, llm_api_key=None),
+        agent_override=fake_agent,
+    )
+    async with application.router.lifespan_context(application):
+        async with AsyncClient(
+            transport=ASGITransport(app=application),
+            base_url="http://test",
+        ) as client:
+            yield application, client, fake_agent
+
+
+def _payload(
+    *,
+    thread_id: str = "THREAD-DEMO-001",
+    user_id: str = "USER-001",
+    message: str = "Tìm ô có sạc",
+) -> dict[str, str]:
+    return {
+        "thread_id": thread_id,
+        "user_id": user_id,
+        "vehicle_id": "VEHICLE-001",
+        "message": message,
+    }
+
+
+@pytest.mark.asyncio
+async def test_happy_chat_response(agent_api):
+    application, client, fake_agent = agent_api
+    request_id = str(uuid4())
+
+    response = await client.post(
+        "/api/v1/agent/chat",
+        headers={REQUEST_ID_HEADER: request_id},
+        json=_payload(),
+    )
+
+    assert response.status_code == 200
+    assert response.headers[REQUEST_ID_HEADER] == request_id
+    assert response.json() == {
+        "success": True,
+        "data": {
+            "thread_id": "THREAD-DEMO-001",
+            "message": "Lượt 1 của thread.",
+            "intent": "RECOMMEND_SLOT",
+            "selected_slot": None,
+            "tool_names": ["recommend_parking_slot"],
+        },
+        "message": None,
+    }
+    call = fake_agent.calls[0]
+    assert call["thread_id"] == "USER-001:THREAD-DEMO-001"
+    assert call["context"].request_id == request_id
+    assert call["context"].user_id == "USER-001"
+    assert application.state.agent is fake_agent
+    assert application.state.agent_checkpointer is not None
+
+
+@pytest.mark.asyncio
+async def test_two_turns_same_thread_keep_context(agent_api):
+    _, client, fake_agent = agent_api
+
+    first = await client.post("/api/v1/agent/chat", json=_payload(message="Xin chào"))
+    second = await client.post("/api/v1/agent/chat", json=_payload(message="Tiếp tục"))
+
+    assert first.json()["data"]["message"] == "Lượt 1 của thread."
+    assert second.json()["data"]["message"] == "Lượt 2 của thread."
+    assert [call["history_size"] for call in fake_agent.calls] == [1, 3]
+
+
+@pytest.mark.asyncio
+async def test_two_threads_do_not_share_state(agent_api):
+    _, client, fake_agent = agent_api
+
+    first = await client.post(
+        "/api/v1/agent/chat",
+        json=_payload(thread_id="THREAD-001", message="Xin chào"),
+    )
+    second = await client.post(
+        "/api/v1/agent/chat",
+        json=_payload(thread_id="THREAD-002", message="Xin chào"),
+    )
+
+    assert first.json()["data"]["message"] == "Lượt 1 của thread."
+    assert second.json()["data"]["message"] == "Lượt 1 của thread."
+    assert set(fake_agent.threads) == {"USER-001:THREAD-001", "USER-001:THREAD-002"}
+
+
+@pytest.mark.asyncio
+async def test_two_users_cannot_share_public_thread(agent_api):
+    _, client, fake_agent = agent_api
+    await client.post("/api/v1/agent/chat", json=_payload(user_id="USER-001"))
+
+    response = await client.post(
+        "/api/v1/agent/chat",
+        json=_payload(user_id="USER-002"),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "INVALID_TRANSITION"
+    assert len(fake_agent.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["", "   "])
+async def test_empty_message_is_rejected(agent_api, message):
+    _, client, fake_agent = agent_api
+
+    response = await client.post(
+        "/api/v1/agent/chat",
+        json=_payload(message=message),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert fake_agent.calls == []
+
+
+async def _request_with_agent(agent, *, timeout: float = 30.0):
+    application = create_app(
+        Settings(_env_file=None, llm_api_key=None),
+        agent_override=agent,
+    )
+    async with application.router.lifespan_context(application):
+        application.state.agent_chat_timeout_seconds = timeout
+        async with AsyncClient(
+            transport=ASGITransport(app=application),
+            base_url="http://test",
+        ) as client:
+            return await client.post("/api/v1/agent/chat", json=_payload())
+
+
+@pytest.mark.asyncio
+async def test_agent_timeout_returns_standard_503():
+    response = await _request_with_agent(SlowAgent(), timeout=0.01)
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "AGENT_TOOL_UNAVAILABLE"
+    assert response.json()["error"]["request_id"]
+    assert "too late" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_agent_exception_returns_standard_503_without_raw_error():
+    response = await _request_with_agent(FailingAgent())
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "AGENT_TOOL_UNAVAILABLE"
+    assert "secret database exception" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_missing_api_key_state_returns_standard_503():
+    response = await _request_with_agent(UnavailableAgent())
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "AGENT_TOOL_UNAVAILABLE"
+    assert "LLM_API_KEY" not in response.text
+    assert "internal fallback" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_real_graph_missing_api_key_does_not_call_network_or_crash_app():
+    application = create_app(Settings(_env_file=None, llm_api_key=None))
+    missing_key_settings = SimpleNamespace(llm_api_key=None)
+    with patch("src.services.llm.get_settings", return_value=missing_key_settings):
+        async with application.router.lifespan_context(application):
+            async with AsyncClient(
+                transport=ASGITransport(app=application),
+                base_url="http://test",
+            ) as client:
+                response = await client.post("/api/v1/agent/chat", json=_payload())
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "AGENT_TOOL_UNAVAILABLE"
+    assert "LLM_API_KEY" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_response_does_not_expose_internal_fields_or_secrets(agent_api):
+    _, client, _ = agent_api
+
+    response = await client.post("/api/v1/agent/chat", json=_payload())
+    body = response.json()
+
+    assert response.status_code == 200
+    serialized = response.text.lower()
+    assert "analysis" not in body["data"]
+    assert "chain_of_thought" not in serialized
+    assert "system_prompt" not in serialized
+    assert "api_key" not in serialized
+    assert "tool_calls" not in serialized
+
+
+def test_agent_router_appears_in_openapi():
+    application = create_app(Settings(_env_file=None, llm_api_key=None))
+    operation = application.openapi()["paths"]["/api/v1/agent/chat"]["post"]
+
+    assert operation["requestBody"]
+    assert operation["responses"]["200"]
+    response_schema = application.openapi()["components"]["schemas"]["ChatResponse"]
+    assert "analysis" not in response_schema["properties"]

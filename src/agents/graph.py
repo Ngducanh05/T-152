@@ -5,6 +5,7 @@ from collections.abc import Sequence
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
@@ -62,6 +63,7 @@ def build_graph(
     *,
     tools: Sequence[BaseTool] | None = None,
     max_steps: int = MAX_AGENT_STEPS,
+    checkpointer: BaseCheckpointSaver | None = None,
 ):
     """Build the parking assistant with injectable model, tools, and step budget.
 
@@ -94,7 +96,4 @@ def build_graph(
     )
     graph.add_edge("tools", "observe_tool_result")
     graph.add_edge("observe_tool_result", "assistant")
-    return graph.compile(name="parksmart-agent")
-
-
-agent = build_graph()
+    return graph.compile(checkpointer=checkpointer, name="parksmart-agent")

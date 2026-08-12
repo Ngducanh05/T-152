@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from src.api.routes.agent import router as agent_router
 from src.api.routes.auth import router as auth_router
 from src.api.routes.health import router as health_router
 from src.api.routes.locations import router as locations_router
@@ -13,6 +14,7 @@ from src.api.routes.sessions import router as sessions_router
 from src.api.routes.simulator import router as simulator_router
 
 api_router = APIRouter()
+api_router.include_router(agent_router)
 api_router.include_router(auth_router)
 api_router.include_router(health_router)
 api_router.include_router(locations_router)

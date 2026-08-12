@@ -6,6 +6,7 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
+from langgraph.checkpoint.memory import InMemorySaver
 
 from src.agents.context import AgentRuntimeContext
 from src.agents.graph import build_graph
@@ -70,3 +71,33 @@ def test_runtime_context_contract_keeps_session_out_of_state():
         "request_id",
         "session_factory",
     }
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_does_not_store_runtime_dependencies_or_request_id():
+    checkpointer = InMemorySaver()
+    graph = build_graph(
+        FakeListChatModel(responses=["Phản hồi an toàn"]),
+        checkpointer=checkpointer,
+    )
+    config = {"configurable": {"thread_id": "USER-001:THREAD-001"}}
+    context = AgentRuntimeContext(
+        user_id="USER-001",
+        vehicle_id="VEHICLE-001",
+        request_id="SECRET-REQUEST-ID",
+        session_factory=object(),  # type: ignore[arg-type]
+    )
+
+    await graph.ainvoke(
+        {"messages": [HumanMessage(content="Xin chào")]},
+        config=config,
+        context=context,
+    )
+    checkpoint = await checkpointer.aget_tuple(config)
+
+    assert checkpoint is not None
+    channel_values = checkpoint.checkpoint["channel_values"]
+    serialized_state = repr(channel_values)
+    assert "session_factory" not in serialized_state
+    assert "SECRET-REQUEST-ID" not in serialized_state
+    assert "api_key" not in serialized_state.lower()
