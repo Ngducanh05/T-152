@@ -39,6 +39,9 @@ include = ["src*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "live_llm: optional live-provider Agent eval; requires explicit opt-in",
+]
 
 [tool.ruff]
 line-length = 100

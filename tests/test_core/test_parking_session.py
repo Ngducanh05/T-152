@@ -276,9 +276,9 @@ async def test_complete_session_releases_slot_and_marks_session_completed(
     completed_at = datetime(2026, 8, 12, 9, 0, tzinfo=UTC)
     async with factory() as session, session.begin():
         reservation = await _reserve(session, "F1-D02", now=completed_at - timedelta(seconds=1))
-        parking_session = await ParkingSessionService(session).confirm_parking(
-            "USER-001", "VEHICLE-001", reservation.id
-        )
+        parking_session = await ParkingSessionService(
+            session, clock=lambda: completed_at
+        ).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
         completed = await ParkingSessionService(
             session, clock=lambda: completed_at
         ).complete_session(parking_session.id, user_id="USER-001")

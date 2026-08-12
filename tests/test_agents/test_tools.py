@@ -99,7 +99,7 @@ def _runtime(
     runtime = ToolRuntime(
         state=state or {},
         context=context,
-        config={},
+        config={"configurable": {"thread_id": "USER-001:THREAD-SECRET-001"}},
         stream_writer=lambda _: None,
         tool_call_id=None,
         store=None,
@@ -458,8 +458,43 @@ async def test_unexpected_error_is_logged_and_safely_normalized(caplog):
         "retryable": True,
     }
     assert "REQUEST-001" in caplog.text
+    assert "tool_name=get_parking_status" in caplog.text
+    assert "duration_ms=" in caplog.text
+    assert "outcome=error" in caplog.text
+    assert "error_code=AGENT_TOOL_UNAVAILABLE" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
+    assert "USER-001" not in caplog.text
+    assert "THREAD-SECRET-001" not in caplog.text
     assert "database detail" not in result["error"]["message"]
+    assert "database detail" not in caplog.text
     json.dumps(result)
+
+
+@pytest.mark.asyncio
+async def test_successful_tool_logs_masked_structured_outcome(caplog):
+    runtime, _ = _runtime()
+    status = ParkingStatus(
+        total=40,
+        available=40,
+        reserved=0,
+        occupied=0,
+        by_zone={},
+    )
+    with patch.object(
+        ParkingStateService,
+        "get_parking_status",
+        AsyncMock(return_value=status),
+    ):
+        await _invoke(get_parking_status, runtime)
+
+    assert "request_id=REQUEST-001" in caplog.text
+    assert "tool_name=get_parking_status" in caplog.text
+    assert "outcome=success" in caplog.text
+    assert "error_code=NONE" in caplog.text
+    assert "thread_id=masked-" in caplog.text
+    assert "user_id=masked-" in caplog.text
+    assert "USER-001" not in caplog.text
+    assert "THREAD-SECRET-001" not in caplog.text
 
 
 @pytest.mark.asyncio
