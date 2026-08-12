@@ -139,6 +139,26 @@ class ParkingStateService:
 
         slot = await self._lock_slot(slot_id)
         self._check_expected_version(slot, expected_version)
+        if slot.status is SlotStatus.RESERVED:
+            active_owner = await self.session.scalar(
+                select(ParkingReservation)
+                .where(
+                    ParkingReservation.slot_id == slot_id,
+                    ParkingReservation.status == ReservationStatus.ACTIVE,
+                )
+                .with_for_update()
+            )
+            if active_owner is not None and active_owner.expires_at <= current_time:
+                active_owner.status = ReservationStatus.EXPIRED
+                self._transition_slot(
+                    slot,
+                    new_status=SlotStatus.AVAILABLE,
+                    event_type=ParkingEventType.RESERVATION_EXPIRED,
+                    actor_type=ActorType.SYSTEM,
+                    actor_id=None,
+                    event_metadata={"reservation_id": active_owner.id},
+                    now=current_time,
+                )
         if slot.status is not SlotStatus.AVAILABLE:
             raise ParkingStateError(
                 ErrorCode.SLOT_NOT_AVAILABLE,
@@ -188,6 +208,7 @@ class ParkingStateService:
             actor_type=ActorType.USER,
             actor_id=user_id,
             event_metadata={"reservation_id": reservation_id, "vehicle_id": vehicle_id},
+            now=current_time,
         )
         await self.session.flush()
         return slot
@@ -238,6 +259,7 @@ class ParkingStateService:
             actor_type=actor_type,
             actor_id=actor_id,
             event_metadata={"reservation_id": reservation_id, "vehicle_id": vehicle_id},
+            now=current_time,
         )
         await self.session.flush()
         return slot
@@ -250,7 +272,9 @@ class ParkingStateService:
         actor_id: str | None,
         vehicle_id: str,
         expected_version: int | None = None,
+        now: datetime | None = None,
     ) -> ParkingSlot:
+        current_time = _utc_now(now)
         slot = await self._lock_slot(slot_id)
         self._check_expected_version(slot, expected_version)
         if slot.status is not SlotStatus.OCCUPIED:
@@ -272,6 +296,7 @@ class ParkingStateService:
             actor_type=actor_type,
             actor_id=actor_id,
             event_metadata={"vehicle_id": vehicle_id},
+            now=current_time,
         )
         await self.session.flush()
         return slot
@@ -304,6 +329,59 @@ class ParkingStateService:
             actor_type=ActorType.SYSTEM,
             actor_id=None,
             event_metadata={"reservation_id": reservation_id},
+            now=current_time,
+        )
+        await self.session.flush()
+        return slot
+
+    async def cancel_reservation(
+        self,
+        slot_id: str,
+        reservation_id: str,
+        *,
+        user_id: str,
+        expected_version: int | None = None,
+        now: datetime | None = None,
+    ) -> ParkingSlot:
+        current_time = _utc_now(now)
+        slot = await self._lock_slot(slot_id)
+        self._check_expected_version(slot, expected_version)
+        if slot.status is not SlotStatus.RESERVED:
+            self._raise_invalid(f"Cannot cancel reservation from {slot.status.value}", slot_id)
+
+        reservation = await self._lock_reservation(reservation_id)
+        if reservation.user_id != user_id:
+            self._raise_invalid("User does not own this reservation", slot_id)
+        if reservation.slot_id != slot_id:
+            self._raise_invalid("Reservation does not own this reserved slot", slot_id)
+        if reservation.status is not ReservationStatus.ACTIVE:
+            self._raise_invalid("Only an active reservation can be cancelled", slot_id)
+        if reservation.expires_at <= current_time:
+            reservation.status = ReservationStatus.EXPIRED
+            self._transition_slot(
+                slot,
+                new_status=SlotStatus.AVAILABLE,
+                event_type=ParkingEventType.RESERVATION_EXPIRED,
+                actor_type=ActorType.SYSTEM,
+                actor_id=None,
+                event_metadata={"reservation_id": reservation_id},
+                now=current_time,
+            )
+            await self.session.flush()
+            return slot
+
+        reservation.status = ReservationStatus.CANCELLED
+        self._transition_slot(
+            slot,
+            new_status=SlotStatus.AVAILABLE,
+            event_type=ParkingEventType.RESERVATION_CANCELLED,
+            actor_type=ActorType.USER,
+            actor_id=user_id,
+            event_metadata={
+                "reservation_id": reservation_id,
+                "vehicle_id": reservation.vehicle_id,
+            },
+            now=current_time,
         )
         await self.session.flush()
         return slot
@@ -373,6 +451,7 @@ class ParkingStateService:
         actor_type: ActorType,
         actor_id: str | None,
         event_metadata: dict[str, Any],
+        now: datetime | None = None,
     ) -> None:
         old_status = slot.status
         slot.status = new_status
@@ -386,7 +465,7 @@ class ParkingStateService:
                 actor_id=actor_id,
                 old_status=old_status,
                 new_status=new_status,
-                created_at=datetime.now(UTC),
+                created_at=now or datetime.now(UTC),
                 event_metadata=event_metadata,
             )
         )
@@ -504,6 +583,7 @@ async def release_slot(
     actor_id: str | None,
     vehicle_id: str,
     expected_version: int | None = None,
+    now: datetime | None = None,
 ) -> ParkingSlot:
     return await ParkingStateService(session).release_slot(
         slot_id,
@@ -511,6 +591,7 @@ async def release_slot(
         actor_id=actor_id,
         vehicle_id=vehicle_id,
         expected_version=expected_version,
+        now=now,
     )
 
 
@@ -530,7 +611,26 @@ async def expire_reservation(
     )
 
 
+async def cancel_reservation(
+    session: AsyncSession,
+    slot_id: str,
+    reservation_id: str,
+    *,
+    user_id: str,
+    expected_version: int | None = None,
+    now: datetime | None = None,
+) -> ParkingSlot:
+    return await ParkingStateService(session).cancel_reservation(
+        slot_id,
+        reservation_id,
+        user_id=user_id,
+        expected_version=expected_version,
+        now=now,
+    )
+
+
 __all__ = [
+    "cancel_reservation",
     "ParkingStateError",
     "ParkingStateService",
     "ParkingStatus",
