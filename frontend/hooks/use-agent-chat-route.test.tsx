@@ -1,15 +1,15 @@
-import {
-  act,
-  cleanup,
-  render,
-  renderHook,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RouteOverlay } from "@/components/parking/RouteOverlay";
 import { MVP_AGENT_THREAD_STORAGE_KEY } from "@/lib/demo";
+import {
+  agentChatResponse,
+  canonicalMap,
+  currentLocation,
+  parkingStatus,
+} from "@/test/fixtures";
 import type { ParkSmartSnapshot } from "./use-parksmart-data";
 import { useParkingWorkflow } from "./use-parking-workflow";
 
@@ -18,25 +18,14 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
-describe("Agent structured route", () => {
-  it("renders only the polyline returned in the structured chat response", async () => {
+describe("Agent structured UI effects", () => {
+  it("shows structured selection and renders only the backend route polyline", async () => {
     sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-route");
     const snapshot: ParkSmartSnapshot = {
-      map: { nodes: [], edges: [], slots: [] },
-      slots: [],
-      status: {
-        total: 0,
-        available: 0,
-        reserved: 0,
-        occupied: 0,
-        by_zone: {
-          A: { AVAILABLE: 0, RESERVED: 0, OCCUPIED: 0 },
-          B: { AVAILABLE: 0, RESERVED: 0, OCCUPIED: 0 },
-          C: { AVAILABLE: 0, RESERVED: 0, OCCUPIED: 0 },
-          D: { AVAILABLE: 0, RESERVED: 0, OCCUPIED: 0 },
-        },
-      },
-      currentLocation: { user_id: "USER-001", node_id: "F1-ENTRANCE" },
+      map: canonicalMap,
+      slots: canonicalMap.slots,
+      status: parkingStatus,
+      currentLocation,
       activeReservation: null,
       activeSession: null,
     };
@@ -50,22 +39,8 @@ describe("Agent structured route", () => {
       completeSession: vi.fn(),
       resetDemo: vi.fn(),
       chat: vi.fn().mockResolvedValue({
-        thread_id: "thread-route",
+        ...agentChatResponse,
         message: "Không dùng đường 99,99 100,100 trong nội dung này.",
-        intent: "route",
-        selected_slot: "F1-D01",
-        tool_names: ["get_route"],
-        current_location: "F1-ENTRANCE",
-        recommended_slot_ids: [],
-        route: {
-          path: ["F1-ENTRANCE", "F1-D01"],
-          distance_m: 76,
-          polyline: [
-            [0, 50],
-            [15, 50],
-            [85, 25],
-          ],
-        },
       }),
     };
     const data = {
@@ -75,20 +50,42 @@ describe("Agent structured route", () => {
       activeSession: null,
       refresh: vi.fn(async () => snapshot),
     };
-    const { result } = renderHook(() => useParkingWorkflow(data, api));
-    await waitFor(() => expect(result.current.threadId).toBe("thread-route"));
 
-    await act(async () => {
-      await result.current.sendAgentMessage("Chỉ đường tới ô đã chọn");
-    });
-    render(
-      <svg>
-        <RouteOverlay route={result.current.activeRoute} />
-      </svg>,
-    );
+    function AgentHarness() {
+      const workflow = useParkingWorkflow(data, api);
+      return (
+        <div>
+          <button
+            disabled={!workflow.threadId || workflow.pending === "chat"}
+            onClick={() => void workflow.sendAgentMessage("Chỉ đường")}
+          >
+            Gửi Agent
+          </button>
+          <p>Đề xuất: {workflow.recommendedSlotIds.join(", ") || "chưa có"}</p>
+          <p>Đã chọn: {workflow.selectedSlotId ?? "chưa có"}</p>
+          <p>Vị trí: {workflow.currentLocationId ?? "chưa có"}</p>
+          <p>Công cụ: {workflow.lastToolNames.join(", ") || "chưa có"}</p>
+          <svg>
+            <RouteOverlay route={workflow.activeRoute} />
+          </svg>
+        </div>
+      );
+    }
 
+    const user = userEvent.setup();
+    render(<AgentHarness />);
+    const send = screen.getByRole("button", { name: "Gửi Agent" });
+    await waitFor(() => expect(send).toBeEnabled());
+    await user.click(send);
+
+    expect(await screen.findByText("Đề xuất: F1-D01")).toBeVisible();
+    expect(screen.getByText("Đã chọn: F1-D01")).toBeVisible();
+    expect(screen.getByText("Vị trí: F1-ENTRANCE")).toBeVisible();
+    expect(
+      screen.getByText("Công cụ: recommend_parking_slot, get_route"),
+    ).toBeVisible();
     const points = screen.getByTestId("route-polyline").getAttribute("points");
-    expect(points).toBe("0,50 15,50 85,25");
+    expect(points).toBe("0,50 15,50 58,70 58,74");
     expect(points).not.toContain("99,99");
   });
 });

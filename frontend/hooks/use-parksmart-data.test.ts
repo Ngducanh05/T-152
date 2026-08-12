@@ -1,29 +1,66 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { ParkSmartApiClient } from "@/lib/api";
+import {
+  activeReservation,
+  activeSession,
+  canonicalMap,
+  currentLocation,
+  errorResponse,
+  parkingStatus,
+  successResponse,
+} from "@/test/fixtures";
 
 import { PARKING_POLL_INTERVAL_MS, useParkSmartData } from "./use-parksmart-data";
 
-function success(data: unknown) {
-  return new Response(
-    JSON.stringify({ success: true, data, message: null }),
-    { status: 200, headers: { "Content-Type": "application/json" } },
-  );
-}
-
-function optional404() {
-  return new Response(
-    JSON.stringify({
-      success: false,
-      error: { code: "NOT_FOUND", message: "Not found.", request_id: "req-404" },
-    }),
-    { status: 404, headers: { "Content-Type": "application/json" } },
-  );
-}
-
 beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+it("shows initial loading until the canonical map and status arrive", async () => {
+  let resolveMap!: (response: Response) => void;
+  let resolveStatus!: (response: Response) => void;
+  const mapRequest = new Promise<Response>((resolve) => {
+    resolveMap = resolve;
+  });
+  const statusRequest = new Promise<Response>((resolve) => {
+    resolveStatus = resolve;
+  });
+  const fetcher = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/parking/map")) return mapRequest;
+    if (url.endsWith("/parking/status")) return statusRequest;
+    if (url.includes("/parking/slots")) return successResponse(canonicalMap.slots);
+    if (url.includes("/locations/current")) return successResponse(currentLocation);
+    if (url.includes("/reservations/active")) return successResponse(activeReservation);
+    if (url.includes("/sessions/active")) return successResponse(activeSession);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const api = new ParkSmartApiClient({
+    baseUrl: "http://api.test/api/v1",
+    fetcher,
+  });
+  const { result } = renderHook(() => useParkSmartData(api));
+
+  expect(result.current.loading).toBe(true);
+  expect(result.current.map).toBeNull();
+
+  await act(async () => {
+    resolveMap(successResponse(canonicalMap));
+    resolveStatus(successResponse(parkingStatus));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(result.current.loading).toBe(false);
+  expect(result.current.map?.slots).toHaveLength(40);
+  expect(result.current.status).toEqual(parkingStatus);
+  expect(result.current.activeReservation).toEqual(activeReservation);
+  expect(result.current.activeSession).toEqual(activeSession);
+});
 
 it("prevents overlapping polls and aborts requests and timers on unmount", async () => {
   const signals: AbortSignal[] = [];
@@ -35,25 +72,19 @@ it("prevents overlapping polls and aborts requests and timers on unmount", async
     if (init?.signal) signals.push(init.signal);
     const url = String(input);
     if (url.endsWith("/parking/map")) {
-      return success({ nodes: [], edges: [], slots: [] });
+      return successResponse(canonicalMap);
     }
     if (url.endsWith("/parking/status")) {
       statusCalls += 1;
       return statusCalls === 1
-        ? success({
-            total: 40,
-            available: 40,
-            reserved: 0,
-            occupied: 0,
-            by_zone: {},
-          })
+        ? successResponse(parkingStatus)
         : neverResolve();
     }
     if (url.includes("/parking/slots")) {
       slotCalls += 1;
-      return slotCalls === 1 ? success([]) : neverResolve();
+      return slotCalls === 1 ? successResponse(canonicalMap.slots) : neverResolve();
     }
-    return optional404();
+    return errorResponse("NOT_FOUND", "Not found.", 404, "req-404");
   });
   const api = new ParkSmartApiClient({
     baseUrl: "http://api.test/api/v1",
