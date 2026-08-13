@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { errorEnvelope, jsonResponse, successEnvelope } from "@/test/fixtures";
-import { ApiError, ParkSmartApiClient, parseApiResponse } from "./api";
+import {
+  ApiError,
+  ParkSmartApiClient,
+  formatApiErrorForOperator,
+  parseApiResponse,
+} from "./api";
 
 describe("API envelope parsing", () => {
   it("returns data from a success envelope", async () => {
@@ -51,5 +56,26 @@ describe("optional resources", () => {
     await expect(api.getCurrentLocation("USER-001")).resolves.toBeNull();
     await expect(api.getActiveReservation("USER-001")).resolves.toBeNull();
     await expect(api.getActiveSession("USER-001")).resolves.toBeNull();
+  });
+});
+
+describe("operator-safe errors", () => {
+  it("shows the stable API code and request ID with understandable Vietnamese wording", () => {
+    const error = new ApiError({
+      code: "SLOT_NOT_AVAILABLE",
+      message: "Slot version changed.",
+      requestId: "request-conflict",
+      status: 409,
+    });
+
+    expect(formatApiErrorForOperator(error)).toBe(
+      "Không thể hoàn tất yêu cầu. Mã lỗi: SLOT_NOT_AVAILABLE. Mã yêu cầu: request-conflict.",
+    );
+  });
+
+  it("does not invent request metadata for a network failure", () => {
+    expect(formatApiErrorForOperator(new TypeError("fetch failed"))).toBe(
+      "Không thể kết nối tới ParkSmart API. Vui lòng thử lại.",
+    );
   });
 });

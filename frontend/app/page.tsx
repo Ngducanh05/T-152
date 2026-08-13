@@ -4,6 +4,7 @@ import { FormEvent, useMemo, useState } from "react";
 
 import { ParkingMap } from "@/components/parking/ParkingMap";
 import { useParkingWorkflow } from "@/hooks/use-parking-workflow";
+import { formatApiErrorForOperator } from "@/lib/api";
 import { useParkSmartData } from "@/hooks/use-parksmart-data";
 import { MVP_DEMO_USER_ID, MVP_DEMO_VEHICLE_ID } from "@/lib/demo";
 
@@ -73,7 +74,7 @@ export default function Home() {
         </header>
 
         {workflow.notice && <div className="page-alert" role="alert">{workflow.notice}</div>}
-        {data.error && !data.loading && <div className="page-alert" role="alert">{data.error.message}</div>}
+        {data.error && !data.loading && <div className="page-alert" role="alert">{formatApiErrorForOperator(data.error, "Không thể tải dữ liệu bãi xe.")}</div>}
 
         <div className="content-grid">
           <section className="main-column">

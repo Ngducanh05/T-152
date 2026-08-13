@@ -1,201 +1,171 @@
-# 🤖 AI20K Agent Template
+# ParkSmart AI
 
-Template chính thức cho học viên **VinUni AI20K Build Phase** — cung cấp sẵn cấu trúc dự án, code mẫu, và hướng dẫn kỹ thuật chi tiết để xây dựng AI Agent đạt điểm cao (35+/50).
+ParkSmart AI là hệ thống demo quản lý và dẫn đường trong bãi xe tầng F1. FastAPI
+và PostgreSQL giữ trạng thái authoritative cho bản đồ, ô đỗ, reservation, phiên
+đỗ xe và vị trí người dùng. Giao diện Next.js hiển thị trạng thái đó; LangGraph
+Agent chỉ gọi các Core Service có cùng quy tắc nghiệp vụ với REST API.
 
-> 📖 **Technical Guidebook:** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
+Demo mặc định dùng `USER-001` và `VEHICLE-001`. Khi bật `DEMO_MODE` và
+`SIMULATOR_ENABLED`, operator có thể đưa demo về baseline: 40 ô, 39 AVAILABLE,
+0 RESERVED, 1 OCCUPIED; chỉ `F1-B03` bị chiếm bởi `SIM-CAR-02`.
 
-## 🎯 Template này dùng để làm gì?
+## Công nghệ và yêu cầu
 
-Khi tham gia AI20K Build Phase, mỗi đội cần xây dựng một AI Agent hoàn chỉnh — từ kiến trúc, code, test, đến deploy. Thay vì bắt đầu từ con số không, template này cung cấp:
+- Python 3.11 hoặc 3.12, `uv`
+- PostgreSQL 16; cấu hình Docker Compose dùng image `pgvector/pgvector:pg16`
+- Node.js/npm tương thích Next.js 16.3
+- Docker Desktop nếu dùng PostgreSQL trong Compose
+- Chromium của Playwright cho release E2E
 
-- **Cấu trúc thư mục chuẩn** — đã được thiết kế theo best practices (separation of concerns)
-- **Code mẫu** cho các phần cốt lõi: LangGraph agent, FastAPI API, config, schemas
-- **Docker + CI/CD sẵn** — Dockerfile multi-stage, GitHub Actions workflow
-- **Hướng dẫn kỹ thuật 10 chương** — từ clone template đến nộp bài Demo Day
-- **Checklist 10 deliverables** — đảm bảo không bỏ sót yêu cầu BTC
-- **AI Usage Logging tự động** — Pre-configured hooks cho Claude Code, Cursor, Codex, Gemini CLI, Antigravity, và GitHub Copilot
+Tất cả lệnh dưới đây dùng Windows PowerShell và chạy từ thư mục gốc repository,
+trừ khi có ghi chú mở terminal riêng.
 
-## ⚡ Quick Start
+## 1. Cấu hình môi trường
 
-### Bước 1: Fork hoặc Clone
-
-```bash
-# Clone template
-git clone https://github.com/AI20K-Build-Cohort-2/starter-code-template.git team-YOUR_TEAM_NAME
-cd team-YOUR_TEAM_NAME
-
-# Xóa git history cũ và khởi tạo lại
-rm -rf .git
-git init
-git add .
-git commit -m "feat: khởi tạo dự án từ template"
+```powershell
+Copy-Item .env.example .env
+Copy-Item frontend\.env.example frontend\.env.local
+notepad .env
+notepad frontend\.env.local
+uv sync --extra dev
+Set-Location frontend
+npm ci
+Set-Location ..
 ```
 
-### Bước 2: Setup môi trường
+Giữ backend URL trong `frontend/.env.local` ở dạng:
 
-```bash
-# Tạo virtual environment
-python3.11 -m venv .venv
-source .venv/bin/activate
-
-# Cài dependencies
-pip install -e ".[dev]"
-
-# Cấu hình API keys
-cp .env.example .env
-# Mở .env và thêm OPENAI_API_KEY của bạn
-# Đồng thời cập nhật AI_LOG_API_KEY bằng key riêng từ link mời của BTC
-# (giá trị trong .env.example chỉ là placeholder)
+```dotenv
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
 ```
 
-### Bước 3: Cài AI Logging Hooks
+Điền `LLM_API_KEY` trong `.env` nếu dùng Agent thật. Không commit `.env`,
+`frontend/.env.local`, API key hoặc database password.
 
-```bash
-# Linux / macOS / Git Bash
-bash scripts/setup_hooks.sh
+## 2. Khởi động PostgreSQL
 
-# Windows PowerShell
-# powershell -ExecutionPolicy Bypass -File scripts\setup_hooks.ps1
+```powershell
+docker compose up -d database
+docker compose ps database
 ```
 
-Hooks tự động log mọi AI prompt khi dùng Claude Code, Cursor, Codex, Gemini CLI, Antigravity, hoặc GitHub Copilot. Không cần thao tác thủ công.
+Compose mở PostgreSQL tại `localhost:5432` với database/user/password `parksmart`.
+`DATABASE_URL` mặc định trong `.env.example` đã khớp cấu hình này.
 
-### Bước 4: Chạy server
+## 3. Chạy migration
 
-```bash
-# Chạy FastAPI backend
-uvicorn src.main:app --reload --port 8000
-
-# Mở Swagger UI
-# http://localhost:8000/docs
+```powershell
+uv run alembic upgrade head
+uv run alembic current
 ```
 
-### Bước 5: Đọc hướng dẫn
+Migration head của Phase 7 là `20260813_0004`.
 
-📖 Mở **[Technical Guidebook](https://phoenix.note.transformerlabs.ai/technical-book)** và làm theo từng chương.
+## 4. Seed dữ liệu demo idempotent
 
-## 📁 Cấu trúc dự án
-
-```
-├── src/
-│   ├── agents/           # 🧠 LangGraph Agent
-│   │   ├── graph.py      #    State graph (nodes + edges)
-│   │   ├── state.py      #    State schema (TypedDict)
-│   │   ├── nodes/        #    Node functions
-│   │   └── tools/        #    Agent tools (@tool)
-│   ├── api/              # 🌐 FastAPI Backend
-│   │   └── routes.py     #    API endpoints
-│   ├── models/           # 📋 Pydantic schemas
-│   ├── services/         # 🔧 Business logic (LLM, etc.)
-│   ├── config.py         # ⚙️ Pydantic Settings
-│   └── main.py           # 🚀 App entry point
-├── tests/                # 🧪 pytest suite
-│   ├── test_agents/      #    Agent/graph tests
-│   └── test_api/         #    API endpoint tests
-├── scripts/              # 🔌 AI Logging Hooks
-│   ├── log_hook.py       #    Auto-log cho Claude/Cursor/Codex/Gemini/Copilot
-│   ├── log_antigravity.py#    Antigravity IDE prompt scanner
-│   ├── log_manual.py     #    Manual log cho ChatGPT / web tools
-│   ├── submit_log.py     #    Submit logs on git push
-│   └── setup_hooks.sh    #    One-time hook installer
-├── .claude/ .codex/ .cursor/ .gemini/  # Per-tool hook configs
-├── .agents/              # Antigravity rules + workflows
-├── .ai-log/              # 📊 AI usage logs (auto-generated)
-├── docs/
-│   ├── guide/            # 📖 Technical Guidebook (10 chapters)
-│   └── architecture_diagram.md
-├── eval/                 # 📊 Evaluation results
-├── presentation/         # 🎤 Demo Day slides
-├── .github/workflows/    # ⚡ CI/CD (GitHub Actions)
-├── .github/hooks/        # 🪝 Copilot hook config
-├── Dockerfile            # 🐳 Multi-stage build
-├── docker-compose.yml    # 🐙 Full stack orchestration
-└── README_boilerplate.md # 📝 README template cho đội của bạn
+```powershell
+uv run python scripts\seed_demo.py
+uv run python scripts\seed_demo.py
 ```
 
-## 📚 Technical Guidebook — 10 Chương
+Lần thứ hai phải báo `0 row(s) created`. Script gọi trực tiếp
+`src/core/seed.py` qua async SQLAlchemy session đã cấu hình. Nó chỉ thêm dữ liệu
+canonical còn thiếu, không reset trạng thái mutable của slot, reservation hoặc
+parking session.
 
-| Chương | Nội dung | Thời gian |
-|---------|----------|-----------|
-| 1 | Lời mở đầu — Mục tiêu, cách sử dụng | 15 phút |
-| 2 | Khởi tạo dự án — Clone, setup, git workflow | 4 giờ |
-| 3 | Thiết kế kiến trúc — 3-tier, diagrams, ADR | 6 giờ |
-| 4 | **LangGraph Agent** — State, nodes, edges, tools, RAG | 8 giờ |
-| 5 | FastAPI — Routes, validation, error handling, streaming | 6 giờ |
-| 6 | Giao diện — Next.js + Streamlit quickstart | 6 giờ |
-| 7 | DevOps — Docker, CI/CD, deploy, logging | 6 giờ |
-| 8 | Kiểm thử — Unit test, integration test, RAGAS | 4 giờ |
-| 9 | Demo Day — 10 deliverables, checklist, tips | 2 giờ |
-| 10 | Tài nguyên — Khóa học, docs, BMAD method | tham khảo |
+## 5. Khởi động FastAPI
 
-📖 **Đọc online:** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
+Mở PowerShell thứ nhất tại thư mục gốc:
 
-## 📋 10 Deliverables cho Demo Day
-
-| # | Deliverable | File vị trí | Template có sẵn |
-|---|-------------|-------------|:---:|
-| 1 | Source Code | `src/` | ✅ |
-| 2 | README.md | `README_boilerplate.md` → copy thành `README.md` | ✅ |
-| 3 | Architecture Diagram | `docs/architecture_diagram.md` | ✅ |
-| 4 | AI Logs | LangSmith (3 env vars) + Auto AI Usage Logging | ✅ |
-| 5 | Live URL | Deploy lên Render/Vercel | ⚡ CI/CD sẵn |
-| 6 | Video Demo | `presentation/` | 📝 |
-| 7 | Pitch Deck | `presentation/` | 📝 |
-| 8 | Development Journal | `JOURNAL.md` | ✅ |
-| 9 | Worklog | `WORKLOG.md` | ✅ |
-| 10 | Evaluation Evidence | `eval/` | 📝 |
-
-## 🛠 Tech Stack
-
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| AI Agent | LangGraph + LangChain | Latest |
-| Backend | FastAPI + Uvicorn | 0.100+ |
-| LLM | OpenAI GPT-4o-mini | API |
-| Frontend | Next.js / Streamlit | 14+ / 1.30+ |
-| Database | SQLite (dev) / PostgreSQL (prod) | — |
-| DevOps | Docker + GitHub Actions | — |
-| Testing | pytest + pytest-asyncio | 8+ |
-
-## 📊 AI Usage Logging
-
-Template đã tích hợp sẵn auto-logging hooks cho 6 AI tools:
-
-| Tool | Cơ chế | Config |
-|------|--------|--------|
-| Claude Code | `.claude/settings.json` hooks | Tự động |
-| Cursor | `.cursor/hooks.json` | Tự động |
-| OpenAI Codex CLI | `.codex/hooks.json` | Tự động |
-| Gemini CLI | `.gemini/settings.json` | Tự động |
-| GitHub Copilot | `.github/hooks/hooks.json` | Tự động |
-| Antigravity IDE | Pre-push scan transcript | Tự động trên `git push` |
-
-Tất cả prompts và tool calls được log vào `.ai-log/session.jsonl` và tự động submit lên grading server mỗi khi `git push`.
-
-**ChatGPT / web tools khác** — log thủ công:
-```bash
-bash scripts/_pyrun.sh scripts/log_manual.py --tool chatgpt --prompt "What you asked"
+```powershell
+uv run uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-> ⚠️ Chạy `bash scripts/setup_hooks.sh` một lần sau khi clone để cài pre-push hook.
+Kiểm tra `http://localhost:8000/health` và Swagger UI tại
+`http://localhost:8000/docs`.
 
-## 📖 Đọc Technical Guidebook
+## 6. Khởi động Next.js
 
-**Online (khuyến nghị):** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
+Mở PowerShell thứ hai:
 
-Đăng nhập bằng GitHub (cùng account đã được BTC mời vào org `AI20K-Build-Cohort-2`)
-→ chọn tab **Technical Book** ở sidebar trái → đọc 10 chương + topic sections,
-có table of contents bên phải, hỗ trợ light/dark/cyberpunk theme.
+```powershell
+Set-Location D:\learn\2026\VinAI\Project\P-152\frontend
+npm run dev
+```
 
-**Offline:** mọi chương đều ở thư mục `docs/guide/` trong template này — mở bằng
-bất kỳ markdown viewer/editor nào (VS Code, Obsidian, GitHub UI, …).
+Mở `http://localhost:3000`. Backend và PostgreSQL phải đang chạy.
 
-## 🔗 Liên kết
+## 7. Reset demo một bước
 
-- 📖 **Technical Guidebook:** [phoenix.note.transformerlabs.ai/technical-book](https://phoenix.note.transformerlabs.ai/technical-book)
-- 🏫 **AI20K Program:** VinUni AI20K Build Phase
-- 👨‍🏫 **Mentor:** Đặng Hải Lộc
+Khi backend đang chạy với `DEMO_MODE=true` và `SIMULATOR_ENABLED=true`:
 
-## 📄 License
+```powershell
+uv run python scripts\reset_demo.py
+```
 
-MIT — Sử dụng tự do cho mục đích giáo dục.
+Script chỉ gọi public API `POST /api/v1/simulator/reset`, sau đó kiểm chứng
+baseline qua public API. Nó không truy cập hay xóa dữ liệu database trực tiếp.
+
+## 8. Backend tests
+
+```powershell
+uv run ruff check src tests scripts
+uv run pytest tests\test_core tests\test_api tests\test_agents -q
+```
+
+## 9. Frontend lint, test và build
+
+```powershell
+Set-Location frontend
+npm run lint
+npm test
+npm run build
+Set-Location ..
+```
+
+Vitest kiểm tra client API, workflow và UI. `next build` là production build của
+Next.js 16.3.
+
+## 10. Playwright release flow
+
+Release E2E dùng Next.js production, FastAPI, PostgreSQL và Core API thật; không
+mock parking, recommendation, reservation, session, simulator hoặc routing.
+
+```powershell
+docker compose up -d database
+Set-Location frontend
+npx playwright install chromium
+npm run test:e2e
+Set-Location ..
+```
+
+Runner tạo lại database test riêng `parksmart_e2e`, build frontend, khởi động
+stack ở cổng 3100/8100 và chạy happy path ba vòng cùng error path cạnh tranh ô.
+Nó không thay đổi database `parksmart` dùng để demo thủ công.
+
+Live Agent E2E là tùy chọn. Lệnh sau đọc key từ `.env` mà không in key ra log:
+
+```powershell
+$keyLine = Get-Content .env | Where-Object { $_ -match '^\s*LLM_API_KEY\s*=' } | Select-Object -First 1
+$env:LLM_API_KEY = ($keyLine -split '=', 2)[1].Trim().Trim('"').Trim("'")
+$env:RUN_LIVE_AGENT_E2E = "1"
+Set-Location frontend
+npm run test:e2e:live-agent
+Set-Location ..
+```
+
+## Kiến trúc và an toàn vận hành
+
+- `src/core`: state transitions, recommendation, routing, seed và demo reset.
+- `src/api`: REST adapters và middleware tạo/propagate `X-Request-ID`.
+- `src/agents`: LangGraph orchestration và tool adapters gọi Core Service.
+- `frontend`: React 19/Next.js 16.3 UI đọc trạng thái authoritative.
+- `alembic`: lịch sử schema PostgreSQL.
+
+Lỗi frontend hiển thị lời giải thích tiếng Việt, `ApiError.code` và `request_id`
+để operator đối chiếu log. Backend log cùng `request_id` tại request boundary,
+Agent chat và Agent tool. Hệ thống không log secret, raw prompt, raw tool payload
+hoặc internal reasoning.
+
+Checklist phát hành Phase 7 nằm tại
+[`docs/PHASE_7_RELEASE_CHECKLIST.md`](docs/PHASE_7_RELEASE_CHECKLIST.md).

@@ -46,6 +46,20 @@ export class ApiError extends Error {
   }
 }
 
+export function formatApiErrorForOperator(
+  error: unknown,
+  userMessage = "Không thể hoàn tất yêu cầu.",
+): string {
+  if (!(error instanceof ApiError)) {
+    return "Không thể kết nối tới ParkSmart API. Vui lòng thử lại.";
+  }
+
+  const requestReference = error.requestId
+    ? ` Mã yêu cầu: ${error.requestId}.`
+    : "";
+  return `${userMessage} Mã lỗi: ${error.code}.${requestReference}`;
+}
+
 function isFailureEnvelope(value: unknown): value is ApiFailure {
   if (!value || typeof value !== "object") return false;
   const envelope = value as Partial<ApiFailure>;

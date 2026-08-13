@@ -1,84 +1,79 @@
 # ParkSmart AI frontend
 
-Ứng dụng Next.js 16.3 và React 19 hiển thị dữ liệu authoritative từ ParkSmart
+Giao diện React 19 và Next.js 16.3 hiển thị dữ liệu authoritative từ ParkSmart
 FastAPI. Bản đồ, trạng thái slot, recommendation, reservation, route, parking
-session và Agent chat đều dùng API backend; frontend không tự tính route hoặc tự
-chuyển trạng thái slot.
+session và Agent chat đều dùng backend; frontend không tự chuyển trạng thái ô
+hoặc tự tính đường đi.
 
-## Yêu cầu
+## Chạy giao diện trên Windows PowerShell
 
-- Node.js và npm tương thích với Next.js 16.3.
-- ParkSmart FastAPI đang chạy và cung cấp các endpoint dưới `/api/v1`.
+Chuẩn bị một lần từ thư mục gốc repository:
 
-Tạo `frontend/.env.local` từ `.env.example` và đặt URL API:
+```powershell
+Copy-Item frontend\.env.example frontend\.env.local
+Set-Location frontend
+npm ci
+Set-Location ..
+```
+
+`frontend/.env.local` cần chứa:
 
 ```dotenv
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
 ```
 
-## Khởi động
+Sau khi PostgreSQL, migration, seed và FastAPI đã sẵn sàng theo README gốc, mở
+một PowerShell riêng:
 
-Khởi động backend từ thư mục repository theo hướng dẫn chính của dự án. Sau đó:
-
-```bash
-cd frontend
-npm install
+```powershell
+Set-Location D:\learn\2026\VinAI\Project\P-152\frontend
 npm run dev
 ```
 
 Mở `http://localhost:3000`.
 
-## Kiểm tra
+## Quality gates
 
-```bash
+```powershell
+Set-Location frontend
 npm run lint
-npm run test
-npm run test:ci
+npm test
 npm run build
 ```
 
-`npm run test` và `npm run test:ci` đều chạy Vitest đúng một lần, không bật watch
-mode. `test:ci` dùng reporter mặc định rõ ràng cho môi trường CI.
+`npm test` chạy Vitest một lần, không bật watch mode.
 
-## Playwright E2E trên stack thật
+## Playwright trên stack thật
 
-Bộ E2E mặc định sử dụng production Next.js, FastAPI, PostgreSQL và các Core API
-thật. Test không mock parking, recommendation, reservation, session, simulator
-hoặc routing endpoint.
-
-Yêu cầu trước khi chạy:
-
-- Docker đang hoạt động và PostgreSQL ParkSmart khả dụng tại `localhost:5432`.
-- Python dependencies đã được cài bằng `uv sync`.
-- PostgreSQL user có quyền tạo/xóa database test. Mặc định runner tự tạo lại
-  database riêng `parksmart_e2e`; override bằng `E2E_DATABASE_URL` nếu cần.
-- Chromium của Playwright đã được cài.
-- Hai cổng E2E mặc định `3100` và `8100` đang trống.
-
-Từ thư mục repository:
+Yêu cầu Docker/PostgreSQL tại `localhost:5432`, Python dependencies từ `uv
+sync --extra dev`, Chromium Playwright và hai cổng trống `3100`, `8100`.
 
 ```powershell
 docker compose up -d database
-cd frontend
+Set-Location frontend
 npx playwright install chromium
 npm run test:e2e
 ```
 
-`npm run test:e2e` tạo mới database E2E và canonical seed, build frontend với
-đúng backend origin, khởi động FastAPI và `next start`, sau đó để Playwright
-health-check stack rồi chạy happy path ba lần liên tiếp và conflict path.
-Mỗi iteration bắt đầu bằng public `POST /api/v1/simulator/reset` qua nút
-**Đặt lại demo**. Có thể override địa chỉ bằng `E2E_FRONTEND_URL`,
-`E2E_BACKEND_URL` và `E2E_API_URL`.
+Runner dùng database riêng `parksmart_e2e`, production Next.js, FastAPI và Core
+API thật. Nó chạy happy path ba lần liên tiếp và error path `SLOT_NOT_AVAILABLE`.
+Không endpoint nghiệp vụ nào bị mock. Có thể override bằng
+`E2E_DATABASE_URL`, `E2E_FRONTEND_URL`, `E2E_BACKEND_URL` và `E2E_API_URL`.
 
-Live Agent test là opt-in và không chạy trong release flow mặc định:
+Live Agent test là opt-in:
 
 ```powershell
-$env:RUN_LIVE_AGENT_E2E="1"
-$env:LLM_API_KEY="your-key"
+Set-Location ..
+$keyLine = Get-Content .env | Where-Object { $_ -match '^\s*LLM_API_KEY\s*=' } | Select-Object -First 1
+$env:LLM_API_KEY = ($keyLine -split '=', 2)[1].Trim().Trim('"').Trim("'")
+$env:RUN_LIVE_AGENT_E2E = "1"
+Set-Location frontend
 npm run test:e2e:live-agent
 ```
 
-Live test gọi Agent endpoint thật và kiểm tra tool/state thay vì so khớp nguyên
-văn câu trả lời của LLM. Trace và video chỉ được giữ ở lần retry; screenshot chỉ
-được giữ khi thất bại. `test-results/` và `playwright-report/` đã được ignore.
+Live test gọi Agent endpoint thật và kiểm tra state transition thay vì khớp
+nguyên văn LLM. Trace/video chỉ được giữ khi retry; screenshot chỉ khi thất bại.
+`test-results/` và `playwright-report/` không được commit.
+
+Hướng dẫn đầy đủ cho environment, PostgreSQL, Alembic, seed, FastAPI, reset demo
+và backend tests nằm trong [`../README.md`](../README.md).

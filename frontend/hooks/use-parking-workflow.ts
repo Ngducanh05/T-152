@@ -3,7 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { ParkSmartData, ParkSmartSnapshot } from "@/hooks/use-parksmart-data";
-import { ApiError, parkSmartApi, type ParkSmartApiClient } from "@/lib/api";
+import {
+  ApiError,
+  formatApiErrorForOperator,
+  parkSmartApi,
+  type ParkSmartApiClient,
+} from "@/lib/api";
 import {
   getOrCreateDemoThreadId,
   MVP_DEMO_USER_ID,
@@ -81,9 +86,7 @@ export interface ParkingWorkflow {
 }
 
 function vietnameseError(error: unknown) {
-  return error instanceof ApiError
-    ? `${error.code}: ${error.message}`
-    : "Không thể kết nối tới ParkSmart API. Vui lòng thử lại.";
+  return formatApiErrorForOperator(error);
 }
 
 function isSlotConflict(error: unknown) {
@@ -139,7 +142,10 @@ export function useParkingWorkflow(
       setSelectedSlotId(null);
       setActiveRoute(null);
       setNotice(
-        "Ô vừa thay đổi hoặc không còn trống. Dữ liệu đã được tải lại; hãy chọn một ô AVAILABLE khác và thử lại.",
+        formatApiErrorForOperator(
+          error,
+          "Ô vừa thay đổi hoặc không còn trống. Dữ liệu đã được tải lại; hãy chọn một ô AVAILABLE khác và thử lại.",
+        ),
       );
       return;
     }
@@ -409,7 +415,10 @@ export function useParkingWorkflow(
         error.code === "AGENT_TOOL_UNAVAILABLE"
       ) {
         setNotice(
-          "Trợ lý ParkSmart đang tạm thời không khả dụng. Bạn có thể thử gửi lại yêu cầu này.",
+          formatApiErrorForOperator(
+            error,
+            "Trợ lý ParkSmart đang tạm thời không khả dụng. Bạn có thể thử gửi lại yêu cầu này.",
+          ),
         );
         setRetryMessage(trimmed);
       } else {
