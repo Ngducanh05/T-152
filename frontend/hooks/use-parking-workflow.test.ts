@@ -411,6 +411,7 @@ describe("useParkingWorkflow", () => {
       new ApiError({
         code: "INVALID_TRANSITION",
         message: "Demo reset is disabled.",
+        requestId: "request-reset-disabled",
         status: 400,
       }),
     );
@@ -431,6 +432,7 @@ describe("useParkingWorkflow", () => {
       "thread-before-failure",
     );
     expect(result.current.messages).toHaveLength(2);
-    expect(result.current.notice).toContain("Demo reset is disabled");
+    expect(result.current.notice).toContain("Mã lỗi: INVALID_TRANSITION");
+    expect(result.current.notice).toContain("Mã yêu cầu: request-reset-disabled");
   });
 });

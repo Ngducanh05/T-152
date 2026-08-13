@@ -124,7 +124,14 @@ def create_app(
 
         try:
             response = await call_next(request)
-        except Exception:
+        except Exception as error:  # noqa: BLE001 - HTTP boundary returns safe envelope
+            logger.error(
+                "request_failed request_id=%s method=%s path=%s exception_type=%s",
+                request_id,
+                request.method,
+                request.url.path,
+                type(error).__name__,
+            )
             response = _error_response(
                 request,
                 status_code=500,
