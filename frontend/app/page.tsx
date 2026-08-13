@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 
+import { LocationConfirmationOutcome } from "@/components/location/LocationConfirmationOutcome";
 import { LocationPicker } from "@/components/location/LocationPicker";
 import { ParkingMap } from "@/components/parking/ParkingMap";
 import { useParkingWorkflow } from "@/hooks/use-parking-workflow";
@@ -20,6 +21,9 @@ export default function Home() {
 
   const selectedSlot =
     data.slots.find((slot) => slot.id === workflow.selectedSlotId) ?? null;
+  const currentLocationNode =
+    data.map?.nodes.find((node) => node.id === workflow.currentLocationId) ?? null;
+  const currentLocationIsSlot = currentLocationNode?.type === "SLOT";
 
   function requestRecommendations() {
     void workflow.requestRecommendations({
@@ -67,7 +71,7 @@ export default function Home() {
           </div>
         </header>
 
-        {workflow.notice && <div className="page-alert" role="alert">{workflow.notice}</div>}
+        {workflow.notice && !showLocationConfirm && <div className="page-alert" role="alert">{workflow.notice}</div>}
         {data.error && !data.loading && <div className="page-alert" role="alert">{formatApiErrorForOperator(data.error, "Không thể tải dữ liệu bãi xe.")}</div>}
 
         <div className="content-grid">
@@ -76,8 +80,16 @@ export default function Home() {
               <div className="reservation-banner" role="status" aria-label="Active reservation">
                 <span className="session-icon">R</span>
                 <div><small>RESERVATION ĐANG HOẠT ĐỘNG</small><b>{data.activeReservation.slot_id}</b></div>
-                <button onClick={() => void workflow.confirmParking()} disabled={workflow.pending === "confirm-parking"}>Xác nhận đã đỗ</button>
+                {!currentLocationIsSlot && <button onClick={() => void workflow.confirmParking()} disabled={workflow.pending === "confirm-parking"}>Xác nhận đã đỗ</button>}
               </div>
+            )}
+            {currentLocationIsSlot && currentLocationNode && (
+              <LocationConfirmationOutcome
+                locationId={currentLocationNode.id}
+                activeReservation={data.activeReservation}
+                pending={workflow.pending === "confirm-parking"}
+                onConfirmParking={workflow.confirmParking}
+              />
             )}
             {data.activeSession && (
               <div className="session-banner" role="status" aria-label="Active parking session">
@@ -183,6 +195,7 @@ export default function Home() {
           map={data.map}
           currentLocationId={workflow.currentLocationId}
           pending={workflow.pending === "location"}
+          errorMessage={workflow.notice}
           onClose={() => setShowLocationConfirm(false)}
           onConfirm={workflow.confirmLocation}
         />

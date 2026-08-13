@@ -27,6 +27,7 @@ interface LocationPickerProps {
   map: ParkingMap | null;
   currentLocationId: FloorScopedId | null;
   pending: boolean;
+  errorMessage?: string | null;
   onClose: () => void;
   onConfirm: (nodeId: FloorScopedId) => Promise<boolean>;
 }
@@ -39,6 +40,7 @@ export function LocationPicker({
   map,
   currentLocationId,
   pending,
+  errorMessage,
   onClose,
   onConfirm,
 }: LocationPickerProps) {
@@ -243,6 +245,7 @@ export function LocationPicker({
             )}
           </div>
           {validationMessage && <p className="location-validation" role="alert">{validationMessage}</p>}
+          {errorMessage && <p className="location-api-error" role="alert">{errorMessage}</p>}
         </form>
 
         {submittingTarget && (

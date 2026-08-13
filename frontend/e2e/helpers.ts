@@ -45,7 +45,7 @@ export async function confirmLocation(page: Page, nodeId: string) {
   await page
     .getByRole("button", { name: /Vị trí đã xác nhận/ })
     .click();
-  const dialog = page.getByRole("dialog", { name: "Chọn vị trí canonical" });
+  const dialog = page.getByRole("dialog", { name: "Xác nhận vị trí hiện tại" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: nodeId, exact: true }).click();
   await expect(dialog).toBeHidden();

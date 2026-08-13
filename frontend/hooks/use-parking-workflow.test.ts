@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
 import { MVP_AGENT_THREAD_STORAGE_KEY } from "@/lib/demo";
-import type { ChatResponse } from "@/lib/types";
+import type { ChatResponse, SlotStatus } from "@/lib/types";
 import { activeReservation } from "@/test/fixtures";
 import type { ParkSmartSnapshot } from "./use-parksmart-data";
 
@@ -118,6 +118,47 @@ describe("useParkingWorkflow", () => {
     expect(slot.status).toBe("AVAILABLE");
     expect(data.activeReservation).toBeNull();
     expect(data.activeSession).toBeNull();
+  });
+
+  it.each<SlotStatus>(["AVAILABLE", "RESERVED", "OCCUPIED"])(
+    "does not change %s slot state locally when confirming location",
+    async (status) => {
+      const { api, data, slot } = fixture();
+      (slot as { status: SlotStatus }).status = status;
+      api.confirmLocation.mockResolvedValue({
+        user_id: "USER-001",
+        node_id: "F1-D01",
+      });
+      const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+      await act(async () => {
+        await result.current.confirmLocation("F1-D01");
+      });
+
+      expect(slot.status).toBe(status);
+      expect(api.confirmParking).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves backend location error code and request ID", async () => {
+    const { api, data } = fixture();
+    api.confirmLocation.mockRejectedValue(
+      new ApiError({
+        code: "LOCATION_NODE_NOT_FOUND",
+        message: "Location node was not found.",
+        requestId: "request-location-404",
+        status: 404,
+      }),
+    );
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      await result.current.confirmLocation("F1-UNKNOWN");
+    });
+
+    expect(result.current.notice).toContain("LOCATION_NODE_NOT_FOUND");
+    expect(result.current.notice).toContain("request-location-404");
+    expect(api.confirmParking).not.toHaveBeenCalled();
   });
 
   it("highlights recommendations without selecting or reserving a slot", async () => {
