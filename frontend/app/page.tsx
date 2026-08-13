@@ -78,14 +78,14 @@ export default function Home() {
         <div className="content-grid">
           <section className="main-column">
             {data.activeReservation && (
-              <div className="reservation-banner">
+              <div className="reservation-banner" role="status" aria-label="Active reservation">
                 <span className="session-icon">R</span>
                 <div><small>RESERVATION ĐANG HOẠT ĐỘNG</small><b>{data.activeReservation.slot_id}</b></div>
                 <button onClick={() => void workflow.confirmParking()} disabled={workflow.pending === "confirm-parking"}>Xác nhận đã đỗ</button>
               </div>
             )}
             {data.activeSession && (
-              <div className="session-banner">
+              <div className="session-banner" role="status" aria-label="Active parking session">
                 <span className="session-icon">P</span>
                 <div><small>PHIÊN ĐỖ XE ĐANG HOẠT ĐỘNG</small><b>Xe của bạn ở {data.activeSession.slot_id}</b></div>
                 <button onClick={() => void workflow.findVehicleAndRoute()} disabled={workflow.pending === "find-car"}>Chỉ đường tới xe</button>
