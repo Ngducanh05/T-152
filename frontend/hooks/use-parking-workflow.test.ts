@@ -402,4 +402,35 @@ describe("useParkingWorkflow", () => {
     expect(result.current.messages).toEqual([]);
     expect(refresh).toHaveBeenCalledOnce();
   });
+
+  it("keeps the current thread and chat when the backend reset fails", async () => {
+    sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-before-failure");
+    const { api, data } = fixture();
+    api.chat.mockResolvedValue(chatResponse({ message: "Tin nhắn còn lại." }));
+    api.resetDemo.mockRejectedValue(
+      new ApiError({
+        code: "INVALID_TRANSITION",
+        message: "Demo reset is disabled.",
+        status: 400,
+      }),
+    );
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    await waitFor(() =>
+      expect(result.current.threadId).toBe("thread-before-failure"),
+    );
+    await act(async () => {
+      await result.current.sendAgentMessage("Giữ lại hội thoại này");
+    });
+
+    await act(async () => {
+      await result.current.resetDemo();
+    });
+
+    expect(result.current.threadId).toBe("thread-before-failure");
+    expect(sessionStorage.getItem(MVP_AGENT_THREAD_STORAGE_KEY)).toBe(
+      "thread-before-failure",
+    );
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.notice).toContain("Demo reset is disabled");
+  });
 });

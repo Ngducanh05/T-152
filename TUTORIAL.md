@@ -196,3 +196,9 @@ bash
   docker compose down
 ```
   Và nhấn Ctrl + C trong terminal đang chạy frontend.
+
+
+
+
+
+  uv run python scripts/reset_demo.py

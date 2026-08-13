@@ -347,6 +347,7 @@ export function useParkingWorkflow(
     setNotice(null);
     try {
       await api.resetDemo();
+      await data.refresh();
       clearRecommendations();
       setSelectedSlotId(null);
       setActiveRoute(null);
@@ -355,7 +356,6 @@ export function useParkingWorkflow(
       setLastToolNames([]);
       setRetryMessage(null);
       setThreadId(rotateDemoThreadId());
-      await data.refresh();
     } catch (error) {
       await handleMutationFailure(error);
     } finally {
