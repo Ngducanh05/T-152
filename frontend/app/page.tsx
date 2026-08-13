@@ -132,8 +132,21 @@ export default function Home() {
                     </button>
                   ))}
                 </div>
+                {selectedSlot && (
+                  <div className={`selected-slot-detail status-${selectedSlot.status.toLowerCase()}`} aria-live="polite">
+                    <div>
+                      <small>Ô đang chọn</small>
+                      <b>{selectedSlot.id}</b>
+                    </div>
+                    <div>
+                      <small>Trạng thái hiện tại</small>
+                      <strong>{selectedSlot.status === "AVAILABLE" ? "Đang trống" : selectedSlot.status === "RESERVED" ? "Đã được giữ" : "Đã có xe"}</strong>
+                    </div>
+                    <span>Khu {selectedSlot.zone_id}{selectedSlot.has_charger ? " · Có sạc EV" : ""}{selectedSlot.is_accessible ? " · Tiếp cận" : ""}</span>
+                  </div>
+                )}
                 <div className="workflow-actions">
-                  <button className="secondary-button" onClick={() => void workflow.reserveSelected()} disabled={!workflow.selectedSlotId || workflow.pending === "reserve"}>Giữ ô đã chọn</button>
+                  <button className="secondary-button" onClick={() => void workflow.reserveSelected()} disabled={!selectedSlot || selectedSlot.status !== "AVAILABLE" || workflow.pending === "reserve" || Boolean(data.activeReservation)}>Chọn làm điểm đỗ</button>
                   <button className="primary-button" onClick={() => void workflow.requestRouteToSelected()} disabled={!workflow.selectedSlotId || workflow.pending === "route"}>Chỉ đường</button>
                 </div>
               </section>

@@ -63,6 +63,7 @@ The following items are confirmed against the canonical Section 5:
 - [x] F1-ELEVATOR connects directly only to F1-C-E and F1-D-W.
 - [x] There is no direct edge between F1-CP2 and F1-ELEVATOR.
 - [x] Every slot references an existing node.
+- [x] Slots 01–03/06–08 attach west and 04–05/09–10 attach east, matching the nearest aisle entrance in each row.
 - [x] Every node has a path to F1-CP2.
 
 ## Map change proposal process

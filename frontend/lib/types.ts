@@ -177,6 +177,7 @@ export interface ChatRequest {
   thread_id: string;
   user_id: EntityId;
   vehicle_id?: EntityId | null;
+  current_location?: FloorScopedId | null;
   message: string;
 }
 

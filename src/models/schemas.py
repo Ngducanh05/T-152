@@ -206,6 +206,7 @@ class ChatRequest(BaseModel):
     thread_id: str = Field(min_length=1, max_length=128)
     user_id: EntityId
     vehicle_id: EntityId | None = None
+    current_location: FloorScopedId | None = None
     message: str = Field(min_length=1, max_length=5000, description="Tin nhắn từ user")
 
     @field_validator("thread_id", "message")

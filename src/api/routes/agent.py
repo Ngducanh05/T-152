@@ -18,6 +18,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from src.agents.context import AgentRuntimeContext
 from src.agents.tools import PARKING_TOOLS
 from src.core.database import get_session_factory
+from src.core.route_guidance import vietnamese_route_guidance
 from src.models.common import ErrorResponse, SuccessResponse
 from src.models.schemas import ChatRequest, ChatResponse, ErrorCode
 
@@ -214,6 +215,32 @@ def _successful_tool_names(messages: list[Any]) -> set[str]:
     return names
 
 
+def _successful_route_guidance(messages: list[Any]) -> str | None:
+    for message in reversed(messages):
+        if not isinstance(message, ToolMessage) or message.name != "get_route":
+            continue
+        content = message.content
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(content, dict) or content.get("ok") is not True:
+            continue
+        data = content.get("data")
+        if not isinstance(data, dict):
+            continue
+        path = data.get("path")
+        distance_m = data.get("distance_m")
+        if (
+            isinstance(path, list)
+            and all(isinstance(node_id, str) for node_id in path)
+            and isinstance(distance_m, int | float)
+        ):
+            return vietnamese_route_guidance(path, float(distance_m))
+    return None
+
+
 @router.post(
     "/chat",
     response_model=SuccessResponse[ChatResponse],
@@ -230,6 +257,7 @@ async def chat(
         vehicle_id=payload.vehicle_id,
         request_id=request_id,
         session_factory=get_session_factory(),
+        current_location=payload.current_location,
     )
     logger.info(
         "agent_chat_started request_id=%s user_id=%s thread_id=%s",
@@ -290,9 +318,10 @@ async def chat(
 
     current_messages = _messages_after_current_input(result, message_id)
     successful_tools = _successful_tool_names(current_messages)
+    route_guidance = _successful_route_guidance(current_messages)
     response = ChatResponse(
         thread_id=payload.thread_id,
-        message=_public_message(current_messages),
+        message=route_guidance or _public_message(current_messages),
         intent=result.get("intent") or None,
         selected_slot=result.get("selected_slot") or None,
         tool_names=_safe_tool_names(current_messages),

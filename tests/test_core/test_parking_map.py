@@ -36,7 +36,8 @@ def test_slot_ids_ev_allocation_and_aisle_attachments_are_exact():
     }
     for zone in "ABCD":
         for number in range(1, 11):
-            expected_side = "W" if number <= 5 else "E"
+            position_in_row = (number - 1) % 5 + 1
+            expected_side = "W" if position_in_row <= 3 else "E"
             assert slots[f"F1-{zone}{number:02d}"].node_id == f"F1-{zone}-{expected_side}"
 
 

@@ -19,8 +19,11 @@ def prepare_context(
             "missing_fields": ["runtime_context"],
         }
 
+    resolved_fields = {"vehicle_id"}
+    if context.current_location:
+        resolved_fields.add("current_location")
     missing_fields = [
-        field for field in state.get("missing_fields", []) if field != "vehicle_id"
+        field for field in state.get("missing_fields", []) if field not in resolved_fields
     ]
     if context.vehicle_id is None:
         missing_fields.append("vehicle_id")
@@ -28,6 +31,7 @@ def prepare_context(
     return {
         "user_id": context.user_id,
         "vehicle_id": context.vehicle_id or "",
+        "current_location": context.current_location or state.get("current_location", ""),
         "missing_fields": list(dict.fromkeys(missing_fields)),
         # Structured tool output is scoped to this invocation. Conversation
         # context such as the confirmed location remains durable.

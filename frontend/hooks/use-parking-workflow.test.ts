@@ -7,7 +7,7 @@ import type { ChatResponse } from "@/lib/types";
 import { activeReservation } from "@/test/fixtures";
 import type { ParkSmartSnapshot } from "./use-parksmart-data";
 
-import { useParkingWorkflow } from "./use-parking-workflow";
+import { useParkingWorkflow, type WorkflowData } from "./use-parking-workflow";
 
 afterEach(() => {
   cleanup();
@@ -61,7 +61,7 @@ function fixture() {
     activeSession: null,
   };
   const refresh = vi.fn(async () => snapshot);
-  const data = {
+  const data: WorkflowData = {
     slots: snapshot.slots,
     currentLocation: snapshot.currentLocation,
     activeReservation: null,
@@ -154,7 +154,60 @@ describe("useParkingWorkflow", () => {
     expect(refresh).toHaveBeenCalledOnce();
     expect(slot.status).toBe("AVAILABLE");
     expect(result.current.selectedSlotId).toBeNull();
-    expect(result.current.notice).toContain("hãy chọn một đề xuất còn AVAILABLE");
+    expect(result.current.notice).toContain("hãy chọn một ô AVAILABLE khác");
+  });
+
+  it("allows selecting and reserving an available map slot outside recommendations", async () => {
+    const { api, data, refresh } = fixture();
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    act(() => result.current.selectCandidate("F1-D01"));
+    await act(async () => {
+      await result.current.reserveSelected();
+    });
+
+    expect(result.current.selectedSlotId).toBe("F1-D01");
+    expect(result.current.recommendedSlotIds).toEqual([]);
+    expect(api.createReservation).toHaveBeenCalledWith({
+      user_id: "USER-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: "F1-D01",
+      expected_version: 7,
+    });
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("clears recommendation highlights after selecting and confirming a parking slot", async () => {
+    const { api, data } = fixture();
+    data.activeReservation = { ...activeReservation, slot_id: "F1-D01" };
+    api.confirmParking.mockResolvedValue({
+      id: "SESSION-001",
+      user_id: "USER-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: "F1-D01",
+      status: "ACTIVE",
+      parked_at: "2026-08-13T04:00:00Z",
+      completed_at: null,
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      await result.current.requestRecommendations({
+        chargingRequired: true,
+        accessibleRequired: false,
+        nearElevator: true,
+      });
+    });
+    expect(result.current.recommendedSlotIds).toEqual(["F1-D01"]);
+
+    act(() => result.current.selectCandidate("F1-D01"));
+    expect(result.current.recommendedSlotIds).toEqual([]);
+
+    await act(async () => {
+      await result.current.confirmParking();
+    });
+    expect(result.current.recommendedSlotIds).toEqual([]);
+    expect(result.current.candidates).toEqual([]);
   });
 
   it("waits for reservation success before refreshing authoritative UI state", async () => {
@@ -240,12 +293,14 @@ describe("useParkingWorkflow", () => {
       thread_id: "thread-this-tab",
       user_id: "USER-001",
       vehicle_id: "VEHICLE-001",
+      current_location: "F1-ENTRANCE",
       message: "Tìm chỗ đỗ",
     });
     expect(api.chat).toHaveBeenNthCalledWith(2, {
       thread_id: "thread-this-tab",
       user_id: "USER-001",
       vehicle_id: "VEHICLE-001",
+      current_location: "F1-ENTRANCE",
       message: "Chỉ đường tới đó",
     });
   });

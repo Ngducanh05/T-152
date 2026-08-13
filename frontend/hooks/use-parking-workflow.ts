@@ -139,15 +139,21 @@ export function useParkingWorkflow(
       setSelectedSlotId(null);
       setActiveRoute(null);
       setNotice(
-        "Ô vừa thay đổi hoặc không còn trống. Dữ liệu đã được tải lại; hãy chọn một đề xuất còn AVAILABLE và thử lại.",
+        "Ô vừa thay đổi hoặc không còn trống. Dữ liệu đã được tải lại; hãy chọn một ô AVAILABLE khác và thử lại.",
       );
       return;
     }
     setNotice(vietnameseError(error));
   }
 
+  function clearRecommendations() {
+    setCandidates([]);
+    setRecommendedSlotIds([]);
+  }
+
   function selectCandidate(slotId: FloorScopedId) {
-    if (!recommendedSlotIds.includes(slotId)) return;
+    if (!data.slots.some((slot) => slot.id === slotId)) return;
+    clearRecommendations();
     setSelectedSlotId(slotId);
     setActiveRoute(null);
     setNotice(null);
@@ -208,12 +214,17 @@ export function useParkingWorkflow(
 
   async function reserveSelected() {
     const slot = data.slots.find((candidate) => candidate.id === selectedSlotId);
-    if (!slot || !recommendedSlotIds.includes(slot.id)) {
-      setNotice("Hãy chọn rõ một ô trong danh sách đề xuất trước khi giữ chỗ.");
+    if (!slot) {
+      setNotice("Hãy chọn một ô trên bản đồ trước khi giữ chỗ.");
+      return;
+    }
+    if (slot.status !== "AVAILABLE") {
+      setNotice(`Ô ${slot.id} hiện không trống. Hãy chọn một ô AVAILABLE khác.`);
       return;
     }
     setPending("reserve");
     setNotice(null);
+    clearRecommendations();
     try {
       await api.createReservation({
         user_id: MVP_DEMO_USER_ID,
@@ -237,6 +248,7 @@ export function useParkingWorkflow(
     }
     setPending("route");
     setNotice(null);
+    clearRecommendations();
     try {
       const route = await api.getRoute({
         start_node_id: startNodeId,
@@ -259,6 +271,7 @@ export function useParkingWorkflow(
     }
     setPending("confirm-parking");
     setNotice(null);
+    clearRecommendations();
     try {
       await api.confirmParking({
         user_id: MVP_DEMO_USER_ID,
@@ -283,6 +296,7 @@ export function useParkingWorkflow(
     }
     setPending("find-car");
     setNotice(null);
+    clearRecommendations();
     try {
       const session = await api.getActiveSession(MVP_DEMO_USER_ID);
       if (!session) {
@@ -312,6 +326,7 @@ export function useParkingWorkflow(
     }
     setPending("complete-session");
     setNotice(null);
+    clearRecommendations();
     try {
       await api.completeSession(session.session_id, {
         user_id: MVP_DEMO_USER_ID,
@@ -332,8 +347,7 @@ export function useParkingWorkflow(
     setNotice(null);
     try {
       await api.resetDemo();
-      setCandidates([]);
-      setRecommendedSlotIds([]);
+      clearRecommendations();
       setSelectedSlotId(null);
       setActiveRoute(null);
       setMessages([]);
@@ -364,6 +378,7 @@ export function useParkingWorkflow(
         thread_id: threadId,
         user_id: MVP_DEMO_USER_ID,
         vehicle_id: MVP_DEMO_VEHICLE_ID,
+        current_location: data.currentLocation?.node_id ?? null,
         message: trimmed,
       });
       if (
@@ -378,7 +393,11 @@ export function useParkingWorkflow(
         { role: "agent", text: response.message },
       ]);
       setCandidates([]);
-      setRecommendedSlotIds(response.recommended_slot_ids);
+      if (response.tool_names.includes("recommend_parking_slot")) {
+        setRecommendedSlotIds(response.recommended_slot_ids);
+      } else {
+        clearRecommendations();
+      }
       setSelectedSlotId(response.selected_slot);
       setActiveRoute(response.route);
       setAgentCurrentLocationId(response.current_location);

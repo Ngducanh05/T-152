@@ -18,3 +18,4 @@ class AgentRuntimeContext:
     vehicle_id: str | None
     request_id: str
     session_factory: async_sessionmaker[AsyncSession]
+    current_location: str | None = None

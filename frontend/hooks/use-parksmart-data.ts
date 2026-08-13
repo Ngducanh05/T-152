@@ -123,7 +123,24 @@ export function useParkSmartData(
   useEffect(() => {
     mountedRef.current = true;
     lifecycleControllerRef.current = new AbortController();
-    void refresh().catch(() => undefined);
+
+    async function loadInitialState() {
+      const existingRefresh = refreshPromiseRef.current;
+      if (existingRefresh) {
+        try {
+          await existingRefresh;
+        } catch {
+          // React Strict Mode intentionally mounts, cleans up, and mounts again
+          // in development. The first lifecycle's aborted request must settle
+          // before the active lifecycle can start its own authoritative load.
+        }
+      }
+      if (mountedRef.current && !refreshPromiseRef.current) {
+        await refresh();
+      }
+    }
+
+    void loadInitialState().catch(() => undefined);
 
     async function pollParking() {
       if (refreshPromiseRef.current || pollControllerRef.current) return;

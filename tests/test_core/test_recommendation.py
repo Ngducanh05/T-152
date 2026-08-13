@@ -154,8 +154,11 @@ async def test_tie_breaks_by_distance_then_slot_id(recommendation_session: Async
         candidates,
         key=lambda item: (-item.score, item.distance_m, item.slot_id),
     )
-    equal_group = [item.slot_id for item in candidates if item.slot_id.startswith("F1-A0")]
-    assert equal_group == sorted(equal_group)
+    tie_groups: dict[tuple[float, float], list[str]] = {}
+    for item in candidates:
+        tie_groups.setdefault((item.score, item.distance_m), []).append(item.slot_id)
+    assert any(len(slot_ids) > 1 for slot_ids in tie_groups.values())
+    assert all(slot_ids == sorted(slot_ids) for slot_ids in tie_groups.values())
 
 
 @pytest.mark.asyncio

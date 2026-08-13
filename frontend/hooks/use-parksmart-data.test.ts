@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -60,6 +61,40 @@ it("shows initial loading until the canonical map and status arrive", async () =
   expect(result.current.status).toEqual(parkingStatus);
   expect(result.current.activeReservation).toEqual(activeReservation);
   expect(result.current.activeSession).toEqual(activeSession);
+});
+
+it("finishes initial loading when React Strict Mode remounts the effect", async () => {
+  const fetcher = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/parking/map")) return successResponse(canonicalMap);
+    if (url.endsWith("/parking/status")) return successResponse(parkingStatus);
+    if (url.includes("/parking/slots")) return successResponse(canonicalMap.slots);
+    if (url.includes("/locations/current")) return successResponse(currentLocation);
+    if (url.includes("/reservations/active")) {
+      return errorResponse("NOT_FOUND", "Not found.", 404);
+    }
+    if (url.includes("/sessions/active")) {
+      return errorResponse("NOT_FOUND", "Not found.", 404);
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const api = new ParkSmartApiClient({
+    baseUrl: "http://api.test/api/v1",
+    fetcher,
+  });
+  const { result } = renderHook(() => useParkSmartData(api), {
+    wrapper: StrictMode,
+  });
+
+  await act(async () => {
+    for (let index = 0; index < 10; index += 1) {
+      await Promise.resolve();
+    }
+  });
+
+  expect(result.current.loading).toBe(false);
+  expect(result.current.map?.slots).toHaveLength(40);
+  expect(result.current.error).toBeNull();
 });
 
 it("prevents overlapping polls and aborts requests and timers on unmount", async () => {

@@ -43,12 +43,15 @@ def test_parking_migration_follows_profiles_revision():
     parking_revision = scripts.get_revision("20260811_0002")
 
     location_cleanup_revision = scripts.get_revision("20260812_0003")
+    nearest_aisle_revision = scripts.get_revision("20260813_0004")
 
-    assert scripts.get_current_head() == "20260812_0003"
+    assert scripts.get_current_head() == "20260813_0004"
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
     assert location_cleanup_revision is not None
     assert location_cleanup_revision.down_revision == "20260811_0002"
+    assert nearest_aisle_revision is not None
+    assert nearest_aisle_revision.down_revision == "20260812_0003"
 
 
 def test_cold_start_sql_creates_profile_enum_once():

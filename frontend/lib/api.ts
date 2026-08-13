@@ -125,7 +125,8 @@ export class ParkSmartApiClient {
   ): Promise<T> {
     const headers = new Headers(options.headers);
     if (options.body !== undefined) headers.set("Content-Type", "application/json");
-    const response = await this.fetcher(`${this.baseUrl}${path}`, {
+    const fetcher = this.fetcher;
+    const response = await fetcher(`${this.baseUrl}${path}`, {
       ...options,
       headers,
     });

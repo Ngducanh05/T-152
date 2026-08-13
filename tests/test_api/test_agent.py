@@ -466,6 +466,11 @@ async def test_successful_current_turn_route_is_exposed_as_safe_structure():
         "distance_m": 10.0,
         "polyline": [[85.0, 50.0], [58.0, 70.0]],
     }
+    guidance = response.json()["data"]["message"]
+    assert "rẽ phải" in guidance
+    assert "rẽ trái vào ô D01" in guidance
+    assert "CP3" not in guidance
+    assert "D-W" not in guidance
     assert "tool_result" not in response.json()["data"]
     assert "must-not-be-public" not in response.text
 

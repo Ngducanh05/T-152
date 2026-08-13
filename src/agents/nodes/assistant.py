@@ -21,9 +21,15 @@ def _safe_error_message(message: str) -> AIMessage:
 
 
 def _context_prompt(state: AgentState) -> str:
+    location = state.get("current_location")
+    location_context = (
+        f" Vị trí hiện tại đã được hệ thống xác nhận là {location}; dùng vị trí này và không hỏi lại."
+        if location
+        else " Vị trí hiện tại chưa được xác nhận."
+    )
     if "vehicle_id" in state.get("missing_fields", []):
-        return "Ngữ cảnh tin cậy: người dùng chưa chọn xe cho request này."
-    return "Ngữ cảnh tin cậy: request này đã có vehicle identity từ runtime context."
+        return "Ngữ cảnh tin cậy: người dùng chưa chọn xe cho request này." + location_context
+    return "Ngữ cảnh tin cậy: request này đã có vehicle identity từ runtime context." + location_context
 
 
 def build_assistant_node(model_provider: ModelProvider, *, max_steps: int):

@@ -1,6 +1,7 @@
 import type { CSSProperties, KeyboardEvent } from "react";
 
 import type { MapNode, ParkingSlot as ParkingSlotData } from "@/lib/types";
+import { getDisplayPoint } from "@/lib/map-geometry";
 
 const STATUS_SIGNALS = {
   AVAILABLE: { icon: "✓", label: "Available" },
@@ -52,9 +53,10 @@ export function ParkingSlot({
   ]
     .filter(Boolean)
     .join(" ");
+  const [displayX, displayY] = getDisplayPoint(displayNode);
   const style = {
-    left: `${displayNode.x}%`,
-    top: `${displayNode.y}%`,
+    left: `${displayX}%`,
+    top: `${displayY}%`,
   } as CSSProperties;
 
   function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
@@ -76,8 +78,8 @@ export function ParkingSlot({
       data-slot-id={slot.id}
       data-status={slot.status}
       data-zone={slot.zone_id}
-      data-x={displayNode.x}
-      data-y={displayNode.y}
+      data-x={displayX}
+      data-y={displayY}
     >
       <span className="map-slot-signal" aria-hidden="true">
         {signal.icon}

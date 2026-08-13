@@ -149,5 +149,50 @@ deactivate
 cd frontend
 npm.cmd run dev
 ```
+1. Khởi động database và backend bằng Docker:
+bash
+```
+  cd D:\learn\2026\VinAI\Project\P-152
+  docker compose up -d --build
+```
+  2. Chạy migration database:
+bash
+```
+  docker compose exec backend alembic upgrade head
+```
+  3. Seed dữ liệu bản đồ:
+bash
+```
+  docker compose exec backend python -c "import asyncio; from src.core.database import get_session_factory; from src.core.seed import
+  seed_if_missing; print(asyncio.run(seed_if_missing(get_session_factory()())))"
+```
+  4. Kiểm tra backend:
+bash
+```
+  Invoke-RestMethod http://localhost:8000/health
+```
+  5. Khởi động frontend:
+bash
+```
+  cd frontend
+  npm install
+  npm run dev
+```
+  6. Mở giao diện:
 
-uv run uvicorn src.main:app --host 0.0.0.0 --port 8000
+  http://localhost:3000 (http://localhost:3000)
+
+  Không cần chạy thêm uvicorn, vì docker compose up đã khởi động backend trên cổng 8000.
+
+  Những lần chạy sau, thông thường chỉ cần:
+  bash
+```
+  docker compose up -d
+  npm --prefix frontend run dev
+```
+  Khi muốn dừng hệ thống:
+bash
+```
+  docker compose down
+```
+  Và nhấn Ctrl + C trong terminal đang chạy frontend.
