@@ -131,7 +131,7 @@ async def recommend_parking_slot(
         ).recommend(request)
         return tool_success(result.model_dump(mode="json"))
 
-    return await execute_tool(runtime, "recommend_parking_slot", operation)
+    return await execute_tool(runtime, "recommend_parking_slot", operation, write=True)
 
 
 @tool

@@ -185,7 +185,7 @@ async def test_get_parking_status_calls_parking_state_service():
 
 @pytest.mark.asyncio
 async def test_recommendation_uses_confirmed_location_and_never_reserves():
-    runtime, _ = _runtime(state={"current_location": "F1-FAKE"})
+    runtime, session_factory = _runtime(state={"current_location": "F1-FAKE"})
     recommendations = RecommendationResult(
         recommendations=[
             RecommendationCandidate(
@@ -224,7 +224,31 @@ async def test_recommendation_uses_confirmed_location_and_never_reserves():
     assert request.start_node_id == "F1-CP3"
     reservation_service.assert_not_called()
     assert result["data"]["recommendations"][0]["slot_id"] == "F1-D01"
+    assert session_factory.sessions[0].commits == 1
     json.dumps(result)
+
+
+@pytest.mark.asyncio
+async def test_unexpected_recommendation_failure_has_no_fake_slot():
+    runtime, session_factory = _runtime()
+    with (
+        patch(
+            "src.agents.tools.parking.LocationService.get_current_location",
+            AsyncMock(return_value="F1-ENTRANCE"),
+        ),
+        patch.object(
+            RecommendationService,
+            "recommend",
+            AsyncMock(side_effect=RuntimeError("database failure")),
+        ),
+    ):
+        result = await _invoke(recommend_parking_slot, runtime)
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "AGENT_TOOL_UNAVAILABLE"
+    assert "data" not in result
+    assert session_factory.sessions[0].commits == 0
+    assert session_factory.sessions[0].rollbacks == 1
 
 
 @pytest.mark.asyncio

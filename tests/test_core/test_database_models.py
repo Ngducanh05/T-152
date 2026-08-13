@@ -57,6 +57,7 @@ def test_parking_migration_follows_profiles_revision():
 def test_cold_start_sql_creates_profile_enum_once():
     output = StringIO()
     config = Config("alembic.ini", output_buffer=output)
+    config.attributes["configure_logger"] = False
 
     command.upgrade(config, "head", sql=True)
 

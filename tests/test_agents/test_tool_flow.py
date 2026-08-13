@@ -22,6 +22,7 @@ from src.agents.tools import PARKING_TOOLS
 from src.core.config import get_settings
 from src.core.db_models import (
     Base,
+    ParkingEvent,
     ParkingReservation,
     ParkingSession,
     ParkingSlot,
@@ -29,7 +30,12 @@ from src.core.db_models import (
     Vehicle,
 )
 from src.core.seed import seed_if_missing
-from src.models.schemas import ParkingSessionStatus, ReservationStatus, SlotStatus
+from src.models.schemas import (
+    ParkingEventType,
+    ParkingSessionStatus,
+    ReservationStatus,
+    SlotStatus,
+)
 
 
 class FlowScriptedModel(FakeMessagesListChatModel):
@@ -358,6 +364,68 @@ async def test_expired_reservation_is_released_without_fake_session(agent_flow: 
     assert reservation is not None and reservation.status is ReservationStatus.EXPIRED
     assert slot is not None and slot.status is SlotStatus.AVAILABLE
     assert session_count == 0
+
+
+@pytest.mark.asyncio
+async def test_agent_recommendation_releases_and_reuses_expired_slot(
+    agent_flow: AgentFlow,
+):
+    thread_id = "USER-001:FLOW-RECOMMEND-EXPIRED"
+    recommended = await agent_flow.turn(
+        "Tìm một ô có sạc.",
+        [
+            agent_flow.tool_call(
+                "recommend_parking_slot",
+                {"charging_required": True, "limit": 1},
+            ),
+            AIMessage(content="Đây là ô có sạc gần nhất."),
+        ],
+        thread_id=thread_id,
+    )
+    slot_id = recommended["tool_result"]["data"]["recommendations"][0]["slot_id"]
+    reserved = await agent_flow.turn(
+        "Tôi chọn ô này.",
+        [
+            agent_flow.tool_call(
+                "reserve_parking_slot",
+                {"slot_id": slot_id, "expected_version": 0},
+            ),
+            AIMessage(content="Đã giữ ô."),
+        ],
+        thread_id=thread_id,
+    )
+    reservation_id = reserved["active_reservation_id"]
+    async with agent_flow.session_factory() as session, session.begin():
+        reservation = await session.get(ParkingReservation, reservation_id)
+        assert reservation is not None
+        expired_at = datetime.now(UTC) - timedelta(seconds=1)
+        reservation.created_at = expired_at - timedelta(minutes=5)
+        reservation.expires_at = expired_at
+
+    refreshed = await agent_flow.turn(
+        "Hãy tìm lại một ô có sạc.",
+        [
+            agent_flow.tool_call(
+                "recommend_parking_slot",
+                {"charging_required": True, "limit": 1},
+            ),
+            AIMessage(content="Ô này đang trống trở lại."),
+        ],
+        thread_id=thread_id,
+    )
+
+    assert refreshed["tool_result"]["data"]["recommendations"][0]["slot_id"] == slot_id
+    async with agent_flow.session_factory() as session:
+        reservation = await session.get(ParkingReservation, reservation_id)
+        slot = await session.get(ParkingSlot, slot_id)
+        expired_events = await session.scalar(
+            select(func.count())
+            .select_from(ParkingEvent)
+            .where(ParkingEvent.event_type == ParkingEventType.RESERVATION_EXPIRED)
+        )
+    assert reservation is not None and reservation.status is ReservationStatus.EXPIRED
+    assert slot is not None and slot.status is SlotStatus.AVAILABLE
+    assert expired_events == 1
 
 
 @pytest.mark.asyncio
