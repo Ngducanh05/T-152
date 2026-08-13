@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 
+import { LocationPicker } from "@/components/location/LocationPicker";
 import { ParkingMap } from "@/components/parking/ParkingMap";
 import { useParkingWorkflow } from "@/hooks/use-parking-workflow";
 import { formatApiErrorForOperator } from "@/lib/api";
@@ -17,13 +18,6 @@ export default function Home() {
   const [showLocationConfirm, setShowLocationConfirm] = useState(false);
   const [input, setInput] = useState("");
 
-  const selectableLocations = useMemo(
-    () =>
-      data.map?.nodes.filter((node) =>
-        ["ENTRANCE", "EXIT", "CHECKPOINT", "ELEVATOR"].includes(node.type),
-      ) ?? [],
-    [data.map],
-  );
   const selectedSlot =
     data.slots.find((slot) => slot.id === workflow.selectedSlotId) ?? null;
 
@@ -185,25 +179,13 @@ export default function Home() {
       </section>
 
       {showLocationConfirm && (
-        <div className="modal-backdrop" onClick={() => setShowLocationConfirm(false)}>
-          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="location-title" onClick={(event) => event.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowLocationConfirm(false)} aria-label="Đóng">×</button>
-            <p className="eyebrow green">POST /LOCATIONS/CONFIRM</p>
-            <h2 id="location-title">Chọn vị trí canonical</h2>
-            <p>Entrance, Exit, Checkpoint và Elevator hợp lệ. Aisle nội bộ không được hiển thị.</p>
-            <div className="location-choice-grid">
-              {selectableLocations.map((node) => (
-                <button
-                  key={node.id}
-                  onClick={() => void workflow.confirmLocation(node.id).then((success) => success && setShowLocationConfirm(false))}
-                  disabled={workflow.pending === "location"}
-                >
-                  {node.id}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <LocationPicker
+          map={data.map}
+          currentLocationId={workflow.currentLocationId}
+          pending={workflow.pending === "location"}
+          onClose={() => setShowLocationConfirm(false)}
+          onConfirm={workflow.confirmLocation}
+        />
       )}
     </main>
   );

@@ -162,6 +162,23 @@ button { color: inherit; }
 .location-choice-grid { max-height: 320px; margin-top: 18px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; overflow: auto; }
 .location-choice-grid button { padding: 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: #f8faf9; font-size: 8px; cursor: pointer; }
 .location-choice-grid button:hover, .location-choice-grid button:focus-visible { border-color: var(--green); background: var(--green-soft); }
+.location-choice-grid button[aria-pressed="true"] { color: var(--green-dark); border-color: var(--green); background: var(--green-soft); box-shadow: 0 0 0 2px #168a5b1c; }
+.location-picker { width: min(620px, calc(100vw - 28px)); max-height: min(760px, calc(100vh - 28px)); overflow: auto; }
+.location-picker-section { margin-top: 18px; }
+.location-picker-section h3, .slot-location-form > label { display: block; margin-bottom: 8px; color: var(--ink); font-size: 9px; font-weight: 800; }
+.location-picker .location-choice-grid { margin-top: 0; }
+.slot-location-form { margin-top: 20px; }
+.slot-location-controls { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.slot-location-controls input { min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font-size: 10px; text-transform: uppercase; }
+.slot-location-controls input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-color: var(--blue); }
+.slot-location-controls button { padding: 9px 12px; border: 0; border-radius: 8px; color: #fff; background: var(--green); font-size: 9px; font-weight: 800; cursor: pointer; }
+.slot-location-controls button:disabled, .location-picker button:disabled { opacity: .5; cursor: not-allowed; }
+.slot-location-options { max-height: 190px; margin-top: 7px; padding: 6px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; overflow: auto; border: 1px solid var(--line); border-radius: 9px; background: #f8faf9; }
+.slot-location-options button { padding: 7px 5px; border: 1px solid transparent; border-radius: 6px; color: var(--ink); background: #fff; font-size: 8px; cursor: pointer; }
+.slot-location-options button:hover, .slot-location-options button.active, .slot-location-options button[aria-selected="true"] { color: var(--green-dark); border-color: var(--green); background: var(--green-soft); }
+.slot-location-options > p { grid-column: 1 / -1; padding: 12px; color: var(--muted); font-size: 9px; text-align: center; }
+.location-validation { margin-top: 8px; color: #8b2d2d; font-size: 9px; }
+.location-pending { margin-top: 12px; color: var(--green-dark); font-size: 9px; font-weight: 800; }
 .reservation-banner { min-height: 58px; padding: 9px 12px; display: flex; align-items: center; gap: 11px; color: #4f3500; background: #fff5dc; border: 1px solid #efd18a; border-radius: 14px; box-shadow: 0 8px 22px #805b1020; }
 .reservation-banner .session-icon { color: #fff; background: #d99008; }
 .reservation-banner div { flex: 1; }.reservation-banner small, .reservation-banner b { display: block; }.reservation-banner small { color: #8d6b25; font-size: 7px; letter-spacing: .8px; }.reservation-banner b { margin-top: 4px; font-size: 11px; }
@@ -192,6 +209,8 @@ button { color: inherit; }
   .api-parking-map { height: 560px; padding: 0; }
   .map-legend { justify-content: flex-start; }
   .location-choice-grid { grid-template-columns: repeat(2, 1fr); }
+  .slot-location-controls { grid-template-columns: 1fr; }
+  .slot-location-options { grid-template-columns: repeat(3, 1fr); }
   .three-options { grid-template-columns: 1fr; }
   .reservation-banner { flex-wrap: wrap; }
 }
