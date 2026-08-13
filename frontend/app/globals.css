@@ -177,8 +177,14 @@ button { color: inherit; }
 .slot-location-options button { padding: 7px 5px; border: 1px solid transparent; border-radius: 6px; color: var(--ink); background: #fff; font-size: 8px; cursor: pointer; }
 .slot-location-options button:hover, .slot-location-options button.active, .slot-location-options button[aria-selected="true"] { color: var(--green-dark); border-color: var(--green); background: var(--green-soft); }
 .slot-location-options > p { grid-column: 1 / -1; padding: 12px; color: var(--muted); font-size: 9px; text-align: center; }
-.location-validation { margin-top: 8px; color: #8b2d2d; font-size: 9px; }
+.location-validation, .location-api-error { margin-top: 8px; color: #8b2d2d; font-size: 9px; }
 .location-pending { margin-top: 12px; color: var(--green-dark); font-size: 9px; font-weight: 800; }
+.location-confirmation-outcome { min-height: 48px; padding: 10px 13px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--green-dark); background: var(--green-soft); border: 1px solid #9bcdb5; border-radius: 12px; font-size: 9px; line-height: 1.5; }
+.location-confirmation-outcome > div { display: grid; gap: 2px; }
+.location-confirmation-outcome > div span { color: var(--muted); }
+.location-confirmation-outcome.matching button { flex: 0 0 auto; padding: 8px 10px; border: 0; color: #fff; background: var(--green); border-radius: 7px; font-size: 9px; font-weight: 800; cursor: pointer; }
+.location-confirmation-outcome.matching button:disabled { opacity: .48; cursor: not-allowed; }
+.location-confirmation-outcome.mismatch { color: #7c2727; background: #fff0f0; border-color: #efc6c6; }
 .reservation-banner { min-height: 58px; padding: 9px 12px; display: flex; align-items: center; gap: 11px; color: #4f3500; background: #fff5dc; border: 1px solid #efd18a; border-radius: 14px; box-shadow: 0 8px 22px #805b1020; }
 .reservation-banner .session-icon { color: #fff; background: #d99008; }
 .reservation-banner div { flex: 1; }.reservation-banner small, .reservation-banner b { display: block; }.reservation-banner small { color: #8d6b25; font-size: 7px; letter-spacing: .8px; }.reservation-banner b { margin-top: 4px; font-size: 11px; }

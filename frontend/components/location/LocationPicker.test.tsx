@@ -34,13 +34,25 @@ describe("LocationPicker", () => {
       />,
     );
 
-    expect(screen.getByRole("group", { name: "Vị trí nhanh" })).toHaveTextContent(
+    const quickChoices = screen.getByRole("group", { name: "Vị trí nhanh" });
+    expect(
+      Array.from(quickChoices.querySelectorAll("button"), (button) => button.textContent),
+    ).toEqual([
       "F1-ENTRANCE",
-    );
-    expect(screen.getByRole("group", { name: "Vị trí nhanh" })).toHaveTextContent(
+      "F1-EXIT",
+      "F1-CP1",
+      "F1-CP2",
+      "F1-CP3",
       "F1-ELEVATOR",
-    );
+    ]);
     expect(screen.queryByText("F1-A-W")).not.toBeInTheDocument();
+    const expectedSlotIds = pickerMap().nodes
+      .filter((node) => node.type === "SLOT")
+      .map((node) => node.id)
+      .toSorted((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(
+      expectedSlotIds,
+    );
 
     const combobox = screen.getByRole("combobox", { name: "Tìm ô đỗ theo ID" });
     await user.type(combobox, "d0");
@@ -48,6 +60,22 @@ describe("LocationPicker", () => {
     expect(screen.getAllByRole("option")).toHaveLength(9);
     expect(screen.getByRole("option", { name: "F1-D01" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "F1-C01" })).not.toBeInTheDocument();
+  });
+
+  it("shows a backend validation code and request ID inside the open picker", () => {
+    render(
+      <LocationPicker
+        map={pickerMap()}
+        currentLocationId="F1-ENTRANCE"
+        pending={false}
+        errorMessage="Không thể hoàn tất yêu cầu. Mã lỗi: LOCATION_NODE_NOT_FOUND. Mã yêu cầu: request-location-404."
+        onClose={vi.fn()}
+        onConfirm={vi.fn(async () => false)}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("LOCATION_NODE_NOT_FOUND");
+    expect(screen.getByRole("alert")).toHaveTextContent("request-location-404");
   });
 
   it("normalizes slot casing and whitespace and prevents duplicate submission", async () => {
