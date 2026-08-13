@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:ci": "vitest run --reporter=default"
+    "test:ci": "vitest run --reporter=default",
+    "test:e2e": "node e2e/run-e2e.mjs",
+    "test:e2e:live-agent": "node e2e/run-e2e.mjs --grep @live-agent"
   },
   "dependencies": {
     "next": "16.3.0",
@@ -16,6 +18,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
