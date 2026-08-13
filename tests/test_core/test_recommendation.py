@@ -10,15 +10,25 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from src.core.config import get_settings
-from src.core.db_models import Base, MapEdge, MapNode, ParkingEvent
+from src.core.db_models import (
+    Base,
+    MapEdge,
+    MapNode,
+    ParkingEvent,
+    ParkingReservation,
+    ParkingSlot,
+)
 from src.core.parking_state import ParkingStateService
 from src.core.recommendation import RecommendationService
+from src.core.reservation import ReservationService
 from src.core.routing import RoutingService
 from src.core.seed import seed_if_missing
 from src.models.schemas import (
     ActorType,
     MapNodeType,
+    ParkingEventType,
     RecommendationRequest,
+    ReservationStatus,
     SlotStatus,
 )
 
@@ -112,6 +122,55 @@ async def test_reserved_never_recommended(recommendation_session: AsyncSession):
     result = await _service(recommendation_session).recommend(_request(charging_required=True))
 
     assert "F1-C01" not in {item.slot_id for item in result.recommendations}
+
+
+@pytest.mark.asyncio
+async def test_expired_reservation_is_swept_before_recommendation(
+    recommendation_session: AsyncSession,
+):
+    reserved_at = datetime(2026, 8, 13, 3, 0, tzinfo=UTC)
+    recommendation_time = reserved_at + timedelta(minutes=6)
+    state = ParkingStateService(recommendation_session)
+
+    async with recommendation_session.begin():
+        reservation = await ReservationService(
+            recommendation_session,
+            state,
+        ).create_reservation(
+            "USER-001",
+            "VEHICLE-001",
+            "F1-C01",
+            now=reserved_at,
+        )
+        result = await RecommendationService(
+            recommendation_session,
+            state,
+            RoutingService(recommendation_session),
+            clock=lambda: recommendation_time,
+        ).recommend(_request(charging_required=True))
+        await RecommendationService(
+            recommendation_session,
+            state,
+            RoutingService(recommendation_session),
+            clock=lambda: recommendation_time,
+        ).recommend(_request(charging_required=True))
+
+    async with recommendation_session.begin():
+        stored_reservation = await recommendation_session.get(
+            ParkingReservation, reservation.id
+        )
+        slot = await recommendation_session.get(ParkingSlot, "F1-C01")
+        expired_events = await recommendation_session.scalar(
+            select(func.count())
+            .select_from(ParkingEvent)
+            .where(ParkingEvent.event_type == ParkingEventType.RESERVATION_EXPIRED)
+        )
+
+    assert slot is not None and slot.status is SlotStatus.AVAILABLE
+    assert "F1-C01" in {candidate.slot_id for candidate in result.recommendations}
+    assert stored_reservation is not None
+    assert stored_reservation.status is ReservationStatus.EXPIRED
+    assert expired_events == 1
 
 
 @pytest.mark.asyncio

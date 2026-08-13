@@ -1,4 +1,6 @@
 from collections.abc import AsyncGenerator
+from datetime import datetime, timedelta
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -130,6 +132,44 @@ async def test_recommendation_does_not_reserve_candidate(recommendation_client: 
 
     assert slot.json()["data"]["status"] == "AVAILABLE"
     assert status.json()["data"]["reserved"] == 0
+
+
+@pytest.mark.asyncio
+async def test_api_recommendation_releases_and_reuses_expired_slot(
+    recommendation_client: AsyncClient,
+):
+    payload = _payload(limit=1)
+    initial = await recommendation_client.post("/api/v1/recommendations", json=payload)
+    slot_id = initial.json()["data"]["recommendations"][0]["slot_id"]
+    slot = await recommendation_client.get(f"/api/v1/parking/slots/{slot_id}")
+    reserved = await recommendation_client.post(
+        "/api/v1/reservations",
+        json={
+            "user_id": "USER-001",
+            "vehicle_id": "VEHICLE-001",
+            "slot_id": slot_id,
+            "expected_version": slot.json()["data"]["version"],
+        },
+    )
+    assert reserved.status_code == 201
+    expires_at = datetime.fromisoformat(
+        reserved.json()["data"]["expires_at"].replace("Z", "+00:00")
+    )
+
+    with patch("src.core.recommendation.datetime") as recommendation_datetime:
+        recommendation_datetime.now.return_value = expires_at + timedelta(seconds=1)
+        refreshed = await recommendation_client.post(
+            "/api/v1/recommendations", json=payload
+        )
+
+    current_slot = await recommendation_client.get(f"/api/v1/parking/slots/{slot_id}")
+    active = await recommendation_client.get(
+        "/api/v1/reservations/active", params={"user_id": "USER-001"}
+    )
+    assert refreshed.status_code == 200
+    assert refreshed.json()["data"]["recommendations"][0]["slot_id"] == slot_id
+    assert current_slot.json()["data"]["status"] == "AVAILABLE"
+    assert active.status_code == 404
 
 
 @pytest.mark.asyncio

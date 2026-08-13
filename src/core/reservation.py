@@ -153,6 +153,28 @@ class ReservationService:
         )
         return True
 
+    async def expire_due_reservations(self, *, now: datetime | None = None) -> None:
+        """Expire all elapsed active holds in stable slot order.
+
+        Parking State owns each transition and event. The caller owns the
+        surrounding transaction and therefore the commit or rollback.
+        """
+        current_time = _utc_now(now)
+        due_reservations = await self.session.execute(
+            select(ParkingReservation.id, ParkingReservation.slot_id)
+            .where(
+                ParkingReservation.status == ReservationStatus.ACTIVE,
+                ParkingReservation.expires_at <= current_time,
+            )
+            .order_by(ParkingReservation.slot_id, ParkingReservation.id)
+        )
+        for reservation_id, slot_id in due_reservations:
+            await self.parking_state.expire_reservation(
+                slot_id,
+                reservation_id,
+                now=current_time,
+            )
+
     async def _validate_and_lock_owner(self, user_id: str, vehicle_id: str) -> None:
         user = await self.session.scalar(
             select(ParkingUser).where(ParkingUser.id == user_id).with_for_update()
@@ -315,10 +337,20 @@ async def expire_reservation_if_needed(
     )
 
 
+async def expire_due_reservations(
+    session: AsyncSession,
+    *,
+    parking_state: ParkingStateService | None = None,
+    now: datetime | None = None,
+) -> None:
+    await ReservationService(session, parking_state).expire_due_reservations(now=now)
+
+
 __all__ = [
     "ReservationService",
     "cancel_reservation",
     "create_reservation",
+    "expire_due_reservations",
     "expire_reservation_if_needed",
     "get_active_reservation",
     "get_reservation",

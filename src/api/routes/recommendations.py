@@ -42,11 +42,12 @@ async def recommend_parking(
     session: SessionDependency,
 ) -> SuccessResponse[RecommendationResult]:
     try:
-        result = await RecommendationService(
-            session,
-            ParkingStateService(session),
-            RoutingService(session),
-        ).recommend(request)
+        async with session.begin():
+            result = await RecommendationService(
+                session,
+                ParkingStateService(session),
+                RoutingService(session),
+            ).recommend(request)
     except RecommendationError as error:
         raise _domain_error(error) from error
     return SuccessResponse(data=result)
