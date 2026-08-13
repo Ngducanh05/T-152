@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import Settings, get_settings
 from src.core.database import get_db_session
+from src.core.demo_reset import DemoResetService
+from src.core.location import LocationError
+from src.core.parking_session import ParkingSessionError
 from src.core.parking_state import ParkingStateError, ParkingStateService
 from src.core.simulator import (
     SIMULATED_VEHICLE_ID_PATTERN,
@@ -119,11 +122,12 @@ async def simulator_reset(
 ) -> SuccessResponse[list[SimulatorStepResponse]]:
     try:
         async with session.begin():
-            steps = await SimulatorService(
-                session,
-                ParkingStateService(session),
-                settings=settings,
-            ).reset_demo()
+            steps = await DemoResetService(session, settings=settings).reset_demo()
+    except (LocationError, ParkingSessionError) as error:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": error.code.value, "message": error.message},
+        ) from error
     except ParkingStateError as error:
         raise _domain_error(error) from error
     return SuccessResponse(data=[_step_response(step) for step in steps])
