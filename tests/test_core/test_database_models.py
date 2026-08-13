@@ -1,4 +1,5 @@
 from io import StringIO
+from unittest.mock import Mock, patch
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -43,21 +44,88 @@ def test_parking_migration_follows_profiles_revision():
     parking_revision = scripts.get_revision("20260811_0002")
 
     location_cleanup_revision = scripts.get_revision("20260812_0003")
+    nearest_aisle_revision = scripts.get_revision("20260813_0004")
 
-    assert scripts.get_current_head() == "20260812_0003"
+    assert scripts.get_current_head() == "20260813_0004"
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
     assert location_cleanup_revision is not None
     assert location_cleanup_revision.down_revision == "20260811_0002"
+    assert nearest_aisle_revision is not None
+    assert nearest_aisle_revision.down_revision == "20260812_0003"
 
 
 def test_cold_start_sql_creates_profile_enum_once():
     output = StringIO()
     config = Config("alembic.ini", output_buffer=output)
+    config.attributes["configure_logger"] = False
 
     command.upgrade(config, "head", sql=True)
 
     assert output.getvalue().count("CREATE TYPE app_role_enum") == 1
+
+
+def test_nearest_aisle_data_migration_is_noop_before_canonical_seed():
+    scripts = ScriptDirectory.from_config(Config("alembic.ini"))
+    revision = scripts.get_revision("20260813_0004")
+    assert revision is not None
+    migration = revision.module
+    bind = Mock()
+    bind.execute.return_value.scalars.return_value = []
+
+    with (
+        patch.object(migration.context, "is_offline_mode", return_value=False),
+        patch.object(migration.op, "get_bind", return_value=bind),
+        patch.object(migration.op, "execute") as execute,
+        patch.object(migration.op, "bulk_insert") as bulk_insert,
+    ):
+        migration.upgrade()
+
+    assert bind.execute.call_count == 2
+    execute.assert_not_called()
+    bulk_insert.assert_not_called()
+
+
+def test_nearest_aisle_data_migration_rewrites_seeded_canonical_slots():
+    scripts = ScriptDirectory.from_config(Config("alembic.ini"))
+    revision = scripts.get_revision("20260813_0004")
+    assert revision is not None
+    migration = revision.module
+    slot_ids = {
+        f"F1-{zone}{slot_number:02d}"
+        for zone in "ABCD"
+        for slot_number in range(1, 11)
+    }
+    node_ids = slot_ids | {
+        f"F1-{zone}-{side}" for zone in "ABCD" for side in ("W", "E")
+    }
+    slot_result = Mock()
+    slot_result.scalars.return_value = slot_ids
+    node_result = Mock()
+    node_result.scalars.return_value = node_ids
+    bind = Mock()
+    bind.execute.side_effect = [slot_result, node_result]
+
+    with (
+        patch.object(migration.context, "is_offline_mode", return_value=False),
+        patch.object(migration.op, "get_bind", return_value=bind),
+        patch.object(migration.op, "execute") as execute,
+        patch.object(migration.op, "bulk_insert") as bulk_insert,
+    ):
+        migration.upgrade()
+
+    assert execute.call_count == 41  # one edge delete and forty slot updates
+    bulk_insert.assert_called_once()
+    inserted_edges = bulk_insert.call_args.args[1]
+    assert len(inserted_edges) == 40
+    assert {
+        (edge["from_node"], edge["to_node"]) for edge in inserted_edges
+    } >= {
+        ("F1-A-W", "F1-A01"),
+        ("F1-A-E", "F1-A04"),
+        ("F1-D-W", "F1-D08"),
+        ("F1-D-E", "F1-D10"),
+    }
 
 
 def test_parking_event_avoids_reserved_metadata_attribute():

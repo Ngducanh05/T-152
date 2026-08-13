@@ -65,6 +65,20 @@ async def test_shortest_path_entrance_to_d01(routing_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_d06_uses_nearest_west_entrance_without_detour(routing_session: AsyncSession):
+    route = await RoutingService(routing_session).get_route("F1-ENTRANCE", "F1-D06")
+
+    assert route.path == [
+        "F1-ENTRANCE",
+        "F1-CP1",
+        "F1-CP2",
+        "F1-D-W",
+        "F1-D06",
+    ]
+    assert route.distance_m == 76
+
+
+@pytest.mark.asyncio
 async def test_route_to_every_slot(routing_session: AsyncSession):
     service = RoutingService(routing_session)
 

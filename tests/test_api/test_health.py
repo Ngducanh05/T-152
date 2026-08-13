@@ -1,9 +1,11 @@
+import logging
 from uuid import UUID, uuid4
 
+from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
-from src.api.main import REQUEST_ID_HEADER, app
-from src.core.config import get_settings
+from src.api.main import REQUEST_ID_HEADER, app, create_app
+from src.core.config import Settings, get_settings
 
 client = TestClient(app)
 
@@ -72,3 +74,29 @@ def test_application_health_is_in_openapi_schema():
     assert response.status_code == 200
     assert "/health" in response.json()["paths"]
     assert "/api/v1/health/database" in response.json()["paths"]
+
+
+def test_unexpected_request_failure_is_traceable_without_logging_details(caplog):
+    request_id = str(uuid4())
+    application = create_app(Settings(llm_api_key="test-key"))
+    router = APIRouter()
+
+    @router.get("/failing-request")
+    async def failing_request():
+        raise RuntimeError("secret database detail")
+
+    application.include_router(router)
+    caplog.set_level(logging.INFO)
+
+    with TestClient(application, raise_server_exceptions=False) as test_client:
+        response = test_client.get(
+            "/failing-request",
+            headers={REQUEST_ID_HEADER: request_id},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["request_id"] == request_id
+    assert f"request_failed request_id={request_id}" in caplog.text
+    assert f"request_completed request_id={request_id}" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
+    assert "secret database detail" not in caplog.text

@@ -288,10 +288,11 @@ Mỗi slot tối thiểu có:
 }
 ```
 
-Quy tắc gắn slot vào graph:
+Quy tắc gắn slot vào graph theo lối vào gần nhất của từng hàng:
 
-- Slot `01`–`05` của mỗi khu nối với node phía tây (`*-W`).
-- Slot `06`–`10` của mỗi khu nối với node phía đông (`*-E`).
+- Slot `01`–`03` và `06`–`08` của mỗi khu nối với node phía tây (`*-W`).
+- Slot `04`–`05` và `09`–`10` của mỗi khu nối với node phía đông (`*-E`).
+- Slot ở giữa hàng (`03`, `08`) ưu tiên phía tây khi khoảng cách hiển thị bằng nhau.
 - Mỗi cạnh từ aisle node tới slot dài 4 m.
 - Slot là điểm đích; không dùng slot làm đường đi xuyên qua khu.
 

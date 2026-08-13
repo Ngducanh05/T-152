@@ -70,6 +70,7 @@ def test_runtime_context_contract_keeps_session_out_of_state():
         "vehicle_id",
         "request_id",
         "session_factory",
+        "current_location",
     }
 
 

@@ -312,10 +312,14 @@ class ParkingStateService:
         current_time = _utc_now(now)
         slot = await self._lock_slot(slot_id)
         self._check_expected_version(slot, expected_version)
+        reservation = await self._lock_reservation(reservation_id)
+        if (
+            slot.status is SlotStatus.AVAILABLE
+            and reservation.status is ReservationStatus.EXPIRED
+        ):
+            return slot
         if slot.status is not SlotStatus.RESERVED:
             self._raise_invalid(f"Cannot expire reservation from {slot.status.value}", slot_id)
-
-        reservation = await self._lock_reservation(reservation_id)
         if reservation.slot_id != slot_id or reservation.status is not ReservationStatus.ACTIVE:
             self._raise_invalid("Reservation does not own this reserved slot", slot_id)
         if reservation.expires_at > current_time:

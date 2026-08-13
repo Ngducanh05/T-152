@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from collections.abc import AsyncIterator, Awaitable
@@ -17,6 +18,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from src.agents.context import AgentRuntimeContext
 from src.agents.tools import PARKING_TOOLS
 from src.core.database import get_session_factory
+from src.core.route_guidance import vietnamese_route_guidance
 from src.models.common import ErrorResponse, SuccessResponse
 from src.models.schemas import ChatRequest, ChatResponse, ErrorCode
 
@@ -192,6 +194,53 @@ def _safe_tool_names(messages: list[Any]) -> list[str]:
     return names
 
 
+def _successful_tool_names(messages: list[Any]) -> set[str]:
+    names: set[str] = set()
+    for message in messages:
+        if not isinstance(message, ToolMessage) or not message.name:
+            continue
+        content = message.content
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except json.JSONDecodeError:
+                continue
+        if (
+            message.name in _REGISTERED_TOOL_NAMES
+            and _SAFE_TOOL_NAME.fullmatch(message.name)
+            and isinstance(content, dict)
+            and content.get("ok") is True
+        ):
+            names.add(message.name)
+    return names
+
+
+def _successful_route_guidance(messages: list[Any]) -> str | None:
+    for message in reversed(messages):
+        if not isinstance(message, ToolMessage) or message.name != "get_route":
+            continue
+        content = message.content
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(content, dict) or content.get("ok") is not True:
+            continue
+        data = content.get("data")
+        if not isinstance(data, dict):
+            continue
+        path = data.get("path")
+        distance_m = data.get("distance_m")
+        if (
+            isinstance(path, list)
+            and all(isinstance(node_id, str) for node_id in path)
+            and isinstance(distance_m, int | float)
+        ):
+            return vietnamese_route_guidance(path, float(distance_m))
+    return None
+
+
 @router.post(
     "/chat",
     response_model=SuccessResponse[ChatResponse],
@@ -208,6 +257,7 @@ async def chat(
         vehicle_id=payload.vehicle_id,
         request_id=request_id,
         session_factory=get_session_factory(),
+        current_location=payload.current_location,
     )
     logger.info(
         "agent_chat_started request_id=%s user_id=%s thread_id=%s",
@@ -267,12 +317,23 @@ async def chat(
         )
 
     current_messages = _messages_after_current_input(result, message_id)
+    successful_tools = _successful_tool_names(current_messages)
+    route_guidance = _successful_route_guidance(current_messages)
     response = ChatResponse(
         thread_id=payload.thread_id,
-        message=_public_message(current_messages),
+        message=route_guidance or _public_message(current_messages),
         intent=result.get("intent") or None,
         selected_slot=result.get("selected_slot") or None,
         tool_names=_safe_tool_names(current_messages),
+        current_location=result.get("current_location") or None,
+        recommended_slot_ids=(
+            result.get("recommended_slot_ids") or []
+            if "recommend_parking_slot" in successful_tools
+            else []
+        ),
+        route=(
+            result.get("route") or None if "get_route" in successful_tools else None
+        ),
     )
     logger.info(
         "agent_chat_completed request_id=%s user_id=%s thread_id=%s tool_count=%s",

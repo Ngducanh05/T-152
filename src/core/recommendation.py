@@ -1,11 +1,14 @@
-"""Deterministic read-only parking-slot recommendation service."""
+"""Deterministic parking-slot recommendation with elapsed-hold cleanup."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.db_models import ParkingUser
 from src.core.parking_state import ParkingStateService
+from src.core.reservation import ReservationService
 from src.core.routing import RoutingError, RoutingGraph, RoutingNode, RoutingService
 from src.models.schemas import (
     ErrorCode,
@@ -62,13 +65,20 @@ class RecommendationService:
         session: AsyncSession,
         parking_state: ParkingStateService,
         routing: RoutingService,
+        *,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.session = session
         self.parking_state = parking_state
         self.routing = routing
+        self.clock = clock or (lambda: datetime.now(UTC))
 
     async def recommend(self, request: RecommendationRequest) -> RecommendationResult:
         await self._validate_user(request.user_id)
+        await ReservationService(
+            self.session,
+            self.parking_state,
+        ).expire_due_reservations(now=self._utc_now())
         graph = await self.routing.load_graph()
         start_node = self._get_start_node(graph, request.start_node_id)
         slots = await self.parking_state.list_slots()
@@ -244,6 +254,15 @@ class RecommendationService:
         if near_elevator:
             reasons.append("Elevator proximity is included in the score")
         return tuple(reasons)
+
+    def _utc_now(self) -> datetime:
+        current_time = self.clock()
+        if current_time.utcoffset() != timedelta(0):
+            raise RecommendationError(
+                ErrorCode.INVALID_TRANSITION,
+                "Recommendation clock must return a timezone-aware UTC datetime",
+            )
+        return current_time
 
 
 async def recommend_parking_slots(

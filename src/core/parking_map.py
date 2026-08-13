@@ -128,7 +128,8 @@ def _slot_id(zone_id: str, slot_number: int) -> str:
 
 
 def _slot_aisle_id(zone_id: str, slot_number: int) -> str:
-    side = "W" if slot_number <= 5 else "E"
+    position_in_row = (slot_number - 1) % 5 + 1
+    side = "W" if position_in_row <= 3 else "E"
     return f"F1-{zone_id}-{side}"
 
 

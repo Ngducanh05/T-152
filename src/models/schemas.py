@@ -206,6 +206,7 @@ class ChatRequest(BaseModel):
     thread_id: str = Field(min_length=1, max_length=128)
     user_id: EntityId
     vehicle_id: EntityId | None = None
+    current_location: FloorScopedId | None = None
     message: str = Field(min_length=1, max_length=5000, description="Tin nhắn từ user")
 
     @field_validator("thread_id", "message")
@@ -225,3 +226,6 @@ class ChatResponse(BaseModel):
     intent: str | None = None
     selected_slot: str | None = None
     tool_names: list[str] = Field(default_factory=list)
+    current_location: FloorScopedId | None = None
+    recommended_slot_ids: list[FloorScopedId] = Field(default_factory=list)
+    route: RouteResult | None = None
