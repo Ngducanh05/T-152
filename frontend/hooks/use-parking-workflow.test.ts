@@ -94,6 +94,32 @@ function fixture() {
 }
 
 describe("useParkingWorkflow", () => {
+  it("confirms a slot location without reserving it or creating a parking session", async () => {
+    const { api, data, refresh, slot } = fixture();
+    api.confirmLocation.mockResolvedValue({
+      user_id: "USER-001",
+      node_id: "F1-D01",
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      await result.current.confirmLocation("F1-D01");
+    });
+
+    expect(api.confirmLocation).toHaveBeenCalledOnce();
+    expect(api.confirmLocation).toHaveBeenCalledWith({
+      user_id: "USER-001",
+      node_id: "F1-D01",
+    });
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(api.createReservation).not.toHaveBeenCalled();
+    expect(api.confirmParking).not.toHaveBeenCalled();
+    expect(api.getActiveSession).not.toHaveBeenCalled();
+    expect(slot.status).toBe("AVAILABLE");
+    expect(data.activeReservation).toBeNull();
+    expect(data.activeSession).toBeNull();
+  });
+
   it("highlights recommendations without selecting or reserving a slot", async () => {
     const { api, data, refresh, slot } = fixture();
     const { result } = renderHook(() => useParkingWorkflow(data, api));
