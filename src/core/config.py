@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     )
     llm_timeout_seconds: float = Field(default=30.0, gt=0.0)
     llm_max_retries: int = Field(default=2, ge=0, le=5)
+    speech_transcription_model: str = "gpt-4o-mini-transcribe"
+    speech_max_audio_bytes: int = Field(default=2_000_000, gt=0, le=10_000_000)
+    speech_timeout_seconds: float = Field(default=60.0, gt=0.0, le=120.0)
+    speech_max_retries: int = Field(default=1, ge=0, le=2)
     agent_thread_ttl_seconds: float = Field(default=3600.0, gt=0.0)
 
     cors_origins: str = Field(

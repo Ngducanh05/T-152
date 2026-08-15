@@ -104,6 +104,7 @@ def create_app(
         debug=application_settings.debug,
         lifespan=lifespan,
     )
+    application.state.settings = application_settings
 
     application.add_middleware(
         CORSMiddleware,

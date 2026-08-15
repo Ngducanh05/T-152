@@ -38,7 +38,7 @@ export function AgentComposer({
   }
 
   function toggleListening() {
-    if (speech.status === "listening") {
+    if (speech.status === "listening" || speech.status === "preparing") {
       speech.stopListening();
       return;
     }
@@ -74,6 +74,8 @@ export function AgentComposer({
     statusMessage = speech.errorMessage;
   } else if (speech.status === "listening") {
     statusMessage = "Đang nghe… Nhấn Dừng nghe để kết thúc.";
+  } else if (speech.status === "preparing") {
+    statusMessage = "Đang chuẩn bị nhận dạng giọng nói trên thiết bị…";
   } else if (speech.status === "speaking") {
     statusMessage = "Đang đọc câu trả lời.";
   }
@@ -99,16 +101,22 @@ export function AgentComposer({
         )}
         <button
           type="button"
-          className={speech.status === "listening" ? "listening" : undefined}
+          className={
+            speech.status === "listening" || speech.status === "preparing"
+              ? "listening"
+              : undefined
+          }
           onClick={toggleListening}
           disabled={!threadReady || pending || !speech.recognitionSupported}
           aria-label={
-            speech.status === "listening"
+            speech.status === "listening" || speech.status === "preparing"
               ? "Dừng nghe"
               : "Bắt đầu nhập bằng giọng nói"
           }
         >
-          {speech.status === "listening" ? "■" : "🎤"}
+          {speech.status === "listening" || speech.status === "preparing"
+            ? "■"
+            : "🎤"}
         </button>
         <button
           type="submit"

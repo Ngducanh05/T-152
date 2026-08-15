@@ -158,6 +158,7 @@ async def test_full_agent_core_tool_flow(agent_flow: AgentFlow):
             agent_flow.tool_call(
                 "recommend_parking_slot",
                 {
+                    "zone_id": "D",
                     "charging_required": True,
                     "accessible_required": False,
                     "near_elevator": True,
@@ -168,7 +169,7 @@ async def test_full_agent_core_tool_flow(agent_flow: AgentFlow):
         ],
     )
     recommended_slot = state["recommended_slot_ids"][0]
-    assert recommended_slot.startswith(("F1-C", "F1-D"))
+    assert all(slot_id.startswith("F1-D") for slot_id in state["recommended_slot_ids"])
     assert "active_reservation_id" not in state
     assert _tool_names(state) == ["set_user_location", "recommend_parking_slot"]
     async with agent_flow.session_factory() as session:
@@ -180,7 +181,33 @@ async def test_full_agent_core_tool_flow(agent_flow: AgentFlow):
     assert active_reservations == 0
 
     state = await agent_flow.turn(
-        f"Tôi chọn {recommended_slot}.",
+        "Chỉ đường tới ô đó và cho tôi biết tình trạng.",
+        [
+            agent_flow.tool_call(
+                "get_parking_slot_status",
+                {"slot_id": recommended_slot},
+            ),
+            agent_flow.tool_call(
+                "get_route",
+                {"destination_node_id": recommended_slot},
+            ),
+            AIMessage(
+                content=(
+                    f"Ô {recommended_slot} hiện đang AVAILABLE. Đây là tuyến đường. "
+                    f"Bạn có muốn đỗ xe ở ô {recommended_slot} không?"
+                )
+            ),
+        ],
+    )
+    assert state["tool_result"]["data"]["start_node_id"] == "F1-ENTRANCE"
+    assert state["tool_result"]["data"]["path"][-1] == recommended_slot
+    assert state["route"].path[-1] == recommended_slot
+    assert state["selected_slot"] == recommended_slot
+    assert "AVAILABLE" in state["messages"][-1].content
+    assert "Bạn có muốn đỗ xe" in state["messages"][-1].content
+
+    state = await agent_flow.turn(
+        "Có, tôi muốn đỗ ở ô đó.",
         [
             agent_flow.tool_call(
                 "reserve_parking_slot",
@@ -193,20 +220,6 @@ async def test_full_agent_core_tool_flow(agent_flow: AgentFlow):
     assert state["selected_slot"] == recommended_slot
     assert state["recommended_slot_ids"] == []
     assert state["route"] is None
-
-    state = await agent_flow.turn(
-        "Chỉ đường tới đó.",
-        [
-            agent_flow.tool_call(
-                "get_route",
-                {"destination_node_id": recommended_slot},
-            ),
-            AIMessage(content="Đây là tuyến đường tới ô đã chọn."),
-        ],
-    )
-    assert state["tool_result"]["data"]["start_node_id"] == "F1-ENTRANCE"
-    assert state["tool_result"]["data"]["path"][-1] == recommended_slot
-    assert state["route"].path[-1] == recommended_slot
 
     state = await agent_flow.turn(
         "Tôi đã đỗ.",
@@ -237,8 +250,9 @@ async def test_full_agent_core_tool_flow(agent_flow: AgentFlow):
     assert _tool_names(state) == [
         "set_user_location",
         "recommend_parking_slot",
-        "reserve_parking_slot",
+        "get_parking_slot_status",
         "get_route",
+        "reserve_parking_slot",
         "confirm_parking",
         "set_user_location",
         "find_parked_vehicle",

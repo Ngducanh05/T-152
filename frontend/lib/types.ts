@@ -93,6 +93,7 @@ export interface ConfirmLocationRequest {
 export interface RecommendationRequest {
   user_id: EntityId;
   start_node_id: FloorScopedId;
+  zone_id?: ZoneId | null;
   charging_required?: boolean;
   accessible_required?: boolean;
   near_elevator?: boolean;
@@ -190,6 +191,10 @@ export interface ChatResponse {
   current_location: FloorScopedId | null;
   recommended_slot_ids: FloorScopedId[];
   route: RouteResult | null;
+}
+
+export interface SpeechTranscriptionResponse {
+  text: string;
 }
 
 export type SimulatorAction = "RESET" | "PARK" | "LEAVE";

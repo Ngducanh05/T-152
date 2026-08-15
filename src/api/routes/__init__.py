@@ -12,6 +12,7 @@ from src.api.routes.reservations import router as reservations_router
 from src.api.routes.routing import router as routing_router
 from src.api.routes.sessions import router as sessions_router
 from src.api.routes.simulator import router as simulator_router
+from src.api.routes.speech import router as speech_router
 
 api_router = APIRouter()
 api_router.include_router(agent_router)
@@ -23,6 +24,7 @@ api_router.include_router(recommendations_router)
 api_router.include_router(reservations_router)
 api_router.include_router(routing_router)
 api_router.include_router(sessions_router)
+api_router.include_router(speech_router)
 api_router.include_router(simulator_router)
 
 __all__ = ["api_router"]

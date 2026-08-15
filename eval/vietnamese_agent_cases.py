@@ -28,9 +28,25 @@ VIETNAMESE_AGENT_EVAL_CASES = (
         tool_sequence=("recommend_parking_slot",),
         tool_arguments=(
             {
+                "zone_id": None,
                 "charging_required": True,
                 "accessible_required": False,
                 "near_elevator": True,
+                "limit": 3,
+            },
+        ),
+        expected_intent="RECOMMEND_SLOT",
+    ),
+    VietnameseAgentEvalCase(
+        name="recommend_in_zone_d",
+        utterance="Tìm cho tôi ô trống ở khu D.",
+        tool_sequence=("recommend_parking_slot",),
+        tool_arguments=(
+            {
+                "zone_id": "D",
+                "charging_required": False,
+                "accessible_required": False,
+                "near_elevator": False,
                 "limit": 3,
             },
         ),
@@ -50,6 +66,35 @@ VIETNAMESE_AGENT_EVAL_CASES = (
         tool_sequence=("get_route",),
         tool_arguments=({"destination_node_id": "F1-D01"},),
         expected_intent="GET_ROUTE_TO_SLOT",
+    ),
+    VietnameseAgentEvalCase(
+        name="route_to_exact_slot_with_status",
+        utterance="Chỉ đường tới ô F1-D01 và cho tôi biết tình trạng ô.",
+        tool_sequence=("get_parking_slot_status", "get_route"),
+        tool_arguments=(
+            {"slot_id": "F1-D01"},
+            {"destination_node_id": "F1-D01"},
+        ),
+        expected_intent="GET_ROUTE_TO_SLOT",
+        expected_selected_slot="F1-D01",
+    ),
+    VietnameseAgentEvalCase(
+        name="route_to_zone_d_with_status",
+        utterance="Chỉ đường tới khu D và cho tôi biết tình trạng khu.",
+        tool_sequence=("get_parking_status", "recommend_parking_slot", "get_route"),
+        tool_arguments=(
+            {},
+            {
+                "zone_id": "D",
+                "charging_required": False,
+                "accessible_required": False,
+                "near_elevator": False,
+                "limit": 1,
+            },
+            {"destination_node_id": "F1-D01"},
+        ),
+        expected_intent="GET_ROUTE_TO_SLOT",
+        expected_selected_slot="F1-D01",
     ),
     VietnameseAgentEvalCase(
         name="confirm_parking",

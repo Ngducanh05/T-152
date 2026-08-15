@@ -20,10 +20,13 @@ async function installFakeSpeech(page: Page, mode: RecognitionMode) {
       type RecognitionResultEvent = { results: RecognitionResult[] };
 
       class FakeSpeechRecognition {
+        static available = async () => "available" as const;
+
         lang = "";
         continuous = true;
         interimResults = true;
         maxAlternatives = 0;
+        processLocally = false;
         onstart: (() => void) | null = null;
         onresult: ((event: RecognitionResultEvent) => void) | null = null;
         onerror: ((event: { error: string }) => void) | null = null;

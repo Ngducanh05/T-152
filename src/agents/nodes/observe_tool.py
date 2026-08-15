@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from langchain_core.messages import ToolMessage
@@ -10,6 +11,7 @@ from src.agents.state import AgentState
 from src.models.schemas import FloorScopedId, RouteResult
 
 _FLOOR_SCOPED_ID_ADAPTER = TypeAdapter(FloorScopedId)
+_PARKING_SLOT_ID = re.compile(r"^F1-[A-D]\d{2}$")
 
 
 def _tool_messages(state: AgentState) -> list[ToolMessage]:
@@ -64,6 +66,7 @@ def _intent_for_tool(
         return "GET_ROUTE_TO_CAR" if active_session_id else "GET_ROUTE_TO_SLOT"
     return {
         "get_parking_status": "GET_PARKING_STATUS",
+        "get_parking_slot_status": "GET_PARKING_STATUS",
         "recommend_parking_slot": "RECOMMEND_SLOT",
         "reserve_parking_slot": "RESERVE_SLOT",
         "set_user_location": "CONFIRM_USER_LOCATION",
@@ -111,6 +114,12 @@ def _apply_success(
         except ValidationError:
             # An invalid success payload is not safe structured output.
             pass
+        else:
+            destination_node_id = data.get("destination_node_id")
+            if isinstance(destination_node_id, str) and _PARKING_SLOT_ID.fullmatch(
+                destination_node_id
+            ):
+                update["selected_slot"] = destination_node_id
     elif tool_name == "reserve_parking_slot":
         if isinstance(data.get("slot_id"), str):
             update["selected_slot"] = data["slot_id"]

@@ -33,9 +33,11 @@ from src.models.schemas import (
     FloorScopedId,
     ParkingReservation,
     ParkingSession,
+    ParkingSlot,
     RecommendationRequest,
     ReservationStatus,
     RouteResult,
+    ZoneId,
 )
 
 ExpectedVersion = Annotated[int | None, Field(ge=0)]
@@ -60,6 +62,10 @@ def _reservation_data(reservation: object) -> dict[str, object]:
         reservation,
         from_attributes=True,
     ).model_dump(mode="json")
+
+
+def _slot_data(slot: object) -> dict[str, object]:
+    return ParkingSlot.model_validate(slot, from_attributes=True).model_dump(mode="json")
 
 
 def _session_data(parking_session: object) -> dict[str, object]:
@@ -104,7 +110,23 @@ async def get_parking_status(runtime: AgentToolRuntime) -> ToolResult:
 
 
 @tool
+async def get_parking_slot_status(
+    slot_id: FloorScopedId,
+    *,
+    runtime: AgentToolRuntime,
+) -> ToolResult:
+    """Get the authoritative status and capabilities of one exact parking slot."""
+
+    async def operation(session: AsyncSession) -> ToolResult:
+        slot = await ParkingStateService(session).get_slot(slot_id)
+        return tool_success(_slot_data(slot))
+
+    return await execute_tool(runtime, "get_parking_slot_status", operation)
+
+
+@tool
 async def recommend_parking_slot(
+    zone_id: ZoneId | None = None,
     charging_required: bool = False,
     accessible_required: bool = False,
     near_elevator: bool = False,
@@ -119,6 +141,7 @@ async def recommend_parking_slot(
         request = RecommendationRequest(
             user_id=runtime.context.user_id,
             start_node_id=start_node_id,
+            zone_id=zone_id,
             charging_required=charging_required,
             accessible_required=accessible_required,
             near_elevator=near_elevator,
@@ -322,6 +345,7 @@ async def complete_parking_session(
 
 PARKING_TOOLS: tuple[BaseTool, ...] = (
     get_parking_status,
+    get_parking_slot_status,
     recommend_parking_slot,
     reserve_parking_slot,
     get_route,
@@ -339,6 +363,7 @@ __all__ = [
     "confirm_parking",
     "find_parked_vehicle",
     "get_parking_status",
+    "get_parking_slot_status",
     "get_route",
     "recommend_parking_slot",
     "reserve_parking_slot",

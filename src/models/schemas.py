@@ -81,6 +81,11 @@ class ErrorCode(StrEnum):
     CURRENT_LOCATION_NOT_FOUND = "CURRENT_LOCATION_NOT_FOUND"
     INVALID_LOCATION_NODE_TYPE = "INVALID_LOCATION_NODE_TYPE"
     AGENT_TOOL_UNAVAILABLE = "AGENT_TOOL_UNAVAILABLE"
+    SPEECH_AUDIO_INVALID = "SPEECH_AUDIO_INVALID"
+    SPEECH_AUDIO_TOO_LARGE = "SPEECH_AUDIO_TOO_LARGE"
+    SPEECH_NO_TRANSCRIPT = "SPEECH_NO_TRANSCRIPT"
+    SPEECH_TRANSCRIPTION_TIMEOUT = "SPEECH_TRANSCRIPTION_TIMEOUT"
+    SPEECH_TRANSCRIPTION_UNAVAILABLE = "SPEECH_TRANSCRIPTION_UNAVAILABLE"
 
 
 class ContractModel(BaseModel):
@@ -166,6 +171,7 @@ class RouteResult(ContractModel):
 class RecommendationRequest(ContractModel):
     user_id: EntityId
     start_node_id: FloorScopedId
+    zone_id: ZoneId | None = None
     charging_required: bool = False
     accessible_required: bool = False
     near_elevator: bool = False
@@ -229,3 +235,9 @@ class ChatResponse(BaseModel):
     current_location: FloorScopedId | None = None
     recommended_slot_ids: list[FloorScopedId] = Field(default_factory=list)
     route: RouteResult | None = None
+
+
+class SpeechTranscriptionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=5000)

@@ -2,6 +2,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useWebSpeech } from "./use-web-speech";
+import { ApiError, parkSmartApi } from "@/lib/api";
 
 type RecognitionResultInput = {
   isFinal: boolean;
@@ -16,11 +17,18 @@ type RecognitionResultMock = {
 
 class MockSpeechRecognition {
   static instances: MockSpeechRecognition[] = [];
+  static available: ((options: {
+    langs: string[];
+    processLocally: boolean;
+    quality: "dictation";
+  }) => Promise<"unavailable" | "downloadable" | "available">) | undefined;
+  static install: (() => Promise<boolean>) | undefined;
 
   lang = "";
   continuous = true;
   interimResults = true;
   maxAlternatives = 0;
+  processLocally = false;
   onstart: (() => void) | null = null;
   onresult: ((event: { results: RecognitionResultMock[] }) => void) | null = null;
   onerror: ((event: { error: string }) => void) | null = null;
@@ -92,6 +100,30 @@ class MockSpeechSynthesis {
   }
 }
 
+class MockMediaRecorder {
+  static instances: MockMediaRecorder[] = [];
+  static isTypeSupported = vi.fn(() => true);
+
+  state: RecordingState = "inactive";
+  mimeType: string;
+  ondataavailable: ((event: { data: Blob }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onstop: (() => void) | null = null;
+  start = vi.fn(() => {
+    this.state = "recording";
+  });
+  stop = vi.fn(() => {
+    this.state = "inactive";
+    this.ondataavailable?.({ data: new Blob(["voice"], { type: this.mimeType }) });
+    this.onstop?.();
+  });
+
+  constructor(_stream: MediaStream, options?: MediaRecorderOptions) {
+    this.mimeType = options?.mimeType ?? "audio/webm";
+    MockMediaRecorder.instances.push(this);
+  }
+}
+
 function defineWindowProperty(name: string, value: unknown) {
   Object.defineProperty(window, name, {
     configurable: true,
@@ -114,9 +146,24 @@ function installSynthesis() {
   return synthesis;
 }
 
+function installMediaCapture() {
+  const stop = vi.fn();
+  const stream = { getTracks: () => [{ stop }] } as unknown as MediaStream;
+  const getUserMedia = vi.fn().mockResolvedValue(stream);
+  defineWindowProperty("MediaRecorder", MockMediaRecorder);
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: { getUserMedia },
+  });
+  return { getUserMedia, stop };
+}
+
 beforeEach(() => {
   MockSpeechRecognition.instances = [];
+  MockSpeechRecognition.available = undefined;
+  MockSpeechRecognition.install = undefined;
   MockUtterance.instances = [];
+  MockMediaRecorder.instances = [];
 });
 
 afterEach(() => {
@@ -125,6 +172,9 @@ afterEach(() => {
   Reflect.deleteProperty(window, "webkitSpeechRecognition");
   Reflect.deleteProperty(window, "speechSynthesis");
   Reflect.deleteProperty(window, "SpeechSynthesisUtterance");
+  Reflect.deleteProperty(window, "MediaRecorder");
+  Reflect.deleteProperty(navigator, "mediaDevices");
+  vi.restoreAllMocks();
 });
 
 describe("useWebSpeech", () => {
@@ -148,6 +198,99 @@ describe("useWebSpeech", () => {
 
     expect(result.current.recognitionSupported).toBe(true);
     expect(MockSpeechRecognition.instances).toHaveLength(1);
+  });
+
+  it("prefers on-device Vietnamese recognition when it is available", async () => {
+    MockSpeechRecognition.available = vi.fn().mockResolvedValue("available");
+    installRecognition("standard");
+    const { result } = renderHook(() => useWebSpeech(vi.fn()));
+    const recognition = MockSpeechRecognition.instances[0];
+
+    await act(async () => result.current.startListening());
+
+    expect(MockSpeechRecognition.available).toHaveBeenCalledWith({
+      langs: ["vi-VN"],
+      processLocally: true,
+      quality: "dictation",
+    });
+    expect(recognition.processLocally).toBe(true);
+    expect(recognition.start).toHaveBeenCalledOnce();
+  });
+
+  it("installs a downloadable Vietnamese language pack before listening", async () => {
+    MockSpeechRecognition.available = vi.fn().mockResolvedValue("downloadable");
+    MockSpeechRecognition.install = vi.fn().mockResolvedValue(true);
+    installRecognition("standard");
+    const { result } = renderHook(() => useWebSpeech(vi.fn()));
+    const recognition = MockSpeechRecognition.instances[0];
+
+    await act(async () => result.current.startListening());
+
+    expect(MockSpeechRecognition.install).toHaveBeenCalledOnce();
+    expect(recognition.processLocally).toBe(true);
+    expect(recognition.start).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to browser-managed recognition when local Vietnamese is unavailable", async () => {
+    MockSpeechRecognition.available = vi.fn().mockResolvedValue("unavailable");
+    installRecognition("standard");
+    const { result } = renderHook(() => useWebSpeech(vi.fn()));
+    const recognition = MockSpeechRecognition.instances[0];
+
+    await act(async () => result.current.startListening());
+
+    expect(recognition.processLocally).toBe(false);
+    expect(recognition.start).toHaveBeenCalledOnce();
+  });
+
+  it("records a short clip and uses backend transcription when local Vietnamese is unavailable", async () => {
+    MockSpeechRecognition.available = vi.fn().mockResolvedValue("unavailable");
+    installRecognition("standard");
+    const capture = installMediaCapture();
+    const transcribe = vi
+      .spyOn(parkSmartApi, "transcribeSpeech")
+      .mockResolvedValue({ text: "  tìm ô trống khu D  " });
+    const onTranscript = vi.fn();
+    const { result } = renderHook(() => useWebSpeech(onTranscript));
+
+    await act(async () => result.current.startListening());
+    expect(result.current.status).toBe("listening");
+    expect(capture.getUserMedia).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      result.current.stopListening();
+      await Promise.resolve();
+    });
+
+    expect(transcribe).toHaveBeenCalledOnce();
+    expect(onTranscript).toHaveBeenCalledWith("tìm ô trống khu D");
+    expect(capture.stop).toHaveBeenCalledOnce();
+    expect(result.current.status).toBe("idle");
+  });
+
+  it("shows the backend transcription error code and request reference", async () => {
+    MockSpeechRecognition.available = vi.fn().mockResolvedValue("unavailable");
+    installRecognition("standard");
+    installMediaCapture();
+    vi.spyOn(parkSmartApi, "transcribeSpeech").mockRejectedValue(
+      new ApiError({
+        code: "SPEECH_TRANSCRIPTION_TIMEOUT",
+        message: "Speech transcription timed out.",
+        requestId: "request-voice-timeout",
+        status: 504,
+      }),
+    );
+    const { result } = renderHook(() => useWebSpeech(vi.fn()));
+
+    await act(async () => result.current.startListening());
+    await act(async () => {
+      result.current.stopListening();
+      await Promise.resolve();
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.errorMessage).toContain("phản hồi quá chậm");
+    expect(result.current.errorMessage).toContain("request-voice-timeout");
   });
 
   it("reports an unsupported browser without crashing", () => {

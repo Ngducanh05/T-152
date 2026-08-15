@@ -20,6 +20,7 @@ import type {
   RouteResponse,
   SimulatorStep,
   SlotFilters,
+  SpeechTranscriptionResponse,
 } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
@@ -279,6 +280,16 @@ export class ParkSmartApiClient {
       body: JSON.stringify(payload),
       signal,
     });
+  }
+
+  async transcribeSpeech(audio: Blob, signal?: AbortSignal) {
+    const response = await this.fetcher(`${this.baseUrl}/speech/transcriptions`, {
+      method: "POST",
+      body: audio,
+      headers: { "Content-Type": audio.type || "audio/webm" },
+      signal,
+    });
+    return parseApiResponse<SpeechTranscriptionResponse>(response);
   }
 
   resetDemo(signal?: AbortSignal) {

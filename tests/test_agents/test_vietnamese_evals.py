@@ -24,11 +24,26 @@ def _success(name: str, arguments: dict[str, Any], data: object) -> dict[str, ob
 @tool
 async def get_parking_status() -> dict[str, object]:
     """Return deterministic parking counts."""
-    return _success("get_parking_status", {}, {"available": 7})
+    return _success(
+        "get_parking_status",
+        {},
+        {"available": 7, "by_zone": {"D": {"AVAILABLE": 5}}},
+    )
+
+
+@tool
+async def get_parking_slot_status(slot_id: str) -> dict[str, object]:
+    """Return the authoritative state of one deterministic slot."""
+    return _success(
+        "get_parking_slot_status",
+        {"slot_id": slot_id},
+        {"id": slot_id, "zone_id": "D", "status": "AVAILABLE"},
+    )
 
 
 @tool
 async def recommend_parking_slot(
+    zone_id: str | None = None,
     charging_required: bool = False,
     accessible_required: bool = False,
     near_elevator: bool = False,
@@ -36,6 +51,7 @@ async def recommend_parking_slot(
 ) -> dict[str, object]:
     """Return one deterministic recommendation without reserving it."""
     arguments = {
+        "zone_id": zone_id,
         "charging_required": charging_required,
         "accessible_required": accessible_required,
         "near_elevator": near_elevator,
@@ -81,6 +97,8 @@ async def get_route(destination_node_id: str) -> dict[str, object]:
             "start_node_id": "F1-CP3",
             "destination_node_id": destination_node_id,
             "path": ["F1-CP3", destination_node_id],
+            "distance_m": 10,
+            "polyline": [[85, 50], [58, 70]],
         },
     )
 
@@ -130,6 +148,7 @@ async def cancel_reservation(reservation_id: str) -> dict[str, object]:
 
 EVAL_TOOLS: tuple[BaseTool, ...] = (
     get_parking_status,
+    get_parking_slot_status,
     recommend_parking_slot,
     reserve_parking_slot,
     get_route,
@@ -197,6 +216,16 @@ async def test_vietnamese_intent_eval_is_deterministic(case):
         final_text = "Tôi không thể bỏ qua quy tắc hoặc sửa cơ sở dữ liệu trực tiếp."
     elif case.name == "occupied_slot_is_rejected":
         final_text = "Ô đó không còn trống; tôi chưa giữ chỗ nào cho bạn."
+    elif case.name == "route_to_exact_slot_with_status":
+        final_text = (
+            "Ô F1-D01 hiện đang AVAILABLE. Đây là tuyến đường tới ô. "
+            "Bạn có muốn đỗ xe ở ô F1-D01 không?"
+        )
+    elif case.name == "route_to_zone_d_with_status":
+        final_text = (
+            "Khu D còn 5 ô AVAILABLE; tôi đã chỉ đường tới ô F1-D01 đang trống. "
+            "Bạn có muốn đỗ xe ở ô F1-D01 không?"
+        )
     else:
         final_text = "Đã xử lý yêu cầu bằng dữ liệu từ công cụ."
     responses.append(AIMessage(content=final_text))
@@ -218,10 +247,15 @@ async def test_vietnamese_intent_eval_is_deterministic(case):
     assert result["messages"][-1].content == final_text
     assert "analysis" not in result
 
-    if case.name == "recommend_ev_near_elevator":
+    if case.name in {"recommend_ev_near_elevator", "recommend_in_zone_d"}:
         assert result["recommended_slot_ids"] == ["F1-D01"]
         assert "active_reservation_id" not in result
         assert "reserve_parking_slot" not in [name for name, _ in EVAL_CALLS]
+    elif case.name in {"route_to_exact_slot_with_status", "route_to_zone_d_with_status"}:
+        assert result["route"].path[-1] == "F1-D01"
+        assert result["selected_slot"] == "F1-D01"
+        assert "AVAILABLE" in final_text
+        assert "Bạn có muốn đỗ xe ở ô F1-D01 không?" in final_text
     elif case.name == "occupied_slot_is_rejected":
         assert result["tool_result"]["error"]["code"] == "SLOT_NOT_AVAILABLE"
         assert "active_reservation_id" not in result
