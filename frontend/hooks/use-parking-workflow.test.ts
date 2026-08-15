@@ -372,6 +372,54 @@ describe("useParkingWorkflow", () => {
     });
   });
 
+  it("returns the Agent response message after preserving structured UI effects", async () => {
+    sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-response");
+    const { api, data, refresh } = fixture();
+    api.chat.mockResolvedValue(
+      chatResponse({
+        message: "Đã giữ ô F1-D01.",
+        selected_slot: "F1-D01",
+        current_location: "F1-ENTRANCE",
+        tool_names: ["reserve_parking_slot"],
+      }),
+    );
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    await waitFor(() => expect(result.current.threadId).toBe("thread-response"));
+
+    let responseMessage: string | null = null;
+    await act(async () => {
+      responseMessage = await result.current.sendAgentMessage("Giữ ô này");
+    });
+
+    expect(responseMessage).toBe("Đã giữ ô F1-D01.");
+    expect(result.current.selectedSlotId).toBe("F1-D01");
+    expect(result.current.currentLocationId).toBe("F1-ENTRANCE");
+    expect(result.current.lastToolNames).toEqual(["reserve_parking_slot"]);
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("returns null when the Agent request fails", async () => {
+    sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-error");
+    const { api, data } = fixture();
+    api.chat.mockRejectedValue(
+      new ApiError({
+        code: "AGENT_TOOL_UNAVAILABLE",
+        message: "Agent unavailable.",
+        status: 503,
+      }),
+    );
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    await waitFor(() => expect(result.current.threadId).toBe("thread-error"));
+
+    let responseMessage: string | null = "unexpected";
+    await act(async () => {
+      responseMessage = await result.current.sendAgentMessage("Tìm ô giúp tôi");
+    });
+
+    expect(responseMessage).toBeNull();
+    expect(result.current.notice).toContain("thử gửi lại");
+  });
+
   it("highlights only structured Agent recommendation IDs", async () => {
     sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-recommend");
     const { api, data } = fixture();

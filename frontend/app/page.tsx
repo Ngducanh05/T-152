@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { useState } from "react";
 
+import { AgentComposer } from "@/components/assistant/AgentComposer";
 import { LocationConfirmationOutcome } from "@/components/location/LocationConfirmationOutcome";
 import { LocationPicker } from "@/components/location/LocationPicker";
 import { ParkingMap } from "@/components/parking/ParkingMap";
@@ -17,7 +18,6 @@ export default function Home() {
   const [needAccessible, setNeedAccessible] = useState(false);
   const [nearElevator, setNearElevator] = useState(true);
   const [showLocationConfirm, setShowLocationConfirm] = useState(false);
-  const [input, setInput] = useState("");
 
   const selectedSlot =
     data.slots.find((slot) => slot.id === workflow.selectedSlotId) ?? null;
@@ -31,14 +31,6 @@ export default function Home() {
       accessibleRequired: needAccessible,
       nearElevator,
     });
-  }
-
-  function sendMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const message = input.trim();
-    if (!message || !workflow.threadId || workflow.pending === "chat") return;
-    setInput("");
-    void workflow.sendAgentMessage(message);
   }
 
   return (
@@ -181,10 +173,11 @@ export default function Home() {
             {workflow.lastToolNames.length > 0 && <div className="tool-summary" aria-label="Công cụ Agent đã dùng">Tools: {workflow.lastToolNames.join(" · ")}</div>}
             {workflow.retryMessage && <button className="agent-retry" onClick={() => void workflow.retryAgentMessage()} disabled={workflow.pending === "chat"}>Thử gửi lại</button>}
             <div className="quick-actions"><button onClick={requestRecommendations}>⚡ Tìm ô có sạc</button><button onClick={() => void workflow.findVehicleAndRoute()}>⌖ Xe của tôi</button><button onClick={() => setShowLocationConfirm(true)}>⌖ Xác nhận vị trí</button></div>
-            <form className="chat-input" onSubmit={sendMessage}>
-              <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Hỏi ParkSmart AI..." aria-label="Tin nhắn cho ParkSmart AI" disabled={!workflow.threadId || workflow.pending === "chat"} />
-              <button type="submit" disabled={!workflow.threadId || workflow.pending === "chat"} aria-label="Gửi tin nhắn">{workflow.pending === "chat" ? "…" : "↑"}</button>
-            </form>
+            <AgentComposer
+              onSend={workflow.sendAgentMessage}
+              threadReady={Boolean(workflow.threadId)}
+              chatPending={workflow.pending === "chat"}
+            />
             <p className="agent-note"><span>✓</span> Mọi mutation chờ backend thành công rồi tải lại trạng thái authoritative.</p>
           </aside>
         </div>
