@@ -81,7 +81,7 @@ export interface ParkingWorkflow {
   findVehicleAndRoute: () => Promise<void>;
   completeSession: () => Promise<void>;
   resetDemo: () => Promise<void>;
-  sendAgentMessage: (message: string) => Promise<void>;
+  sendAgentMessage: (message: string) => Promise<string | null>;
   retryAgentMessage: () => Promise<void>;
 }
 
@@ -144,7 +144,7 @@ export function useParkingWorkflow(
       setNotice(
         formatApiErrorForOperator(
           error,
-          "Ô vừa thay đổi hoặc không còn trống. Dữ liệu đã được tải lại; hãy chọn một ô AVAILABLE khác và thử lại.",
+          "Ô vừa thay đổi hoặc không còn trống. Thông tin đã được tải lại; hãy chọn một ô đang trống khác và thử lại.",
         ),
       );
       return;
@@ -225,7 +225,7 @@ export function useParkingWorkflow(
       return;
     }
     if (slot.status !== "AVAILABLE") {
-      setNotice(`Ô ${slot.id} hiện không trống. Hãy chọn một ô AVAILABLE khác.`);
+      setNotice(`Ô ${slot.id} hiện không trống. Hãy chọn một ô đang trống khác.`);
       return;
     }
     setPending("reserve");
@@ -272,7 +272,7 @@ export function useParkingWorkflow(
     const reservation = data.activeReservation;
     const slot = data.slots.find((candidate) => candidate.id === reservation?.slot_id);
     if (!reservation || !slot) {
-      setNotice("Không có reservation đang hoạt động để xác nhận đỗ xe.");
+      setNotice("Bạn chưa có chỗ đỗ đã giữ để xác nhận.");
       return;
     }
     setPending("confirm-parking");
@@ -371,7 +371,7 @@ export function useParkingWorkflow(
 
   async function sendAgentMessage(message: string, appendUserMessage = true) {
     const trimmed = message.trim();
-    if (!trimmed || !threadId || chatInFlightRef.current) return;
+    if (!trimmed || !threadId || chatInFlightRef.current) return null;
     chatInFlightRef.current = true;
     if (appendUserMessage) {
       setMessages((current) => [...current, { role: "user", text: trimmed }]);
@@ -408,6 +408,7 @@ export function useParkingWorkflow(
       setActiveRoute(response.route);
       setAgentCurrentLocationId(response.current_location);
       setLastToolNames(response.tool_names);
+      return response.message;
     } catch (error) {
       if (
         error instanceof ApiError &&
@@ -424,6 +425,7 @@ export function useParkingWorkflow(
       } else {
         setNotice(vietnameseError(error));
       }
+      return null;
     } finally {
       chatInFlightRef.current = false;
       setPending(null);

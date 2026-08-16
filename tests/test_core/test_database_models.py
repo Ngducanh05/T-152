@@ -22,6 +22,7 @@ EXPECTED_TABLES = {
     "parking_reservations",
     "parking_sessions",
     "parking_events",
+    "wrong_parking_reports",
 }
 
 
@@ -45,14 +46,17 @@ def test_parking_migration_follows_profiles_revision():
 
     location_cleanup_revision = scripts.get_revision("20260812_0003")
     nearest_aisle_revision = scripts.get_revision("20260813_0004")
+    wrong_parking_report_revision = scripts.get_revision("20260815_0005")
 
-    assert scripts.get_current_head() == "20260813_0004"
+    assert scripts.get_current_head() == "20260815_0005"
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
     assert location_cleanup_revision is not None
     assert location_cleanup_revision.down_revision == "20260811_0002"
     assert nearest_aisle_revision is not None
     assert nearest_aisle_revision.down_revision == "20260812_0003"
+    assert wrong_parking_report_revision is not None
+    assert wrong_parking_report_revision.down_revision == "20260813_0004"
 
 
 def test_cold_start_sql_creates_profile_enum_once():

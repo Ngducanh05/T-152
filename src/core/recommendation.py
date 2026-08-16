@@ -88,6 +88,7 @@ class RecommendationService:
             for slot in slots
             if slot.status is SlotStatus.AVAILABLE
             and slot.floor_id == start_node.floor_id
+            and (request.zone_id is None or slot.zone_id == request.zone_id)
             and (not request.charging_required or slot.has_charger)
             and (not request.accessible_required or slot.is_accessible)
         ]

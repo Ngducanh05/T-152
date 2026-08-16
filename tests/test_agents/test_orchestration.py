@@ -28,6 +28,7 @@ async def get_parking_status() -> dict[str, object]:
 
 @tool
 async def recommend_parking_slot(
+    zone_id: str | None = None,
     charging_required: bool = False,
     accessible_required: bool = False,
     near_elevator: bool = False,
@@ -35,6 +36,7 @@ async def recommend_parking_slot(
 ) -> dict[str, object]:
     """Fake recommendation."""
     arguments = {
+        "zone_id": zone_id,
         "charging_required": charging_required,
         "accessible_required": accessible_required,
         "near_elevator": near_elevator,
@@ -407,6 +409,9 @@ def test_system_prompt_contains_required_safety_contract():
         "người dùng đã chấp nhận rõ ràng",
         "chỉ hỏi đúng một câu",
         "vị trí đã được xác nhận",
+        "hard constraint",
+        "get_parking_slot_status",
+        "có muốn đỗ xe ở đúng ô đó không",
         "active Parking Session",
         "internal reasoning",
     )

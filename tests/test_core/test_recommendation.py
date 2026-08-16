@@ -228,6 +228,16 @@ async def test_limit(recommendation_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_requested_zone_is_a_hard_filter(recommendation_session: AsyncSession):
+    result = await _service(recommendation_session).recommend(
+        _request(zone_id="D", limit=10)
+    )
+
+    assert len(result.recommendations) == 10
+    assert all(candidate.slot_id.startswith("F1-D") for candidate in result.recommendations)
+
+
+@pytest.mark.asyncio
 async def test_no_matching_slot_returns_empty_result(recommendation_session: AsyncSession):
     result = await _service(recommendation_session).recommend(
         _request(charging_required=True, accessible_required=True)

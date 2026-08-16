@@ -17,6 +17,7 @@ from src.agents.tools.parking import (
     complete_parking_session,
     confirm_parking,
     find_parked_vehicle,
+    get_parking_slot_status,
     get_parking_status,
     get_route,
     recommend_parking_slot,
@@ -141,9 +142,16 @@ def _parking_session(*, status: ParkingSessionStatus = ParkingSessionStatus.ACTI
     ("agent_tool", "visible_fields"),
     [
         (get_parking_status, set()),
+        (get_parking_slot_status, {"slot_id"}),
         (
             recommend_parking_slot,
-            {"charging_required", "accessible_required", "near_elevator", "limit"},
+            {
+                "zone_id",
+                "charging_required",
+                "accessible_required",
+                "near_elevator",
+                "limit",
+            },
         ),
         (reserve_parking_slot, {"slot_id", "expected_version"}),
         (get_route, {"destination_node_id"}),
@@ -184,6 +192,41 @@ async def test_get_parking_status_calls_parking_state_service():
 
 
 @pytest.mark.asyncio
+async def test_get_parking_slot_status_returns_authoritative_slot():
+    runtime, _ = _runtime()
+    slot = SimpleNamespace(
+        id="F1-D01",
+        floor_id="F1",
+        zone_id="D",
+        node_id="F1-D-W",
+        status=SlotStatus.AVAILABLE,
+        has_charger=True,
+        is_accessible=False,
+        version=3,
+        occupied_by_vehicle_id=None,
+    )
+    with patch.object(
+        ParkingStateService,
+        "get_slot",
+        AsyncMock(return_value=slot),
+    ) as core_call:
+        result = await _invoke(get_parking_slot_status, runtime, slot_id="F1-D01")
+
+    core_call.assert_awaited_once_with("F1-D01")
+    assert result["data"] == {
+        "id": "F1-D01",
+        "floor_id": "F1",
+        "zone_id": "D",
+        "node_id": "F1-D-W",
+        "status": "AVAILABLE",
+        "has_charger": True,
+        "is_accessible": False,
+        "version": 3,
+        "occupied_by_vehicle_id": None,
+    }
+
+
+@pytest.mark.asyncio
 async def test_recommendation_uses_confirmed_location_and_never_reserves():
     runtime, session_factory = _runtime(state={"current_location": "F1-FAKE"})
     recommendations = RecommendationResult(
@@ -212,6 +255,7 @@ async def test_recommendation_uses_confirmed_location_and_never_reserves():
         result = await _invoke(
             recommend_parking_slot,
             runtime,
+            zone_id="D",
             charging_required=True,
             accessible_required=False,
             near_elevator=True,
@@ -222,6 +266,7 @@ async def test_recommendation_uses_confirmed_location_and_never_reserves():
     request = core_call.await_args.args[0]
     assert request.user_id == "USER-001"
     assert request.start_node_id == "F1-CP3"
+    assert request.zone_id == "D"
     reservation_service.assert_not_called()
     assert result["data"]["recommendations"][0]["slot_id"] == "F1-D01"
     assert session_factory.sessions[0].commits == 1
@@ -596,6 +641,7 @@ async def test_missing_location_returns_stable_error_without_recommendation():
 def test_all_required_tools_are_registered():
     assert {agent_tool.name for agent_tool in PARKING_TOOLS} == {
         "get_parking_status",
+        "get_parking_slot_status",
         "recommend_parking_slot",
         "reserve_parking_slot",
         "get_route",

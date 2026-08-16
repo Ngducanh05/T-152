@@ -10,6 +10,15 @@ export type ReservationStatus =
   | "EXPIRED"
   | "CANCELLED";
 export type ParkingSessionStatus = "ACTIVE" | "COMPLETED" | "CANCELLED";
+export type ActorType = "USER" | "SIMULATOR" | "CAMERA" | "SYSTEM";
+export type ParkingEventType =
+  | "VEHICLE_ENTERED"
+  | "SLOT_RESERVED"
+  | "RESERVATION_CANCELLED"
+  | "RESERVATION_EXPIRED"
+  | "VEHICLE_PARKED"
+  | "VEHICLE_LEFT_SLOT"
+  | "VEHICLE_EXITED";
 export type MapNodeType =
   | "ENTRANCE"
   | "EXIT"
@@ -93,6 +102,7 @@ export interface ConfirmLocationRequest {
 export interface RecommendationRequest {
   user_id: EntityId;
   start_node_id: FloorScopedId;
+  zone_id?: ZoneId | null;
   charging_required?: boolean;
   accessible_required?: boolean;
   near_elevator?: boolean;
@@ -192,6 +202,10 @@ export interface ChatResponse {
   route: RouteResult | null;
 }
 
+export interface SpeechTranscriptionResponse {
+  text: string;
+}
+
 export type SimulatorAction = "RESET" | "PARK" | "LEAVE";
 
 export interface SimulatorStep {
@@ -200,6 +214,46 @@ export interface SimulatorStep {
   slot_id: FloorScopedId | null;
   vehicle_id: string | null;
   resulting_status: SlotStatus | null;
+}
+
+export interface SimulatorMutationRequest {
+  slot_id: FloorScopedId;
+  vehicle_id: EntityId;
+}
+
+export interface ParkingEvent {
+  id: EntityId;
+  event_type: ParkingEventType;
+  slot_id: FloorScopedId | null;
+  actor_type: ActorType;
+  actor_id: EntityId | null;
+  old_status: SlotStatus | null;
+  new_status: SlotStatus | null;
+  created_at: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface AdminEventFilters {
+  limit?: number;
+  zone_id?: ZoneId;
+  event_type?: ParkingEventType;
+  slot_id?: FloorScopedId;
+}
+
+export interface WrongParkingReport {
+  id: EntityId;
+  reporter_user_id: EntityId;
+  slot_id: FloorScopedId;
+  observed_plate_number: string | null;
+  description: string;
+  created_at: string;
+}
+
+export interface CreateWrongParkingReportRequest {
+  user_id: EntityId;
+  slot_id: FloorScopedId;
+  observed_plate_number?: string | null;
+  description: string;
 }
 
 export interface SlotFilters {

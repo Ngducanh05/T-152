@@ -15,8 +15,8 @@
 
 * { box-sizing: border-box; padding: 0; margin: 0; }
 html, body { min-height: 100%; }
-body { background: var(--canvas); color: var(--ink); font-family: Arial, Helvetica, sans-serif; -webkit-font-smoothing: antialiased; }
-button, input, select { font: inherit; }
+body { background: var(--canvas); color: var(--ink); font-family: "Segoe UI", "Noto Sans", "Helvetica Neue", Arial, sans-serif; font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+button, input, select, textarea { font: inherit; }
 button { color: inherit; }
 
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 224px minmax(0, 1fr); }
@@ -102,6 +102,156 @@ button { color: inherit; }
   .app-shell { display: block; padding-bottom: 64px; }.sidebar { position: fixed; top: auto; bottom: 0; width: 100%; height: 64px; padding: 7px 12px; border-right: 0; border-top: 1px solid var(--line); flex-direction: row; align-items: center; background: #fff; }.brand, .profile { display: none; }.sidebar nav { width: 100%; grid-template-columns: repeat(3, 1fr); }.nav-item { flex-direction: column; gap: 2px; padding: 4px; }.nav-item span { font-size: 18px; }.nav-item b { display: block; font-size: 8px; }.workspace { padding: 0 12px 20px; }.topbar { height: auto; padding: 18px 2px; align-items: flex-start; }.topbar h1 { font-size: 18px; }.top-actions .icon-button { display: none; }.location-button { min-width: 0; padding: 8px; }.location-button span:nth-child(2) { display: none; }.content-grid { min-width: 0; }.assistant-card { height: 530px; min-height: 0; }.lower-grid { grid-template-columns: 1fr; }.stats-row { grid-template-columns: repeat(3, 1fr); }.occupancy { display: none; }.parking-map { height: 760px; padding: 72px 14px 48px; }.parking-map::before { top: 72px; width: 14px; }.zones { grid-template-columns: 1fr; gap: 34px; }.slot-grid { grid-template-columns: repeat(3, 1fr); column-gap: 7px; row-gap: 34px; }.parking-slot { height: 67px; }.zone-title { margin-bottom: 5px; }.map-label.elevator { display: none; }.road { gap: 12px; }.cross-aisles > i { left: 14px !important; right: 14px; width: auto; height: 26px; bottom: auto; transform: none; border: 0; border-top: 1px dashed #bdc8c2; border-bottom: 1px dashed #bdc8c2; }.cross-aisles > i:first-child { top: 35%; }.cross-aisles > i:last-child { top: 65%; }.cross-aisles span { transform: translate(-50%, -50%); }.route-path { --route-top-left: var(--route-mobile-top-left) !important; --route-top-width: var(--route-mobile-top-width) !important; --route-aisle-x: var(--route-mobile-aisle-x) !important; --route-lane-y: var(--route-mobile-lane-y) !important; --route-final-left: var(--route-mobile-final-left) !important; --route-final-width: var(--route-mobile-final-width) !important; --route-target-x: var(--route-mobile-target-x) !important; --route-start-y: 8%; }.legend { gap: 10px; flex-wrap: wrap; }.slot-list button { grid-template-columns: 70px 45px 1fr 65px; }.session-banner { flex-wrap: wrap; }.session-banner div { min-width: 180px; }.sim-slots { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* Readable Vietnamese typography and wrong-parking reports */
+button, input, select, textarea, label, p, small { line-height: 1.45; }
+.nav-item b { font-size: 14px; }
+.profile b { font-size: 13px; }.profile small { font-size: 11px; }
+.eyebrow { font-size: 11px; line-height: 1.35; }
+.topbar h1 { font-size: 26px; }
+.location-button small { font-size: 11px; }.location-button b { font-size: 13px; }
+.card-header h2, .assistant-header h2 { font-size: 18px; }.card-header p { font-size: 11px; }
+.stats-row b { font-size: 19px; }.stats-row small { font-size: 11px; }
+.primary-button, .secondary-button { min-height: 40px; font-size: 12px; }
+.deterministic { font-size: 10px; }
+.preference-row b { font-size: 12px; }.preference-row small { font-size: 10px; }
+.candidate-list > p, .candidate-list b, .candidate-list span { font-size: 11px; }
+.selected-slot-detail small { font-size: 10px; }.selected-slot-detail strong { font-size: 12px; }.selected-slot-detail > span { font-size: 11px; }
+.route-contract-copy, .structured-result { font-size: 11px; line-height: 1.6; }
+.reservation-banner small, .session-banner small { font-size: 10px; }.reservation-banner b, .session-banner b { font-size: 13px; }
+.reservation-banner button, .session-banner button { font-size: 11px; }
+.assistant-header p { font-size: 11px; }
+.message p { font-size: 13px; line-height: 1.6; }.message small { font-size: 10px; }
+.date-separator { font-size: 9px; }.chat-loading { font-size: 11px; }
+.quick-actions button { padding: 7px 10px; font-size: 11px; }
+.chat-input input { font-size: 13px; }.agent-note { font-size: 11px; line-height: 1.5; }
+.page-alert { font-size: 12px; line-height: 1.5; }
+.map-legend { font-size: 10px; }.live-map-indicator { font-size: 10px; }
+.map-slot b { font-size: 10px; }.map-slot-badge { font-size: 8px; }
+.location-picker-section h3, .slot-location-form > label { font-size: 12px; }
+.location-choice-grid button, .slot-location-options button { font-size: 10px; }
+.slot-location-controls input, .slot-location-controls button { font-size: 12px; }
+.location-validation, .location-api-error, .location-pending, .location-confirmation-outcome { font-size: 11px; }
+.parking-summary { grid-template-columns: repeat(4, minmax(105px, auto)) minmax(150px, 1fr); }
+.content-grid { grid-template-columns: minmax(620px, 1fr) 360px; }
+
+.wrong-parking-report-dialog { width: min(560px, calc(100vw - 28px)); }
+.wrong-parking-report-form { margin-top: 16px; display: grid; gap: 14px; }
+.wrong-parking-report-form > p { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.wrong-parking-report-form label { margin: 0; display: grid; gap: 7px; color: var(--ink); font-size: 12px; font-weight: 700; }
+.wrong-parking-report-form select, .wrong-parking-report-form input, .wrong-parking-report-form textarea { width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: #fff; font-size: 13px; }
+.wrong-parking-report-form textarea { min-height: 116px; resize: vertical; }
+.wrong-parking-report-form label small { justify-self: end; color: var(--muted); font-size: 10px; font-weight: 400; }
+.wrong-parking-report-form .primary-button { width: 100%; }
+.wrong-parking-report-form button:disabled { opacity: .5; cursor: not-allowed; }
+.report-error { padding: 10px 12px; color: #7c2727; background: #fff0f0; border: 1px solid #efc6c6; border-radius: 8px; font-size: 12px; }
+.report-success { margin-top: 20px; padding: 18px; display: grid; gap: 10px; color: var(--green-dark); background: var(--green-soft); border: 1px solid #9bcdb5; border-radius: 12px; }
+.report-success b { font-size: 17px; }.report-success p { font-size: 13px; }.report-success button { margin-top: 5px; }
+
+.admin-topbar > div > p:last-child { font-size: 12px; }
+.admin-top-actions a { font-size: 11px; }
+.admin-error, .admin-operation-notice { font-size: 12px; }
+.admin-metrics small { font-size: 11px; }.admin-metrics span { font-size: 10px; }
+.admin-section-heading h2 { font-size: 19px; }.admin-section-heading > span { font-size: 11px; }
+.zone-density-grid article > div:first-child { font-size: 13px; }.zone-density-grid small { font-size: 11px; }
+.admin-filters label, .admin-operations label { font-size: 11px; }
+.admin-filters select, .admin-operations select, .admin-operations input { font-size: 12px; }
+.admin-filters > span { font-size: 11px; }
+.admin-operations form h3 { font-size: 14px; }
+.admin-empty { font-size: 12px; }
+.admin-event-list b { font-size: 12px; }.admin-event-list span, .admin-event-list small, .admin-event-list time { font-size: 10px; }
+.admin-report-list { display: grid; }
+.admin-report-list article { min-height: 72px; padding: 13px 4px; display: grid; grid-template-columns: minmax(180px, .8fr) minmax(260px, 1.5fr) 160px; align-items: center; gap: 16px; border-top: 1px solid var(--line); }
+.admin-report-list article > div { display: grid; gap: 4px; }
+.admin-report-list b { font-size: 13px; }.admin-report-list small, .admin-report-list time { color: var(--muted); font-size: 10px; }
+.admin-report-list p { font-size: 12px; line-height: 1.55; }.admin-report-list time { text-align: right; }
+.admin-report-refresh { display: flex; align-items: center; gap: 10px; }
+.admin-report-refresh > span { color: var(--muted); font-size: 11px; font-weight: 700; }
+
+@media (max-width: 1080px) {
+  .content-grid { display: flex; }
+}
+
+@media (max-width: 680px) {
+  .topbar h1 { font-size: 21px; }
+  .parking-summary { grid-template-columns: repeat(2, 1fr); }
+  .admin-report-list article { grid-template-columns: 1fr; gap: 7px; }
+  .admin-report-list time { text-align: left; }
+  .admin-report-refresh { align-items: flex-end; flex-direction: column; }
+}
+
+/* Phase 10 admin operations dashboard */
+.admin-shell { min-height: 100vh; padding: 28px clamp(16px, 3vw, 42px) 48px; background: #f2f5f3; }
+.admin-topbar { max-width: 1540px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.admin-topbar h1 { margin-top: 4px; font-size: clamp(22px, 3vw, 34px); }
+.admin-topbar > div > p:last-child { margin-top: 7px; color: var(--muted); font-size: 10px; }
+.admin-top-actions { display: flex; align-items: center; gap: 10px; }
+.admin-top-actions .secondary-button { width: auto; min-width: 120px; }
+.admin-top-actions a { padding: 10px 14px; color: #fff; background: var(--green-dark); border-radius: 9px; font-size: 9px; font-weight: 800; text-decoration: none; }
+.admin-error, .admin-operation-notice { max-width: 1540px; margin: 0 auto 14px; padding: 11px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #efc6c6; border-radius: 10px; color: #7c2727; background: #fff0f0; font-size: 10px; }
+.admin-error button, .admin-events .admin-section-heading > button { padding: 7px 10px; border: 1px solid currentColor; border-radius: 7px; color: inherit; background: transparent; font-size: 8px; font-weight: 800; cursor: pointer; }
+.admin-operation-notice { color: var(--green-dark); background: var(--green-soft); border-color: #9bcdb5; }
+.admin-loading { max-width: 1540px; min-height: 300px; margin: 0 auto; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.admin-metrics { max-width: 1540px; margin: 0 auto 16px; display: grid; grid-template-columns: repeat(6, minmax(115px, 1fr)) minmax(190px, 1.4fr); gap: 10px; }
+.admin-metrics article { min-height: 100px; padding: 16px; display: flex; flex-direction: column; justify-content: center; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: 0 8px 24px #163d2e0a; }
+.admin-metrics small { color: var(--muted); font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .6px; }
+.admin-metrics b { margin-top: 8px; color: var(--green-dark); font-size: 25px; }
+.admin-metrics span { margin-top: 3px; color: var(--muted); font-size: 8px; }
+.admin-metrics .last-updated b { font-size: 13px; line-height: 1.4; }
+.zone-density-card, .admin-main-grid, .admin-events { max-width: 1540px; margin: 0 auto 16px; }
+.zone-density-card { padding: 18px; }
+.admin-section-heading { margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.admin-section-heading h2 { margin-top: 3px; font-size: 16px; }
+.admin-section-heading > span { color: var(--muted); font-size: 8px; }
+.zone-density-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.zone-density-grid article { padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: #fafcfb; }
+.zone-density-grid article > div:first-child { display: flex; justify-content: space-between; font-size: 10px; }
+.zone-density-grid strong { color: var(--green-dark); }
+.zone-density-grid small { display: block; margin-top: 7px; color: var(--muted); font-size: 8px; }
+.density-track { height: 7px; margin-top: 10px; overflow: hidden; background: #dde5e1; border-radius: 20px; }
+.density-track i { height: 100%; display: block; background: linear-gradient(90deg, var(--green), #e6a43c); border-radius: inherit; }
+.admin-main-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; }
+.admin-map-column { min-width: 0; display: grid; gap: 12px; }
+.admin-filters { padding: 13px; display: grid; grid-template-columns: repeat(3, minmax(130px, 1fr)) auto; gap: 10px; align-items: end; }
+.admin-filters label, .admin-operations label { display: grid; gap: 6px; color: var(--muted); font-size: 8px; font-weight: 800; }
+.admin-filters select, .admin-operations select, .admin-operations input { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font-size: 9px; }
+.admin-filters > span { padding: 10px; color: var(--green-dark); background: var(--green-soft); border-radius: 8px; font-size: 9px; font-weight: 800; text-align: center; }
+.admin-map-column .api-parking-map { height: 600px; }
+.admin-empty { padding: 18px; color: var(--muted); background: #f7faf8; border-radius: 9px; font-size: 9px; text-align: center; }
+.admin-operations { position: sticky; top: 16px; padding: 18px; }
+.admin-operations form { padding: 14px 0; display: grid; gap: 10px; border-top: 1px solid var(--line); }
+.admin-operations form h3 { font-size: 11px; }
+.admin-operations button { width: 100%; }
+.admin-operations button:disabled, .admin-filters select:disabled { opacity: .5; cursor: not-allowed; }
+.admin-scenario-actions { padding-top: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 1px solid var(--line); }
+.admin-events { padding: 18px; }
+.admin-event-list { display: grid; }
+.admin-event-list article { min-height: 58px; padding: 10px 4px; display: grid; grid-template-columns: 10px minmax(150px, 1.1fr) minmax(180px, 1fr) 150px; align-items: center; gap: 10px; border-top: 1px solid var(--line); }
+.admin-event-list article > div { display: grid; gap: 4px; }
+.admin-event-list b { font-size: 10px; }
+.admin-event-list span, .admin-event-list small, .admin-event-list time { color: var(--muted); font-size: 8px; }
+.admin-event-list time { text-align: right; }
+.event-status { width: 8px; height: 8px; border-radius: 50%; background: #9aa7a0; }
+.event-status.available { background: var(--green); }.event-status.reserved { background: #f4a62a; }.event-status.occupied { background: #7e8b85; }
+
+@media (max-width: 1200px) {
+  .admin-metrics { grid-template-columns: repeat(4, 1fr); }
+  .admin-main-grid { grid-template-columns: 1fr; }
+  .admin-operations { position: static; }
+}
+
+@media (max-width: 760px) {
+  .admin-shell { padding: 18px 12px 30px; }
+  .admin-topbar { align-items: flex-start; flex-direction: column; }
+  .admin-top-actions { width: 100%; flex-wrap: wrap; }
+  .admin-metrics { grid-template-columns: repeat(2, 1fr); }
+  .admin-metrics .last-updated { grid-column: 1 / -1; }
+  .zone-density-grid { grid-template-columns: repeat(2, 1fr); }
+  .admin-filters { grid-template-columns: 1fr; }
+  .admin-map-column .api-parking-map { height: 560px; }
+  .admin-event-list article { grid-template-columns: 10px 1fr; }
+  .admin-event-list article > div:nth-of-type(2), .admin-event-list time { grid-column: 2; text-align: left; }
+}
+
 /* Canonical API-driven parking map */
 .live-map-indicator { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; color: var(--green-dark); background: var(--green-soft); border-radius: 20px; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px; }
 .live-map-indicator i { width: 7px; height: 7px; background: var(--green); border-radius: 50%; box-shadow: 0 0 0 4px #20b8741f; }
@@ -162,6 +312,29 @@ button { color: inherit; }
 .location-choice-grid { max-height: 320px; margin-top: 18px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; overflow: auto; }
 .location-choice-grid button { padding: 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: #f8faf9; font-size: 8px; cursor: pointer; }
 .location-choice-grid button:hover, .location-choice-grid button:focus-visible { border-color: var(--green); background: var(--green-soft); }
+.location-choice-grid button[aria-pressed="true"] { color: var(--green-dark); border-color: var(--green); background: var(--green-soft); box-shadow: 0 0 0 2px #168a5b1c; }
+.location-picker { width: min(620px, calc(100vw - 28px)); max-height: min(760px, calc(100vh - 28px)); overflow: auto; }
+.location-picker-section { margin-top: 18px; }
+.location-picker-section h3, .slot-location-form > label { display: block; margin-bottom: 8px; color: var(--ink); font-size: 9px; font-weight: 800; }
+.location-picker .location-choice-grid { margin-top: 0; }
+.slot-location-form { margin-top: 20px; }
+.slot-location-controls { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.slot-location-controls input { min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font-size: 10px; text-transform: uppercase; }
+.slot-location-controls input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-color: var(--blue); }
+.slot-location-controls button { padding: 9px 12px; border: 0; border-radius: 8px; color: #fff; background: var(--green); font-size: 9px; font-weight: 800; cursor: pointer; }
+.slot-location-controls button:disabled, .location-picker button:disabled { opacity: .5; cursor: not-allowed; }
+.slot-location-options { max-height: 190px; margin-top: 7px; padding: 6px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; overflow: auto; border: 1px solid var(--line); border-radius: 9px; background: #f8faf9; }
+.slot-location-options button { padding: 7px 5px; border: 1px solid transparent; border-radius: 6px; color: var(--ink); background: #fff; font-size: 8px; cursor: pointer; }
+.slot-location-options button:hover, .slot-location-options button.active, .slot-location-options button[aria-selected="true"] { color: var(--green-dark); border-color: var(--green); background: var(--green-soft); }
+.slot-location-options > p { grid-column: 1 / -1; padding: 12px; color: var(--muted); font-size: 9px; text-align: center; }
+.location-validation, .location-api-error { margin-top: 8px; color: #8b2d2d; font-size: 9px; }
+.location-pending { margin-top: 12px; color: var(--green-dark); font-size: 9px; font-weight: 800; }
+.location-confirmation-outcome { min-height: 48px; padding: 10px 13px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--green-dark); background: var(--green-soft); border: 1px solid #9bcdb5; border-radius: 12px; font-size: 9px; line-height: 1.5; }
+.location-confirmation-outcome > div { display: grid; gap: 2px; }
+.location-confirmation-outcome > div span { color: var(--muted); }
+.location-confirmation-outcome.matching button { flex: 0 0 auto; padding: 8px 10px; border: 0; color: #fff; background: var(--green); border-radius: 7px; font-size: 9px; font-weight: 800; cursor: pointer; }
+.location-confirmation-outcome.matching button:disabled { opacity: .48; cursor: not-allowed; }
+.location-confirmation-outcome.mismatch { color: #7c2727; background: #fff0f0; border-color: #efc6c6; }
 .reservation-banner { min-height: 58px; padding: 9px 12px; display: flex; align-items: center; gap: 11px; color: #4f3500; background: #fff5dc; border: 1px solid #efd18a; border-radius: 14px; box-shadow: 0 8px 22px #805b1020; }
 .reservation-banner .session-icon { color: #fff; background: #d99008; }
 .reservation-banner div { flex: 1; }.reservation-banner small, .reservation-banner b { display: block; }.reservation-banner small { color: #8d6b25; font-size: 7px; letter-spacing: .8px; }.reservation-banner b { margin-top: 4px; font-size: 11px; }
@@ -192,6 +365,45 @@ button { color: inherit; }
   .api-parking-map { height: 560px; padding: 0; }
   .map-legend { justify-content: flex-start; }
   .location-choice-grid { grid-template-columns: repeat(2, 1fr); }
+  .slot-location-controls { grid-template-columns: 1fr; }
+  .slot-location-options { grid-template-columns: repeat(3, 1fr); }
   .three-options { grid-template-columns: 1fr; }
   .reservation-banner { flex-wrap: wrap; }
+}
+
+/* Keep readability overrides after component-specific rules. */
+body .selected-slot-detail small { font-size: 10px; }
+body .selected-slot-detail strong { font-size: 12px; }
+body .selected-slot-detail > span { font-size: 11px; }
+body .route-contract-copy, body .structured-result { font-size: 11px; line-height: 1.6; }
+body .chat-loading { font-size: 11px; }
+body .agent-note { font-size: 11px; line-height: 1.5; }
+body .page-alert { font-size: 12px; line-height: 1.5; }
+body .map-legend, body .live-map-indicator { font-size: 10px; }
+body .map-slot b { font-size: 10px; }
+body .map-slot-badge { font-size: 8px; }
+body .location-picker-section h3, body .slot-location-form > label { font-size: 12px; }
+body .location-choice-grid button, body .slot-location-options button { font-size: 10px; }
+body .slot-location-controls input, body .slot-location-controls button { font-size: 12px; }
+body .location-validation, body .location-api-error, body .location-pending, body .location-confirmation-outcome { font-size: 11px; }
+body .parking-summary { grid-template-columns: repeat(4, minmax(105px, auto)) minmax(150px, 1fr); }
+body .admin-topbar > div > p:last-child { font-size: 12px; }
+body .admin-top-actions a { font-size: 11px; }
+body .admin-error, body .admin-operation-notice { font-size: 12px; }
+body .admin-metrics small { font-size: 11px; }
+body .admin-metrics span { font-size: 10px; }
+body .admin-section-heading h2 { font-size: 19px; }
+body .admin-section-heading > span { font-size: 11px; }
+body .zone-density-grid article > div:first-child { font-size: 13px; }
+body .zone-density-grid small { font-size: 11px; }
+body .admin-filters label, body .admin-operations label { font-size: 11px; }
+body .admin-filters select, body .admin-operations select, body .admin-operations input { font-size: 12px; }
+body .admin-filters > span { font-size: 11px; }
+body .admin-operations form h3 { font-size: 14px; }
+body .admin-empty { font-size: 12px; }
+body .admin-event-list b { font-size: 12px; }
+body .admin-event-list span, body .admin-event-list small, body .admin-event-list time { font-size: 10px; }
+
+@media (max-width: 680px) {
+  body .parking-summary { grid-template-columns: repeat(2, 1fr); }
 }

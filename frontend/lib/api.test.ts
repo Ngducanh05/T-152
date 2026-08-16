@@ -79,3 +79,90 @@ describe("operator-safe errors", () => {
     );
   });
 });
+
+describe("admin operations client", () => {
+  it("uses typed simulator paths and payloads", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope([])),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+    });
+
+    await api.parkSimulatedVehicle({
+      slot_id: "F1-A01",
+      vehicle_id: "SIM-CAR-01",
+    });
+    await api.leaveSimulatedVehicle({
+      slot_id: "F1-A01",
+      vehicle_id: "SIM-CAR-01",
+    });
+    await api.resetDemo();
+    await api.runFixedScenario();
+
+    expect(fetcher.mock.calls.map(([input]) => String(input))).toEqual([
+      "http://api.test/api/v1/simulator/park",
+      "http://api.test/api/v1/simulator/leave",
+      "http://api.test/api/v1/simulator/reset",
+      "http://api.test/api/v1/simulator/run-scenario",
+    ]);
+    expect(fetcher.mock.calls[0]?.[1]?.body).toBe(
+      JSON.stringify({ slot_id: "F1-A01", vehicle_id: "SIM-CAR-01" }),
+    );
+  });
+
+  it("serializes admin event filters", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope([])),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+    });
+
+    await api.getAdminEvents({
+      limit: 10,
+      zone_id: "D",
+      event_type: "VEHICLE_PARKED",
+      slot_id: "F1-D01",
+    });
+
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      "http://api.test/api/v1/admin/events?limit=10&zone_id=D&event_type=VEHICLE_PARKED&slot_id=F1-D01",
+    );
+  });
+
+  it("submits and reads wrong-parking reports through typed endpoints", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope([])),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+    });
+
+    await api.reportWrongParking({
+      user_id: "USER-001",
+      slot_id: "F1-D01",
+      observed_plate_number: "51A-123.45",
+      description: "Xe đỗ chéo sang ô bên cạnh.",
+    });
+    await api.getAdminReports(10);
+
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      "http://api.test/api/v1/reports/wrong-parking",
+    );
+    expect(fetcher.mock.calls[0]?.[1]?.body).toBe(
+      JSON.stringify({
+        user_id: "USER-001",
+        slot_id: "F1-D01",
+        observed_plate_number: "51A-123.45",
+        description: "Xe đỗ chéo sang ô bên cạnh.",
+      }),
+    );
+    expect(String(fetcher.mock.calls[1]?.[0])).toBe(
+      "http://api.test/api/v1/admin/reports?limit=10",
+    );
+  });
+});

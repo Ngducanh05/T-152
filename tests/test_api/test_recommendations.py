@@ -101,6 +101,19 @@ async def test_empty_recommendations_return_http_200(recommendation_client: Asyn
 
 
 @pytest.mark.asyncio
+async def test_recommendations_honor_requested_zone(recommendation_client: AsyncClient):
+    response = await recommendation_client.post(
+        "/api/v1/recommendations",
+        json=_payload(zone_id="D", limit=10),
+    )
+
+    assert response.status_code == 200
+    candidates = response.json()["data"]["recommendations"]
+    assert len(candidates) == 5
+    assert all(candidate["slot_id"].startswith("F1-D") for candidate in candidates)
+
+
+@pytest.mark.asyncio
 async def test_recommendation_error_contains_request_id(recommendation_client: AsyncClient):
     request_id = str(uuid4())
 

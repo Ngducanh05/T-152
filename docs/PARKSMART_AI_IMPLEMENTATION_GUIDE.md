@@ -490,6 +490,7 @@ Request recommendation:
 {
   "user_id": "USER-001",
   "start_node_id": "F1-ENTRANCE",
+  "zone_id": "D",
   "charging_required": true,
   "near_elevator": true,
   "limit": 3

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
 import { MVP_AGENT_THREAD_STORAGE_KEY } from "@/lib/demo";
-import type { ChatResponse } from "@/lib/types";
+import type { ChatResponse, SlotStatus } from "@/lib/types";
 import { activeReservation } from "@/test/fixtures";
 import type { ParkSmartSnapshot } from "./use-parksmart-data";
 
@@ -94,6 +94,73 @@ function fixture() {
 }
 
 describe("useParkingWorkflow", () => {
+  it("confirms a slot location without reserving it or creating a parking session", async () => {
+    const { api, data, refresh, slot } = fixture();
+    api.confirmLocation.mockResolvedValue({
+      user_id: "USER-001",
+      node_id: "F1-D01",
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      await result.current.confirmLocation("F1-D01");
+    });
+
+    expect(api.confirmLocation).toHaveBeenCalledOnce();
+    expect(api.confirmLocation).toHaveBeenCalledWith({
+      user_id: "USER-001",
+      node_id: "F1-D01",
+    });
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(api.createReservation).not.toHaveBeenCalled();
+    expect(api.confirmParking).not.toHaveBeenCalled();
+    expect(api.getActiveSession).not.toHaveBeenCalled();
+    expect(slot.status).toBe("AVAILABLE");
+    expect(data.activeReservation).toBeNull();
+    expect(data.activeSession).toBeNull();
+  });
+
+  it.each<SlotStatus>(["AVAILABLE", "RESERVED", "OCCUPIED"])(
+    "does not change %s slot state locally when confirming location",
+    async (status) => {
+      const { api, data, slot } = fixture();
+      (slot as { status: SlotStatus }).status = status;
+      api.confirmLocation.mockResolvedValue({
+        user_id: "USER-001",
+        node_id: "F1-D01",
+      });
+      const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+      await act(async () => {
+        await result.current.confirmLocation("F1-D01");
+      });
+
+      expect(slot.status).toBe(status);
+      expect(api.confirmParking).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves backend location error code and request ID", async () => {
+    const { api, data } = fixture();
+    api.confirmLocation.mockRejectedValue(
+      new ApiError({
+        code: "LOCATION_NODE_NOT_FOUND",
+        message: "Location node was not found.",
+        requestId: "request-location-404",
+        status: 404,
+      }),
+    );
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      await result.current.confirmLocation("F1-UNKNOWN");
+    });
+
+    expect(result.current.notice).toContain("LOCATION_NODE_NOT_FOUND");
+    expect(result.current.notice).toContain("request-location-404");
+    expect(api.confirmParking).not.toHaveBeenCalled();
+  });
+
   it("highlights recommendations without selecting or reserving a slot", async () => {
     const { api, data, refresh, slot } = fixture();
     const { result } = renderHook(() => useParkingWorkflow(data, api));
@@ -154,7 +221,7 @@ describe("useParkingWorkflow", () => {
     expect(refresh).toHaveBeenCalledOnce();
     expect(slot.status).toBe("AVAILABLE");
     expect(result.current.selectedSlotId).toBeNull();
-    expect(result.current.notice).toContain("hãy chọn một ô AVAILABLE khác");
+    expect(result.current.notice).toContain("hãy chọn một ô đang trống khác");
   });
 
   it("allows selecting and reserving an available map slot outside recommendations", async () => {
@@ -303,6 +370,54 @@ describe("useParkingWorkflow", () => {
       current_location: "F1-ENTRANCE",
       message: "Chỉ đường tới đó",
     });
+  });
+
+  it("returns the Agent response message after preserving structured UI effects", async () => {
+    sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-response");
+    const { api, data, refresh } = fixture();
+    api.chat.mockResolvedValue(
+      chatResponse({
+        message: "Đã giữ ô F1-D01.",
+        selected_slot: "F1-D01",
+        current_location: "F1-ENTRANCE",
+        tool_names: ["reserve_parking_slot"],
+      }),
+    );
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    await waitFor(() => expect(result.current.threadId).toBe("thread-response"));
+
+    let responseMessage: string | null = null;
+    await act(async () => {
+      responseMessage = await result.current.sendAgentMessage("Giữ ô này");
+    });
+
+    expect(responseMessage).toBe("Đã giữ ô F1-D01.");
+    expect(result.current.selectedSlotId).toBe("F1-D01");
+    expect(result.current.currentLocationId).toBe("F1-ENTRANCE");
+    expect(result.current.lastToolNames).toEqual(["reserve_parking_slot"]);
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("returns null when the Agent request fails", async () => {
+    sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-error");
+    const { api, data } = fixture();
+    api.chat.mockRejectedValue(
+      new ApiError({
+        code: "AGENT_TOOL_UNAVAILABLE",
+        message: "Agent unavailable.",
+        status: 503,
+      }),
+    );
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    await waitFor(() => expect(result.current.threadId).toBe("thread-error"));
+
+    let responseMessage: string | null = "unexpected";
+    await act(async () => {
+      responseMessage = await result.current.sendAgentMessage("Tìm ô giúp tôi");
+    });
+
+    expect(responseMessage).toBeNull();
+    expect(result.current.notice).toContain("thử gửi lại");
   });
 
   it("highlights only structured Agent recommendation IDs", async () => {

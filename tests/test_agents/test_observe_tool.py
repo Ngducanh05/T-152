@@ -118,6 +118,7 @@ def test_successful_route_is_validated_and_stored_without_tool_envelope():
         "distance_m": 10.0,
         "polyline": [[85.0, 50.0], [58.0, 70.0]],
     }
+    assert result["selected_slot"] == "F1-D01"
 
 
 @pytest.mark.parametrize(
@@ -144,6 +145,7 @@ def test_failed_or_invalid_route_has_no_structured_result(message):
     result = observe_tool_result({"messages": [message]})
 
     assert "route" not in result
+    assert "selected_slot" not in result
 
 
 def test_recommendations_only_use_valid_ids_from_structured_tool_data():

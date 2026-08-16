@@ -19,7 +19,7 @@ export function RouteOverlay({ route, nodeById }: RouteOverlayProps) {
   const points = visualPoints.map(([x, y]) => `${x},${y}`).join(" ");
 
   return (
-    <g className="map-route" aria-label={`Active route, ${route.distance_m} metres`}>
+    <g className="map-route" aria-label={`Đường đang xem, dài ${route.distance_m} mét`}>
       <defs>
         <marker
           id="route-arrow"

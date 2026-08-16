@@ -42,13 +42,14 @@ The canonical Pydantic definitions live in src/models/schemas.py.
 | MapNode | id, floor_id, type, x, y |
 | MapEdge | from_node, to_node, distance_m, bidirectional, enabled |
 | RouteResult | path, distance_m, polyline |
-| RecommendationRequest | user_id, start_node_id, charging_required, accessible_required, near_elevator, limit |
+| RecommendationRequest | user_id, start_node_id, zone_id, charging_required, accessible_required, near_elevator, limit |
 | RecommendationCandidate | slot_id, score, distance_m, reasons |
 | RecommendationResult | recommendations, parking_state_version |
 | ParkingEvent | id, event_type, slot_id, actor_type, actor_id, old_status, new_status, created_at, metadata |
 
 Nullable fields are User.current_node_id, ParkingSlot.occupied_by_vehicle_id,
-ParkingSession.completed_at, and the event fields that may not apply to a particular event:
+ParkingSession.completed_at, RecommendationRequest.zone_id, and the event fields that may
+not apply to a particular event:
 slot_id, actor_id, old_status, and new_status. ParkingEvent.metadata defaults to an empty
 object. MapEdge.bidirectional and MapEdge.enabled default to true.
 
@@ -100,6 +101,16 @@ HTTP status codes and stable error codes follow the implementation guide:
 | 404 | SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ROUTE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND |
 | 409 | SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS |
 | 503 | AGENT_TOOL_UNAVAILABLE |
+
+Voice transcription additionally uses:
+
+| HTTP | Error code |
+|---:|---|
+| 400 | SPEECH_AUDIO_INVALID |
+| 413 | SPEECH_AUDIO_TOO_LARGE |
+| 422 | SPEECH_NO_TRANSCRIPT |
+| 503 | SPEECH_TRANSCRIPTION_UNAVAILABLE |
+| 504 | SPEECH_TRANSCRIPTION_TIMEOUT |
 
 Phase 4 lifecycle endpoints additionally use:
 
@@ -157,3 +168,27 @@ memory only: it is lost on process restart and is not shared across multiple wor
 Agent timeout, missing LLM configuration, or unexpected Agent/tool failures return HTTP 503
 with `AGENT_TOOL_UNAVAILABLE` in the standard `ErrorResponse` envelope and include the request
 ID. This endpoint does not provide streaming, WebSocket, voice, or QR behavior.
+
+## Speech transcription
+
+### `POST /api/v1/speech/transcriptions`
+
+Accepts a short raw audio body with `Content-Type` set to `audio/webm`, `audio/ogg`,
+`audio/mp4`, `audio/mpeg`, or `audio/wav`. The default request-size limit is 2 MB. Audio is
+held in memory only for the provider request and is not persisted by ParkSmart.
+
+Success response:
+
+```json
+{
+  "success": true,
+  "data": { "text": "Tìm ô trống ở khu D" },
+  "message": null
+}
+```
+
+The server uses `SPEECH_TRANSCRIPTION_MODEL` (default `gpt-4o-mini-transcribe`) and the same
+server-side `LLM_API_KEY` credential. The credential is never sent to the browser. The
+transcript is returned to the editable composer and is not automatically submitted to the
+Agent endpoint. Transcription uses a 60-second timeout and one retry for transient network,
+rate-limit, or provider failures by default.
