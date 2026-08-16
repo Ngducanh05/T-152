@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
   title: "ParkSmart AI — Trợ lý đỗ xe thông minh",
-  description: "Demo end-to-end cho hệ thống trợ lý đỗ xe ParkSmart AI.",
+  description: "Bản thử nghiệm đầy đủ cho hệ thống trợ lý đỗ xe ParkSmart AI.",
   openGraph: {
     title: "ParkSmart AI",
     description: "Tìm đúng chỗ. Đỗ xe nhẹ nhàng.",

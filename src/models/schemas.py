@@ -206,6 +206,15 @@ class ParkingEvent(ContractModel):
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
+class WrongParkingReport(ContractModel):
+    id: EntityId
+    reporter_user_id: EntityId
+    slot_id: FloorScopedId
+    observed_plate_number: str | None = None
+    description: str
+    created_at: AwareDatetime
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

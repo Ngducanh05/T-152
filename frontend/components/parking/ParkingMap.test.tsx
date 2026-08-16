@@ -33,10 +33,10 @@ describe("ParkingMap", () => {
       />,
     );
 
-    expect(screen.getAllByRole("button", { name: /Parking slot/ })).toHaveLength(40);
-    expect(screen.getByRole("button", { name: /F1-D10, Zone D/ })).toBeDefined();
-    expect(screen.getByRole("button", { name: /F1-A01.*Reserved.*Active reservation/ }).getAttribute("data-status")).toBe("RESERVED");
-    expect(screen.getByRole("button", { name: /F1-D01.*EV charger.*Recommended/ })).toBeDefined();
+    expect(screen.getAllByRole("button", { name: /Ô đỗ/ })).toHaveLength(40);
+    expect(screen.getByRole("button", { name: /F1-D10, Khu D/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /F1-A01.*Đã giữ.*Chỗ đã giữ/ }).getAttribute("data-status")).toBe("RESERVED");
+    expect(screen.getByRole("button", { name: /F1-D01.*Có sạc điện.*Được đề xuất/ })).toBeDefined();
     expect(screen.getByTestId("current-location")).toBeDefined();
     expect(container.querySelector('[data-node-id="F1-CP1"] circle')?.getAttribute("r")).toBe("0.85");
     expect(getDisplayPoint({ id: "F1-ELEVATOR", floor_id: "F1", type: "ELEVATOR", x: 50, y: 92 })).toEqual([50, 96]);
@@ -59,7 +59,7 @@ describe("ParkingMap", () => {
       />,
     );
 
-    const slot = screen.getByRole("button", { name: /F1-D01, Zone D/ });
+    const slot = screen.getByRole("button", { name: /F1-D01, Khu D/ });
     expect(slot.getAttribute("data-x")).toBe("55");
     expect(slot.getAttribute("data-y")).toBe("61");
     expect(screen.getByTestId("route-polyline").getAttribute("points")).toBe(

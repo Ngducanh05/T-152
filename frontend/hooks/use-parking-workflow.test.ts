@@ -221,7 +221,7 @@ describe("useParkingWorkflow", () => {
     expect(refresh).toHaveBeenCalledOnce();
     expect(slot.status).toBe("AVAILABLE");
     expect(result.current.selectedSlotId).toBeNull();
-    expect(result.current.notice).toContain("hãy chọn một ô AVAILABLE khác");
+    expect(result.current.notice).toContain("hãy chọn một ô đang trống khác");
   });
 
   it("allows selecting and reserving an available map slot outside recommendations", async () => {

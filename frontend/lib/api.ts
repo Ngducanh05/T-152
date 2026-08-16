@@ -1,15 +1,18 @@
 import type {
   ActiveParkingSession,
+  AdminEventFilters,
   ApiEnvelope,
   ApiFailure,
   ChatRequest,
   ChatResponse,
   CompleteSessionRequest,
+  CreateWrongParkingReportRequest,
   ConfirmLocationRequest,
   ConfirmParkingRequest,
   CreateReservationRequest,
   Location,
   ParkingMap,
+  ParkingEvent,
   ParkingReservation,
   ParkingSession,
   ParkingSlot,
@@ -19,8 +22,10 @@ import type {
   RouteRequest,
   RouteResponse,
   SimulatorStep,
+  SimulatorMutationRequest,
   SlotFilters,
   SpeechTranscriptionResponse,
+  WrongParkingReport,
 } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
@@ -296,6 +301,58 @@ export class ParkSmartApiClient {
     return this.request<SimulatorStep[]>("/simulator/reset", {
       method: "POST",
       body: JSON.stringify({}),
+      signal,
+    });
+  }
+
+  parkSimulatedVehicle(payload: SimulatorMutationRequest, signal?: AbortSignal) {
+    return this.request<ParkingSlot>("/simulator/park", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
+  }
+
+  leaveSimulatedVehicle(payload: SimulatorMutationRequest, signal?: AbortSignal) {
+    return this.request<ParkingSlot>("/simulator/leave", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
+  }
+
+  runFixedScenario(signal?: AbortSignal) {
+    return this.request<SimulatorStep[]>("/simulator/run-scenario", {
+      method: "POST",
+      body: JSON.stringify({}),
+      signal,
+    });
+  }
+
+  getAdminEvents(filters: AdminEventFilters = {}, signal?: AbortSignal) {
+    const query = queryString({
+      limit: filters.limit,
+      zone_id: filters.zone_id,
+      event_type: filters.event_type,
+      slot_id: filters.slot_id,
+    });
+    return this.request<ParkingEvent[]>(`/admin/events${query}`, { signal });
+  }
+
+  reportWrongParking(
+    payload: CreateWrongParkingReportRequest,
+    signal?: AbortSignal,
+  ) {
+    return this.request<WrongParkingReport>("/reports/wrong-parking", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
+  }
+
+  getAdminReports(limit = 20, signal?: AbortSignal) {
+    const query = queryString({ limit });
+    return this.request<WrongParkingReport[]>(`/admin/reports${query}`, {
       signal,
     });
   }
