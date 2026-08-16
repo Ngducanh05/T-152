@@ -30,6 +30,9 @@ export interface ParkingMapProps {
   currentLocationNodeId?: FloorScopedId | null;
   route?: RouteResult | null;
   onSelectSlot?: (slotId: string) => void;
+  heading?: string;
+  description?: string;
+  showSummary?: boolean;
 }
 
 export function ParkingMap({
@@ -43,6 +46,9 @@ export function ParkingMap({
   currentLocationNodeId = null,
   route = null,
   onSelectSlot,
+  heading = "Sơ đồ bãi xe",
+  description = "Trạng thái các ô được cập nhật tự động",
+  showSummary = true,
 }: ParkingMapProps) {
   const nodeById = useMemo(
     () => new Map(map.nodes.map((node) => [node.id, node])),
@@ -55,16 +61,17 @@ export function ParkingMap({
   const currentNode = currentLocationNodeId
     ? nodeById.get(currentLocationNodeId)
     : undefined;
-  const zoneLabels = (["A", "B", "C", "D"] as ZoneId[]).map((zoneId) => {
+  const zoneLabels = (["A", "B", "C", "D"] as ZoneId[]).flatMap((zoneId) => {
     const zoneNodes = slots
       .filter((slot) => slot.zone_id === zoneId)
       .map((slot) => nodeById.get(slot.id))
       .filter((node) => node !== undefined);
-    return {
+    if (zoneNodes.length === 0) return [];
+    return [{
       zoneId,
       x: zoneNodes.reduce((sum, node) => sum + node.x, 0) / zoneNodes.length,
       y: zoneId === "A" || zoneId === "B" ? 10 : 55,
-    };
+    }];
   });
   const enabledEdges = map.edges
     .filter((edge) => edge.enabled)
@@ -93,19 +100,19 @@ export function ParkingMap({
     <section className="card map-card" aria-labelledby="parking-map-heading">
       <div className="card-header">
         <div>
-          <h2 id="parking-map-heading">Sơ đồ bãi xe trực tiếp</h2>
-          <p>Canonical F1 map · cập nhật trạng thái mỗi 2 giây</p>
+          <h2 id="parking-map-heading">{heading}</h2>
+          <p>{description}</p>
         </div>
-        <span className="live-map-indicator"><i />Live</span>
+        <span className="live-map-indicator"><i />Đang cập nhật</span>
       </div>
-      <ParkingSummary status={status} slots={slots} />
+      {showSummary && <ParkingSummary status={status} slots={slots} />}
       <div className="parking-map api-parking-map" data-testid="parking-map">
         <div className="map-viewport">
           <svg
             className="map-network"
             viewBox="0 0 100 100"
             role="img"
-            aria-label="Parking graph with enabled edges and current route"
+            aria-label="Sơ đồ đường đi và các ô trong bãi xe"
             preserveAspectRatio="none"
           >
           <g className="map-zone-surfaces" aria-hidden="true">
@@ -128,7 +135,7 @@ export function ParkingMap({
             <path d="M 20 50 L 20 90 L 80 90 L 80 50" />
             <path d="M 50 50 L 50 90" />
           </g>
-          <g className="map-edges" aria-label="Enabled parking map lanes">
+          <g className="map-edges" aria-label="Các lối đi đang hoạt động">
             {enabledEdges.map((edge) => (
               <path
                 key={`${edge.from_node}:${edge.to_node}`}
@@ -138,7 +145,7 @@ export function ParkingMap({
               />
             ))}
           </g>
-          <g className="map-core-nodes" aria-label="Parking map nodes">
+          <g className="map-core-nodes" aria-label="Các điểm trên sơ đồ bãi xe">
             {map.nodes.filter((node) => node.type !== "SLOT").map((node) => {
               const [x, y] = getDisplayPoint(node);
               const radius = node.type === "AISLE" ? 0.55 : node.type === "CHECKPOINT" ? 0.85 : 1.35;
@@ -167,14 +174,14 @@ export function ParkingMap({
               className="current-location-node"
               transform={`translate(${getDisplayPoint(currentNode).join(" ")})`}
               data-testid="current-location"
-              aria-label={`Current user location ${currentNode.id}`}
+              aria-label={`Vị trí hiện tại ${currentNode.id}`}
             >
               <circle r="3.2" />
               <text textAnchor="middle" y="1.1">⌖</text>
             </g>
           )}
           </svg>
-          <div className="map-slot-layer" aria-label="Parking slots">
+          <div className="map-slot-layer" aria-label="Các ô đỗ xe">
             {slots.map((slot) => {
               // A slot's own MapNode is its display coordinate. node_id is only
               // the connected aisle and must never be used for positioning.

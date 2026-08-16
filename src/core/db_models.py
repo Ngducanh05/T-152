@@ -294,6 +294,27 @@ class ParkingEvent(Base):
     )
 
 
+class WrongParkingReport(Base):
+    __tablename__ = "wrong_parking_reports"
+    __table_args__ = (
+        Index("ix_wrong_parking_reports_created", "created_at"),
+        Index("ix_wrong_parking_reports_slot_created", "slot_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    reporter_user_id: Mapped[str] = mapped_column(
+        ForeignKey("parking_users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    slot_id: Mapped[str] = mapped_column(
+        ForeignKey("parking_slots.id", ondelete="RESTRICT"), nullable=False
+    )
+    observed_plate_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 __all__ = [
     "ActorType",
     "AppRoleEnum",
@@ -311,4 +332,5 @@ __all__ = [
     "ReservationStatus",
     "SlotStatus",
     "Vehicle",
+    "WrongParkingReport",
 ]

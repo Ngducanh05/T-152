@@ -14,13 +14,13 @@ export function ParkingSummary({ status, slots }: ParkingSummaryProps) {
   ).length;
 
   return (
-    <div className="stats-row parking-summary" aria-label="Parking status summary">
-      <div aria-label="Available slots"><span className="stat-dot available" /><span><b>{status.available}</b><small>Available</small></span></div>
-      <div aria-label="Reserved slots"><span className="stat-dot reserved" /><span><b>{status.reserved}</b><small>Reserved</small></span></div>
-      <div aria-label="Occupied slots"><span className="stat-dot occupied" /><span><b>{status.occupied}</b><small>Occupied</small></span></div>
-      <div aria-label="Available EV slots"><span className="stat-dot ev" /><span><b>{availableEv}</b><small>EV available</small></span></div>
+    <div className="stats-row parking-summary" aria-label="Tóm tắt trạng thái bãi xe">
+      <div aria-label="Ô đang trống"><span className="stat-dot available" /><span><b>{status.available}</b><small>Đang trống</small></span></div>
+      <div aria-label="Ô đã được giữ"><span className="stat-dot reserved" /><span><b>{status.reserved}</b><small>Đã giữ</small></span></div>
+      <div aria-label="Ô đã có xe"><span className="stat-dot occupied" /><span><b>{status.occupied}</b><small>Đã có xe</small></span></div>
+      <div aria-label="Ô sạc điện đang trống"><span className="stat-dot ev" /><span><b>{availableEv}</b><small>Có sạc, đang trống</small></span></div>
       <div className="occupancy">
-        <span><small>Utilization</small><b>{utilization}%</b></span>
+        <span><small>Tỷ lệ sử dụng</small><b>{utilization}%</b></span>
         <div aria-hidden="true"><i style={{ width: `${utilization}%` }} /></div>
       </div>
     </div>

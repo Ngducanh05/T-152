@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 
+import { formatParkingLocation } from "@/lib/parking-display";
 import type { FloorScopedId, MapNode, ParkingMap } from "@/lib/types";
 
 const SPECIAL_TYPES = new Set<MapNode["type"]>([
@@ -168,7 +169,7 @@ export function LocationPicker({
         >
           ×
         </button>
-        <p className="eyebrow green">POST /LOCATIONS/CONFIRM</p>
+        <p className="eyebrow green">VỊ TRÍ TRONG BÃI</p>
         <h2 id="location-picker-title">Xác nhận vị trí hiện tại</h2>
         <p id="location-picker-description">
           Chọn một địa điểm nhanh hoặc tìm một trong 40 ô đỗ từ bản đồ. Việc xác
@@ -186,7 +187,7 @@ export function LocationPicker({
                 onClick={() => void submitLocation(node.id)}
                 disabled={busy}
               >
-                {node.id}
+                {formatParkingLocation(node.id)}
               </button>
             ))}
           </div>
@@ -237,7 +238,7 @@ export function LocationPicker({
                 onClick={() => chooseSlot(node.id)}
                 disabled={busy}
               >
-                {node.id}
+                {formatParkingLocation(node.id)}
               </button>
             ))}
             {filteredSlots.length === 0 && (
@@ -250,7 +251,7 @@ export function LocationPicker({
 
         {submittingTarget && (
           <p className="location-pending" role="status" aria-live="polite">
-            Đang xác nhận {submittingTarget}…
+            Đang xác nhận {formatParkingLocation(submittingTarget)}…
           </p>
         )}
       </div>

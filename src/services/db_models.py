@@ -15,6 +15,7 @@ from src.core.db_models import (
     ParkingUser,
     Profile,
     Vehicle,
+    WrongParkingReport,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "ParkingUser",
     "Profile",
     "Vehicle",
+    "WrongParkingReport",
 ]

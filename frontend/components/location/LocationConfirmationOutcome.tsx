@@ -1,5 +1,6 @@
 "use client";
 
+import { formatParkingLocation } from "@/lib/parking-display";
 import type { FloorScopedId, ParkingReservation } from "@/lib/types";
 
 interface LocationConfirmationOutcomeProps {
@@ -22,7 +23,7 @@ export function LocationConfirmationOutcome({
         role="status"
         aria-label="Kết quả xác nhận vị trí"
       >
-        Đã cập nhật vị trí hiện tại thành {locationId}.
+        Đã cập nhật vị trí hiện tại thành {formatParkingLocation(locationId)}.
       </div>
     );
   }
@@ -30,8 +31,8 @@ export function LocationConfirmationOutcome({
   if (activeReservation.slot_id !== locationId) {
     return (
       <div className="location-confirmation-outcome mismatch" role="alert">
-        Bạn đang có reservation tại {activeReservation.slot_id} nhưng vị trí vừa
-        xác nhận là {locationId}. Hệ thống chưa xác nhận đỗ xe.
+        Bạn đang giữ {formatParkingLocation(activeReservation.slot_id)} nhưng vị trí vừa
+        xác nhận là {formatParkingLocation(locationId)}. Xe vẫn chưa được ghi nhận là đã đỗ.
       </div>
     );
   }
@@ -43,7 +44,7 @@ export function LocationConfirmationOutcome({
       aria-label="Kết quả xác nhận vị trí"
     >
       <div>
-        <b>Bạn đã xác nhận đang ở {locationId}.</b>
+        <b>Bạn đã xác nhận đang ở {formatParkingLocation(locationId)}.</b>
         <span>Nếu xe đã đỗ đúng ô này, hãy xác nhận bước tiếp theo.</span>
       </div>
       <button

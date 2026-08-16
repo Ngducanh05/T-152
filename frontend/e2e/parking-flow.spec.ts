@@ -15,7 +15,7 @@ test.describe.configure({ mode: "serial" });
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Bản đồ đỗ xe trực tiếp" }),
+    page.getByRole("heading", { name: "Tìm chỗ đỗ phù hợp" }),
   ).toBeVisible();
 });
 
@@ -30,9 +30,9 @@ test("repeats the deterministic parking happy path three times", async ({
       const { candidate, slotId } = await requestCandidate(page);
       await expectParkingCounts(page, 39, 0, 1);
       await expect(
-        page.getByRole("status", { name: "Active reservation", exact: true }),
+        page.getByRole("status", { name: "Chỗ đỗ đã giữ", exact: true }),
       ).toHaveCount(0);
-      await expect(slotButton(page, slotId)).toHaveAccessibleName(/Available/);
+      await expect(slotButton(page, slotId)).toHaveAccessibleName(/Đang trống/);
 
       await candidate.click();
       const reservationResponse = page.waitForResponse(
@@ -42,9 +42,9 @@ test("repeats the deterministic parking happy path three times", async ({
       );
       await page.getByRole("button", { name: "Chọn làm điểm đỗ" }).click();
       expect((await reservationResponse).status()).toBe(201);
-      await expect(slotButton(page, slotId)).toHaveAccessibleName(/Reserved/);
+      await expect(slotButton(page, slotId)).toHaveAccessibleName(/Đã giữ/);
       await expect(
-        page.getByRole("status", { name: "Active reservation", exact: true }),
+        page.getByRole("status", { name: "Chỗ đỗ đã giữ", exact: true }),
       ).toContainText(slotId);
       await expectParkingCounts(page, 38, 1, 1);
 
@@ -60,11 +60,11 @@ test("repeats the deterministic parking happy path three times", async ({
 
       await page.getByRole("button", { name: "Xác nhận đã đỗ" }).click();
       const sessionBanner = page.getByRole("status", {
-        name: "Active parking session",
+        name: "Xe đang đỗ trong bãi",
         exact: true,
       });
-      await expect(sessionBanner).toContainText(`Xe của bạn ở ${slotId}`);
-      await expect(slotButton(page, slotId)).toHaveAccessibleName(/Occupied/);
+      await expect(sessionBanner).toContainText(slotId);
+      await expect(slotButton(page, slotId)).toHaveAccessibleName(/Đã có xe/);
       await expectParkingCounts(page, 38, 0, 2);
 
       await confirmLocation(page, "F1-CP3");
@@ -73,11 +73,7 @@ test("repeats the deterministic parking happy path three times", async ({
         .getByRole("button", { name: "Chỉ đường tới xe" })
         .click();
       const vehicleRoute = await vehicleRouteResponse;
-      const actualSessionSlot = (await sessionBanner.locator("b").innerText())
-        .replace("Xe của bạn ở", "")
-        .trim();
-      expect(actualSessionSlot).toBe(slotId);
-      expect(vehicleRoute.path.at(-1)).toBe(actualSessionSlot);
+      expect(vehicleRoute.path.at(-1)).toBe(slotId);
       await expect(page.getByTestId("route-polyline")).toBeVisible();
     });
   }
@@ -112,9 +108,9 @@ test("refreshes authoritative state after a recommended slot becomes occupied", 
 
   const alert = page.locator(".page-alert");
   await expect(alert).toContainText("Ô vừa thay đổi hoặc không còn trống");
-  await expect(alert).toContainText("hãy chọn một ô AVAILABLE khác");
-  await expect(slotButton(page, slotId)).toHaveAccessibleName(/Occupied/);
+  await expect(alert).toContainText("hãy chọn một ô đang trống khác");
+  await expect(slotButton(page, slotId)).toHaveAccessibleName(/Đã có xe/);
   await expect(
-    page.getByRole("status", { name: "Active reservation", exact: true }),
+    page.getByRole("status", { name: "Chỗ đỗ đã giữ", exact: true }),
   ).toHaveCount(0);
 });

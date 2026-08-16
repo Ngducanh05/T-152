@@ -26,7 +26,7 @@ test("@live-agent uses the real Agent to recommend and reserve a slot", async ({
   );
 
   const recommendedSlot = page
-    .getByRole("button", { name: /Parking slot .*Recommended/ })
+    .getByRole("button", { name: /Ô đỗ .*Được đề xuất/ })
     .first();
   await expect(recommendedSlot).toBeVisible();
   const slotId = await recommendedSlot.getAttribute("data-slot-id");
@@ -39,7 +39,7 @@ test("@live-agent uses the real Agent to recommend and reserve a slot", async ({
     { timeout: 60_000 },
   );
   await expect(
-    page.getByRole("status", { name: "Active reservation", exact: true }),
+    page.getByRole("status", { name: "Chỗ đỗ đã giữ", exact: true }),
   ).toContainText(slotId!);
-  await expect(slotButton(page, slotId!)).toHaveAccessibleName(/Reserved/);
+  await expect(slotButton(page, slotId!)).toHaveAccessibleName(/Đã giữ/);
 });

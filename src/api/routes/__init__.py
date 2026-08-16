@@ -2,12 +2,14 @@
 
 from fastapi import APIRouter
 
+from src.api.routes.admin import router as admin_router
 from src.api.routes.agent import router as agent_router
 from src.api.routes.auth import router as auth_router
 from src.api.routes.health import router as health_router
 from src.api.routes.locations import router as locations_router
 from src.api.routes.parking import router as parking_router
 from src.api.routes.recommendations import router as recommendations_router
+from src.api.routes.reports import router as reports_router
 from src.api.routes.reservations import router as reservations_router
 from src.api.routes.routing import router as routing_router
 from src.api.routes.sessions import router as sessions_router
@@ -15,6 +17,7 @@ from src.api.routes.simulator import router as simulator_router
 from src.api.routes.speech import router as speech_router
 
 api_router = APIRouter()
+api_router.include_router(admin_router)
 api_router.include_router(agent_router)
 api_router.include_router(auth_router)
 api_router.include_router(health_router)
@@ -22,6 +25,7 @@ api_router.include_router(locations_router)
 api_router.include_router(parking_router)
 api_router.include_router(recommendations_router)
 api_router.include_router(reservations_router)
+api_router.include_router(reports_router)
 api_router.include_router(routing_router)
 api_router.include_router(sessions_router)
 api_router.include_router(speech_router)

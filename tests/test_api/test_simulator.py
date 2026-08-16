@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateSchema, DropSchema
 
+from src.api.dependencies import get_optional_current_user
 from src.api.main import REQUEST_ID_HEADER, create_app
 from src.core.config import Settings, get_settings
 from src.core.database import get_db_session
@@ -25,7 +26,14 @@ from src.core.db_models import (
 from src.core.parking_state import ParkingStateService
 from src.core.reservation import ReservationService
 from src.core.seed import seed_if_missing
-from src.models.schemas import ParkingSessionStatus, ReservationStatus
+from src.models.auth import AppRole, CurrentUser
+from src.models.schemas import (
+    ActorType,
+    ParkingEventType,
+    ParkingSessionStatus,
+    ReservationStatus,
+    SlotStatus,
+)
 
 
 @dataclass(slots=True)
@@ -351,3 +359,222 @@ async def test_simulator_error_contains_request_id(simulator_api: SimulatorApi):
     assert response.status_code == 400
     assert response.headers[REQUEST_ID_HEADER] == request_id
     assert response.json()["error"]["request_id"] == request_id
+
+
+async def _insert_admin_events(api: SimulatorApi) -> None:
+    async with api.session_factory() as session, session.begin():
+        session.add_all(
+            [
+                ParkingEvent(
+                    id="EVENT-ADMIN-001",
+                    event_type=ParkingEventType.VEHICLE_PARKED,
+                    slot_id="F1-A01",
+                    actor_type=ActorType.SIMULATOR,
+                    actor_id="SIM-CAR-01",
+                    old_status=SlotStatus.AVAILABLE,
+                    new_status=SlotStatus.OCCUPIED,
+                    created_at=datetime(2026, 8, 15, 8, 0, tzinfo=UTC),
+                    event_metadata={"source": "test"},
+                ),
+                ParkingEvent(
+                    id="EVENT-ADMIN-002",
+                    event_type=ParkingEventType.VEHICLE_LEFT_SLOT,
+                    slot_id="F1-A01",
+                    actor_type=ActorType.SIMULATOR,
+                    actor_id="SIM-CAR-01",
+                    old_status=SlotStatus.OCCUPIED,
+                    new_status=SlotStatus.AVAILABLE,
+                    created_at=datetime(2026, 8, 15, 8, 5, tzinfo=UTC),
+                    event_metadata={},
+                ),
+                ParkingEvent(
+                    id="EVENT-ADMIN-003",
+                    event_type=ParkingEventType.SLOT_RESERVED,
+                    slot_id="F1-D01",
+                    actor_type=ActorType.USER,
+                    actor_id="USER-001",
+                    old_status=SlotStatus.AVAILABLE,
+                    new_status=SlotStatus.RESERVED,
+                    created_at=datetime(2026, 8, 15, 8, 10, tzinfo=UTC),
+                    event_metadata={"reservation_id": "RESERVATION-001"},
+                ),
+            ]
+        )
+
+
+@pytest.mark.asyncio
+async def test_admin_events_are_ordered_and_limited(simulator_api: SimulatorApi):
+    await _insert_admin_events(simulator_api)
+
+    response = await simulator_api.client.get("/api/v1/admin/events", params={"limit": 2})
+
+    assert response.status_code == 200
+    events = response.json()["data"]
+    assert [event["id"] for event in events] == ["EVENT-ADMIN-003", "EVENT-ADMIN-002"]
+    assert events[0]["metadata"] == {"reservation_id": "RESERVATION-001"}
+
+
+@pytest.mark.asyncio
+async def test_admin_events_support_zone_type_and_slot_filters(simulator_api: SimulatorApi):
+    await _insert_admin_events(simulator_api)
+
+    zone_response = await simulator_api.client.get(
+        "/api/v1/admin/events", params={"zone_id": "A"}
+    )
+    type_response = await simulator_api.client.get(
+        "/api/v1/admin/events", params={"event_type": "SLOT_RESERVED"}
+    )
+    slot_response = await simulator_api.client.get(
+        "/api/v1/admin/events", params={"slot_id": "F1-A01"}
+    )
+
+    assert [event["id"] for event in zone_response.json()["data"]] == [
+        "EVENT-ADMIN-002",
+        "EVENT-ADMIN-001",
+    ]
+    assert [event["id"] for event in type_response.json()["data"]] == [
+        "EVENT-ADMIN-003"
+    ]
+    assert [event["id"] for event in slot_response.json()["data"]] == [
+        "EVENT-ADMIN-002",
+        "EVENT-ADMIN-001",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_admin_events_return_an_empty_list_for_no_match(simulator_api: SimulatorApi):
+    await _insert_admin_events(simulator_api)
+
+    response = await simulator_api.client.get(
+        "/api/v1/admin/events", params={"slot_id": "F1-C10"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, 101])
+async def test_admin_events_validate_limit_bounds(
+    simulator_api: SimulatorApi,
+    limit: int,
+):
+    response = await simulator_api.client.get(
+        "/api/v1/admin/events", params={"limit": limit}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_admin_events_require_admin_role_outside_demo(simulator_api: SimulatorApi):
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
+        demo_mode=False
+    )
+    response = await simulator_api.client.get("/api/v1/admin/events")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "AUTH_REQUIRED"
+
+    async def resident_user() -> CurrentUser:
+        return CurrentUser(
+            id=uuid4(),
+            email="resident@example.com",
+            full_name="Resident",
+            app_role=AppRole.RESIDENT,
+        )
+
+    simulator_api.application.dependency_overrides[get_optional_current_user] = resident_user
+    response = await simulator_api.client.get("/api/v1/admin/events")
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "ADMIN_REQUIRED"
+
+    async def admin_user() -> CurrentUser:
+        return CurrentUser(
+            id=uuid4(),
+            email="admin@example.com",
+            full_name="Admin",
+            app_role=AppRole.ADMIN,
+        )
+
+    simulator_api.application.dependency_overrides[get_optional_current_user] = admin_user
+    response = await simulator_api.client.get("/api/v1/admin/events")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_user_can_report_wrong_parking_and_admin_can_read_it(
+    simulator_api: SimulatorApi,
+):
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        json={
+            "user_id": "USER-001",
+            "slot_id": "F1-D01",
+            "observed_plate_number": "  51a-123.45  ",
+            "description": "Xe đang đỗ chéo và lấn sang ô bên cạnh.",
+        },
+    )
+
+    assert response.status_code == 201
+    report = response.json()["data"]
+    assert report["id"].startswith("REPORT-")
+    assert report["reporter_user_id"] == "USER-001"
+    assert report["slot_id"] == "F1-D01"
+    assert report["observed_plate_number"] == "51A-123.45"
+    assert report["description"] == "Xe đang đỗ chéo và lấn sang ô bên cạnh."
+    assert report["created_at"].endswith("Z")
+
+    admin_response = await simulator_api.client.get(
+        "/api/v1/admin/reports", params={"limit": 1}
+    )
+    assert admin_response.status_code == 200
+    assert admin_response.json()["data"] == [report]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "expected_status", "expected_code"),
+    [
+        (
+            {
+                "user_id": "USER-MISSING",
+                "slot_id": "F1-D01",
+                "description": "Xe đỗ không đúng vị trí.",
+            },
+            404,
+            "USER_NOT_FOUND",
+        ),
+        (
+            {
+                "user_id": "USER-001",
+                "slot_id": "F1-Z99",
+                "description": "Xe đỗ không đúng vị trí.",
+            },
+            404,
+            "SLOT_NOT_FOUND",
+        ),
+        (
+            {
+                "user_id": "USER-001",
+                "slot_id": "F1-D01",
+                "description": "   ",
+            },
+            422,
+            "VALIDATION_ERROR",
+        ),
+    ],
+)
+async def test_wrong_parking_report_validates_input(
+    simulator_api: SimulatorApi,
+    payload: dict[str, object],
+    expected_status: int,
+    expected_code: str,
+):
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        json=payload,
+    )
+
+    assert response.status_code == expected_status
+    assert response.json()["error"]["code"] == expected_code

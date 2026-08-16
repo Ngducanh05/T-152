@@ -16,12 +16,12 @@ test("confirms checkpoint and slot locations without changing parking state", as
   });
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Bản đồ đỗ xe trực tiếp" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tìm chỗ đỗ phù hợp" })).toBeVisible();
   await resetDemo(page);
 
-  const locationButton = page.getByRole("button", { name: /Vị trí đã xác nhận/ });
+  const locationButton = page.getByRole("button", { name: /Vị trí của bạn/ });
   const targetSlot = slotButton(page, "F1-D01");
-  await expect(targetSlot).toHaveAccessibleName(/Available/);
+  await expect(targetSlot).toHaveAccessibleName(/Đang trống/);
 
   await locationButton.click();
   const checkpointResponse = page.waitForResponse(
@@ -30,7 +30,7 @@ test("confirms checkpoint and slot locations without changing parking state", as
       new URL(response.url()).pathname.endsWith("/locations/confirm"),
   );
   await page.getByRole("dialog", { name: "Xác nhận vị trí hiện tại" })
-    .getByRole("button", { name: "F1-CP3" })
+    .getByRole("button", { name: /F1-CP3/ })
     .click();
   expect((await checkpointResponse).status()).toBe(200);
   await expect(locationButton).toContainText("F1-CP3");
@@ -51,10 +51,10 @@ test("confirms checkpoint and slot locations without changing parking state", as
   });
 
   await expect(locationButton).toContainText("F1-D01");
-  await expect(targetSlot).toHaveAccessibleName(/Available/);
+  await expect(targetSlot).toHaveAccessibleName(/Đang trống/);
   await expect(page.getByRole("status", { name: "Kết quả xác nhận vị trí" })).toContainText(
-    "Đã cập nhật vị trí hiện tại thành F1-D01",
+    "Đã cập nhật vị trí hiện tại thành Ô D01 (F1-D01)",
   );
-  await expect(page.getByRole("status", { name: "Active parking session" })).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "Xe đang đỗ trong bãi" })).toHaveCount(0);
   expect(confirmParkingRequests).toEqual([]);
 });

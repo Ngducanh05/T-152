@@ -31,6 +31,7 @@ export interface ParkSmartDataState {
   currentLocation: Location | null;
   activeReservation: ParkingReservation | null;
   activeSession: ActiveParkingSession | null;
+  lastUpdatedAt: string | null;
   loading: boolean;
   refreshing: boolean;
   error: ApiError | null;
@@ -47,6 +48,7 @@ const initialState: ParkSmartDataState = {
   currentLocation: null,
   activeReservation: null,
   activeSession: null,
+  lastUpdatedAt: null,
   loading: true,
   refreshing: false,
   error: null,
@@ -95,6 +97,7 @@ export function useParkSmartData(
         if (mountedRef.current) {
           setState({
             ...snapshot,
+            lastUpdatedAt: new Date().toISOString(),
             loading: false,
             refreshing: false,
             error: null,
@@ -152,7 +155,13 @@ export function useParkSmartData(
           api.getParkingStatus(controller.signal),
         ]);
         if (mountedRef.current) {
-          setState((current) => ({ ...current, slots, status, error: null }));
+          setState((current) => ({
+            ...current,
+            slots,
+            status,
+            lastUpdatedAt: new Date().toISOString(),
+            error: null,
+          }));
         }
       } catch (error) {
         if (mountedRef.current && !controller.signal.aborted) {

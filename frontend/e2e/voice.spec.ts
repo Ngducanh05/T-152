@@ -163,7 +163,7 @@ test("sends a reviewed voice transcript through the existing Agent contract and 
 
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Bản đồ đỗ xe trực tiếp" }),
+    page.getByRole("heading", { name: "Tìm chỗ đỗ phù hợp" }),
   ).toBeVisible();
   await confirmLocation(page, "F1-ENTRANCE");
 
@@ -222,7 +222,7 @@ test("shows the permission fallback and keeps the text composer usable", async (
 
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Bản đồ đỗ xe trực tiếp" }),
+    page.getByRole("heading", { name: "Tìm chỗ đỗ phù hợp" }),
   ).toBeVisible();
   await page
     .getByRole("button", { name: "Bắt đầu nhập bằng giọng nói" })

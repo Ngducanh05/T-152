@@ -4,9 +4,9 @@ import type { MapNode, ParkingSlot as ParkingSlotData } from "@/lib/types";
 import { getDisplayPoint } from "@/lib/map-geometry";
 
 const STATUS_SIGNALS = {
-  AVAILABLE: { icon: "✓", label: "Available" },
-  RESERVED: { icon: "R", label: "Reserved" },
-  OCCUPIED: { icon: "●", label: "Occupied" },
+  AVAILABLE: { icon: "✓", label: "Đang trống" },
+  RESERVED: { icon: "R", label: "Đã giữ" },
+  OCCUPIED: { icon: "●", label: "Đã có xe" },
 } as const;
 
 export interface ParkingSlotProps {
@@ -32,13 +32,13 @@ export function ParkingSlot({
 }: ParkingSlotProps) {
   const signal = STATUS_SIGNALS[slot.status];
   const flags = [
-    slot.has_charger ? "EV charger" : null,
-    slot.is_accessible ? "Accessible" : null,
-    recommended ? "Recommended" : null,
-    selected ? "Selected" : null,
-    activeReservation ? "Active reservation" : null,
-    parkedVehicle ? "Parked vehicle" : null,
-    currentLocation ? "Current user location" : null,
+    slot.has_charger ? "Có sạc điện" : null,
+    slot.is_accessible ? "Dễ tiếp cận" : null,
+    recommended ? "Được đề xuất" : null,
+    selected ? "Đang được chọn" : null,
+    activeReservation ? "Chỗ đã giữ" : null,
+    parkedVehicle ? "Xe của bạn" : null,
+    currentLocation ? "Vị trí hiện tại" : null,
   ].filter(Boolean);
   const className = [
     "map-slot",
@@ -74,7 +74,7 @@ export function ParkingSlot({
       onClick={() => onSelect?.(slot.id)}
       onKeyDown={handleKeyDown}
       aria-pressed={selected}
-      aria-label={`Parking slot ${slot.id}, Zone ${slot.zone_id}, ${signal.label}${flags.length ? `, ${flags.join(", ")}` : ""}`}
+      aria-label={`Ô đỗ ${slot.id}, Khu ${slot.zone_id}, ${signal.label}${flags.length ? `, ${flags.join(", ")}` : ""}`}
       data-slot-id={slot.id}
       data-status={slot.status}
       data-zone={slot.zone_id}
