@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 
-import { AdminDashboard } from "@/components/admin/AdminDashboard";
+import { AdminRoute } from "@/components/auth/AdminRoute";
 
 export const metadata: Metadata = {
-  title: "Bảng điều khiển vận hành — ParkSmart AI",
-  description: "Bảng điều khiển vận hành bãi xe ParkSmart AI.",
+  title: "ParkSmart AI | Admin",
+  description: "Dashboard vận hành ParkSmart AI",
 };
 
 export default function AdminPage() {
-  return <AdminDashboard />;
+  return <AdminRoute />;
 }

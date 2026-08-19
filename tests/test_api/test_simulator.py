@@ -325,13 +325,23 @@ async def test_reserved_slot_rejects_simulator_park(simulator_api: SimulatorApi)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("simulator_enabled", "demo_mode"),
-    [(False, True), (True, False)],
+    (
+        "simulator_enabled",
+        "demo_mode",
+        "expected_status",
+        "expected_code",
+    ),
+    [
+        (False, True, 400, "INVALID_TRANSITION"),
+        (True, False, 401, "AUTH_REQUIRED"),
+    ],
 )
 async def test_simulator_disabled_rejects_endpoint(
     simulator_api: SimulatorApi,
     simulator_enabled: bool,
     demo_mode: bool,
+    expected_status: int,
+    expected_code: str,
 ):
     simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
         simulator_enabled=simulator_enabled,
@@ -341,10 +351,20 @@ async def test_simulator_disabled_rejects_endpoint(
     response = await simulator_api.client.post("/api/v1/simulator/reset", json={})
     status_response = await simulator_api.client.get("/api/v1/parking/status")
 
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "INVALID_TRANSITION"
-    status = status_response.json()["data"]
-    assert (status["available"], status["reserved"], status["occupied"]) == (40, 0, 0)
+    assert response.status_code == expected_status
+    assert response.json()["error"]["code"] == expected_code
+
+    if demo_mode:
+        assert status_response.status_code == 200
+        status = status_response.json()["data"]
+        assert (
+            status["available"],
+            status["reserved"],
+            status["occupied"],
+        ) == (40, 0, 0)
+    else:
+        assert status_response.status_code == 401
+        assert status_response.json()["error"]["code"] == "AUTH_REQUIRED"
 
 
 @pytest.mark.asyncio
@@ -477,15 +497,15 @@ async def test_admin_events_require_admin_role_outside_demo(simulator_api: Simul
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "AUTH_REQUIRED"
 
-    async def resident_user() -> CurrentUser:
+    async def regular_user() -> CurrentUser:
         return CurrentUser(
             id=uuid4(),
-            email="resident@example.com",
-            full_name="Resident",
-            app_role=AppRole.RESIDENT,
+            email="user@example.com",
+            full_name="User",
+            role=AppRole.USER,
         )
 
-    simulator_api.application.dependency_overrides[get_optional_current_user] = resident_user
+    simulator_api.application.dependency_overrides[get_optional_current_user] = regular_user
     response = await simulator_api.client.get("/api/v1/admin/events")
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "ADMIN_REQUIRED"
@@ -495,7 +515,7 @@ async def test_admin_events_require_admin_role_outside_demo(simulator_api: Simul
             id=uuid4(),
             email="admin@example.com",
             full_name="Admin",
-            app_role=AppRole.ADMIN,
+            role=AppRole.ADMIN,
         )
 
     simulator_api.application.dependency_overrides[get_optional_current_user] = admin_user
@@ -750,19 +770,19 @@ async def test_non_admin_cannot_resolve_reopen_or_delete_reports_outside_demo(
     report = await _create_lifecycle_report(simulator_api, slot_id="F1-C01")
     report_id = str(report["id"])
 
-    async def resident_user() -> CurrentUser:
+    async def regular_user() -> CurrentUser:
         return CurrentUser(
             id=uuid4(),
-            email="resident@example.com",
-            full_name="Resident",
-            app_role=AppRole.RESIDENT,
+            email="user@example.com",
+            full_name="User",
+            role=AppRole.USER,
         )
 
     simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
         demo_mode=False
     )
     simulator_api.application.dependency_overrides[get_optional_current_user] = (
-        resident_user
+        regular_user
     )
 
     responses = [
@@ -844,7 +864,7 @@ async def test_report_resolution_uses_authenticated_admin_id_in_demo(
             id=admin_id,
             email="admin@example.com",
             full_name="Admin",
-            app_role=AppRole.ADMIN,
+            role=AppRole.ADMIN,
         )
 
     simulator_api.application.dependency_overrides[get_optional_current_user] = admin_user

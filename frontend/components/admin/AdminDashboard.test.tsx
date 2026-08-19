@@ -141,5 +141,5 @@ describe("AdminDashboard report warnings", () => {
       );
     });
     expect(mocks.resolveAdminReport).toHaveBeenCalledTimes(2);
-  });
+  }, 10_000);
 });

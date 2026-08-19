@@ -1,0 +1,169 @@
+.loginPage,
+.guardState {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(43, 111, 255, 0.13), transparent 36%),
+    linear-gradient(180deg, #f7f9fc 0%, #eef2f7 100%);
+}
+
+.loginCard,
+.guardCard {
+  width: min(100%, 430px);
+  border: 1px solid rgba(20, 31, 51, 0.09);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 70px rgba(20, 31, 51, 0.12);
+}
+
+.loginCard {
+  display: grid;
+  gap: 18px;
+  padding: 28px;
+}
+
+.guardCard {
+  padding: 28px;
+  text-align: center;
+}
+
+.guardCard strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 1.15rem;
+}
+
+.guardCard p,
+.loginHeading p,
+.securityNote {
+  color: #687386;
+}
+
+.loginHeading {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.loginHeading h1 {
+  margin: 0 0 5px;
+  color: #151d2d;
+  font-size: 1.45rem;
+  letter-spacing: -0.025em;
+}
+
+.loginHeading p,
+.securityNote,
+.guardCard p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.logoMark {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: #151d2d;
+  color: white;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+  color: #303a4d;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.field input {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid #d8deea;
+  border-radius: 12px;
+  padding: 0 14px;
+  background: white;
+  color: #151d2d;
+  font: inherit;
+  font-weight: 500;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.field input:focus {
+  border-color: #2b6fff;
+  box-shadow: 0 0 0 4px rgba(43, 111, 255, 0.12);
+}
+
+.field input:disabled {
+  opacity: 0.65;
+}
+
+.loginButton,
+.logoutButton {
+  border: 0;
+  border-radius: 12px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.loginButton {
+  min-height: 48px;
+  padding: 0 18px;
+  background: #151d2d;
+  color: white;
+}
+
+.loginButton:disabled,
+.logoutButton:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.logoutButton {
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid rgba(20, 31, 51, 0.12);
+  background: white;
+  color: #3f4a5d;
+}
+
+.loginError {
+  margin: 0;
+  border: 1px solid #f0c8c8;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff4f4;
+  color: #a32626;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.securityNote {
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.adminAuthBar {
+  position: fixed;
+  z-index: 80;
+  top: 12px;
+  right: 16px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.userHeaderActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
