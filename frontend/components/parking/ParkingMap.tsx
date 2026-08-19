@@ -190,7 +190,7 @@ export function ParkingMap({
             >
               <strong>{formatFloorName(floorId)}</strong>
               <span className="floor-tab-badge">
-                {counts.available}/{counts.total}
+                Trống {counts.available}/{counts.total}
               </span>
             </button>
           );

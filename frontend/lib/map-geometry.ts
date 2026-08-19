@@ -2,8 +2,8 @@ import type { MapNode } from "@/lib/types";
 
 export type MapPoint = [number, number];
 
-const SLOT_PATTERN = /^F1-([A-D])(\d{2})$/;
-const AISLE_PATTERN = /^F1-([A-D])-(W|E)$/;
+const SLOT_PATTERN = /^(?:F[1-3])-([A-D])(\d{2})$/;
+const AISLE_PATTERN = /^(?:F[1-3])-([A-D])-(W|E)$/;
 
 const ZONE_ROAD_BOUNDS = {
   A: { left: 20, right: 50, nearMain: 50, outer: 7, north: true },
