@@ -1,14 +1,25 @@
+from datetime import UTC, datetime
 from io import StringIO
 from unittest.mock import Mock, patch
 
+import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from pydantic import ValidationError
 from sqlalchemy.dialects.postgresql import JSONB
 
 from alembic import command
 from src.core import database as core_database
-from src.core.db_models import Base, ParkingEvent, ParkingSlot, Profile
+from src.core.db_models import (
+    Base,
+    ParkingEvent,
+    ParkingSlot,
+    Profile,
+    WrongParkingReport,
+)
+from src.models.schemas import ErrorCode, WrongParkingReason, WrongParkingReportStatus
 from src.models.schemas import ParkingSlot as ParkingSlotSchema
+from src.models.schemas import WrongParkingReport as WrongParkingReportSchema
 from src.services import database as compatibility_database
 from src.services import db_models as compatibility_models
 
@@ -47,8 +58,9 @@ def test_parking_migration_follows_profiles_revision():
     location_cleanup_revision = scripts.get_revision("20260812_0003")
     nearest_aisle_revision = scripts.get_revision("20260813_0004")
     wrong_parking_report_revision = scripts.get_revision("20260815_0005")
+    report_lifecycle_revision = scripts.get_revision("20260819_0006")
 
-    assert scripts.get_current_head() == "20260815_0005"
+    assert scripts.get_current_head() == "20260819_0006"
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
     assert location_cleanup_revision is not None
@@ -57,6 +69,8 @@ def test_parking_migration_follows_profiles_revision():
     assert nearest_aisle_revision.down_revision == "20260812_0003"
     assert wrong_parking_report_revision is not None
     assert wrong_parking_report_revision.down_revision == "20260813_0004"
+    assert report_lifecycle_revision is not None
+    assert report_lifecycle_revision.down_revision == "20260815_0005"
 
 
 def test_cold_start_sql_creates_profile_enum_once():
@@ -67,6 +81,26 @@ def test_cold_start_sql_creates_profile_enum_once():
     command.upgrade(config, "head", sql=True)
 
     assert output.getvalue().count("CREATE TYPE app_role_enum") == 1
+
+
+def test_report_lifecycle_migration_backfills_before_required_constraints():
+    output = StringIO()
+    config = Config("alembic.ini", output_buffer=output)
+    config.attributes["configure_logger"] = False
+
+    command.upgrade(config, "20260815_0005:20260819_0006", sql=True)
+
+    migration_sql = output.getvalue()
+    backfill_position = migration_sql.index("UPDATE wrong_parking_reports")
+    assert "reason_code = 'OTHER'" in migration_sql
+    assert "status = 'OPEN'" in migration_sql
+    assert "version = 0" in migration_sql
+    assert "updated_at = created_at" in migration_sql
+    for column_name in ("reason_code", "status", "updated_at", "version"):
+        not_null_position = migration_sql.index(
+            f"ALTER COLUMN {column_name} SET NOT NULL"
+        )
+        assert backfill_position < not_null_position
 
 
 def test_nearest_aisle_data_migration_is_noop_before_canonical_seed():
@@ -170,3 +204,81 @@ def test_multiple_slots_can_reference_the_same_aisle_node():
 
     assert node_id.index is True
     assert node_id.unique is not True
+
+
+def test_wrong_parking_report_lifecycle_model_has_required_contract_shape():
+    table = WrongParkingReport.__table__
+
+    assert table.c.description.nullable is True
+    assert table.c.reason_code.nullable is False
+    assert table.c.status.nullable is False
+    assert table.c.updated_at.nullable is False
+    assert table.c.version.nullable is False
+    assert table.c.reason_code.type.name == "wrong_parking_reason_enum"
+    assert table.c.status.type.name == "wrong_parking_report_status_enum"
+    assert table.c.resolved_by.foreign_keys == set()
+    assert {
+        constraint.name for constraint in table.constraints
+    } >= {"ck_wrong_parking_reports_version_nonnegative"}
+
+    index_columns = {
+        index.name: tuple(column.name for column in index.columns)
+        for index in table.indexes
+    }
+    assert index_columns["ix_wrong_parking_reports_status_created"] == (
+        "status",
+        "created_at",
+    )
+    assert index_columns["ix_wrong_parking_reports_slot_status_created"] == (
+        "slot_id",
+        "status",
+        "created_at",
+    )
+
+
+def test_wrong_parking_report_schema_exposes_lifecycle_and_rejects_negative_version():
+    payload = {
+        "id": "REPORT-001",
+        "reporter_user_id": "USER-001",
+        "slot_id": "F1-D01",
+        "reason_code": WrongParkingReason.CROSSED_LINE,
+        "status": WrongParkingReportStatus.OPEN,
+        "description": None,
+        "created_at": datetime(2026, 8, 19, 8, 0, tzinfo=UTC),
+        "updated_at": datetime(2026, 8, 19, 8, 0, tzinfo=UTC),
+        "resolved_at": None,
+        "resolved_by": None,
+        "resolution_note": None,
+        "version": 0,
+    }
+
+    report = WrongParkingReportSchema.model_validate(payload)
+
+    assert report.reason_code is WrongParkingReason.CROSSED_LINE
+    assert report.status is WrongParkingReportStatus.OPEN
+    assert report.description is None
+    with pytest.raises(ValidationError):
+        WrongParkingReportSchema.model_validate({**payload, "version": -1})
+
+
+def test_wrong_parking_report_enums_and_error_codes_are_stable():
+    assert {reason.value for reason in WrongParkingReason} == {
+        "WRONG_SLOT",
+        "CROSSED_LINE",
+        "BLOCKING_ACCESS",
+        "OCCUPYING_CHARGER",
+        "OTHER",
+    }
+    assert {status.value for status in WrongParkingReportStatus} == {
+        "OPEN",
+        "RESOLVED",
+    }
+    assert {
+        ErrorCode.REPORT_NOT_FOUND.value,
+        ErrorCode.REPORT_VERSION_CONFLICT.value,
+        ErrorCode.INVALID_REPORT_TRANSITION.value,
+    } == {
+        "REPORT_NOT_FOUND",
+        "REPORT_VERSION_CONFLICT",
+        "INVALID_REPORT_TRANSITION",
+    }

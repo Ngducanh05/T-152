@@ -17,7 +17,9 @@ export interface ParkingSlotProps {
   activeReservation?: boolean;
   parkedVehicle?: boolean;
   currentLocation?: boolean;
+  openReportCount?: number;
   onSelect?: (slotId: string) => void;
+  onOpenReportedSlot?: (slotId: string) => void;
 }
 
 export function ParkingSlot({
@@ -28,7 +30,9 @@ export function ParkingSlot({
   activeReservation = false,
   parkedVehicle = false,
   currentLocation = false,
+  openReportCount = 0,
   onSelect,
+  onOpenReportedSlot,
 }: ParkingSlotProps) {
   const signal = STATUS_SIGNALS[slot.status];
   const flags = [
@@ -39,6 +43,7 @@ export function ParkingSlot({
     activeReservation ? "Chỗ đã giữ" : null,
     parkedVehicle ? "Xe của bạn" : null,
     currentLocation ? "Vị trí hiện tại" : null,
+    openReportCount > 0 ? `${openReportCount} báo cáo đang mở` : null,
   ].filter(Boolean);
   const className = [
     "map-slot",
@@ -50,6 +55,7 @@ export function ParkingSlot({
     activeReservation ? "is-reservation" : "",
     parkedVehicle ? "is-parked" : "",
     currentLocation ? "is-current-location" : "",
+    openReportCount > 0 ? "has-open-reports" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -62,8 +68,16 @@ export function ParkingSlot({
   function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      onSelect?.(slot.id);
+      activateSlot();
     }
+  }
+
+  function activateSlot() {
+    if (openReportCount > 0) {
+      onOpenReportedSlot?.(slot.id);
+      return;
+    }
+    onSelect?.(slot.id);
   }
 
   return (
@@ -71,7 +85,7 @@ export function ParkingSlot({
       type="button"
       className={className}
       style={style}
-      onClick={() => onSelect?.(slot.id)}
+      onClick={activateSlot}
       onKeyDown={handleKeyDown}
       aria-pressed={selected}
       aria-label={`Ô đỗ ${slot.id}, Khu ${slot.zone_id}, ${signal.label}${flags.length ? `, ${flags.join(", ")}` : ""}`}
@@ -92,6 +106,12 @@ export function ParkingSlot({
       {recommended && <span className="map-slot-badge">Đề xuất</span>}
       {activeReservation && <span className="map-slot-badge reservation">Đã giữ</span>}
       {parkedVehicle && <span className="map-slot-badge parked">Xe của bạn</span>}
+      {openReportCount > 0 && (
+        <span className="map-slot-report-warning" aria-hidden="true">
+          <span>!</span>
+          <b>{openReportCount}</b>
+        </span>
+      )}
     </button>
   );
 }

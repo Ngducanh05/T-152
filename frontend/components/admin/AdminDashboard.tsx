@@ -3,20 +3,28 @@
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  ReportDetailDrawer,
+  type PendingReportMutation,
+  type ReportMutationAction,
+} from "@/components/admin/ReportDetailDrawer";
 import { ParkingMap } from "@/components/parking/ParkingMap";
 import { useParkSmartData } from "@/hooks/use-parksmart-data";
-import { formatApiErrorForOperator, parkSmartApi } from "@/lib/api";
+import { ApiError, formatApiErrorForOperator, parkSmartApi } from "@/lib/api";
 import {
   formatActorType,
   formatEventType,
   formatParkingLocation,
   formatSlotStatus,
+  formatWrongParkingReason,
+  formatWrongParkingReportStatus,
 } from "@/lib/parking-display";
 import { subscribeToWrongParkingReportUpdates } from "@/lib/report-updates";
 import type {
   ParkingEvent,
   SlotStatus,
   WrongParkingReport,
+  WrongParkingReportStatus,
   ZoneId,
 } from "@/lib/types";
 
@@ -50,12 +58,22 @@ export function AdminDashboard() {
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [reports, setReports] = useState<WrongParkingReport[]>([]);
+  const [openReports, setOpenReports] = useState<WrongParkingReport[]>([]);
+  const [reportFilter, setReportFilter] =
+    useState<FilterValue<WrongParkingReportStatus>>("OPEN");
   const [reportsLoading, setReportsLoading] = useState(true);
   const [reportsError, setReportsError] = useState<string | null>(null);
   const [reportsLastUpdatedAt, setReportsLastUpdatedAt] = useState<Date | null>(null);
   const [mutationPending, setMutationPending] = useState<MutationName | null>(null);
   const [operationNotice, setOperationNotice] = useState<string | null>(null);
+  const [selectedReportSlotId, setSelectedReportSlotId] = useState<string | null>(null);
+  const [drawerReports, setDrawerReports] = useState<WrongParkingReport[]>([]);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerError, setDrawerError] = useState<string | null>(null);
+  const [pendingReportMutation, setPendingReportMutation] =
+    useState<PendingReportMutation | null>(null);
   const mutationLockRef = useRef(false);
+  const reportMutationLockRef = useRef(false);
 
   const loadEvents = useCallback(async (signal?: AbortSignal) => {
     setEventsLoading(true);
@@ -74,13 +92,34 @@ export function AdminDashboard() {
     }
   }, []);
 
-  const loadReports = useCallback(async (signal?: AbortSignal) => {
-    setReportsLoading(true);
+  const loadReports = useCallback(async (
+    signal?: AbortSignal,
+    showLoading = true,
+  ) => {
+    if (showLoading) setReportsLoading(true);
     setReportsError(null);
     try {
-      const result = await parkSmartApi.getAdminReports(20, signal);
+      const openRequest = parkSmartApi.getAdminReports(
+        { status: "OPEN", limit: 100 },
+        signal,
+      );
+      const visibleRequest =
+        reportFilter === "OPEN"
+          ? openRequest
+          : parkSmartApi.getAdminReports(
+              {
+                status: reportFilter === "ALL" ? undefined : reportFilter,
+                limit: 100,
+              },
+              signal,
+            );
+      const [openResult, visibleResult] = await Promise.all([
+        openRequest,
+        visibleRequest,
+      ]);
       if (!signal?.aborted) {
-        setReports(result);
+        setOpenReports(openResult);
+        setReports(visibleResult);
         setReportsLastUpdatedAt(new Date());
       }
     } catch (error) {
@@ -90,9 +129,9 @@ export function AdminDashboard() {
         );
       }
     } finally {
-      if (!signal?.aborted) setReportsLoading(false);
+      if (!signal?.aborted && showLoading) setReportsLoading(false);
     }
-  }, []);
+  }, [reportFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -116,26 +155,12 @@ export function AdminDashboard() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void parkSmartApi
-      .getAdminReports(20, controller.signal)
-      .then((result) => {
-        if (!controller.signal.aborted) {
-          setReports(result);
-          setReportsLastUpdatedAt(new Date());
-        }
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) {
-          setReportsError(
-            formatApiErrorForOperator(error, "Không thể tải báo cáo của người dùng."),
-          );
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setReportsLoading(false);
-      });
-    return () => controller.abort();
-  }, []);
+    const timer = window.setTimeout(() => void loadReports(controller.signal), 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [loadReports]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -151,12 +176,7 @@ export function AdminDashboard() {
       }
       requestPending = true;
       try {
-        const result = await parkSmartApi.getAdminReports(20, controller.signal);
-        if (!controller.signal.aborted) {
-          setReports(result);
-          setReportsError(null);
-          setReportsLastUpdatedAt(new Date());
-        }
+        await loadReports(controller.signal, false);
       } catch (error) {
         if (!controller.signal.aborted) {
           setReportsError(
@@ -191,7 +211,7 @@ export function AdminDashboard() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       unsubscribe();
     };
-  }, []);
+  }, [loadReports]);
 
   const availableSlots = useMemo(
     () => data.slots.filter((slot) => slot.status === "AVAILABLE"),
@@ -220,6 +240,16 @@ export function AdminDashboard() {
       }),
     [data.slots, evFilter, statusFilter, zoneFilter],
   );
+  const openReportCountBySlot = useMemo(
+    () =>
+      openReports.reduce<Record<string, number>>((counts, report) => {
+        counts[report.slot_id] = (counts[report.slot_id] ?? 0) + 1;
+        return counts;
+      }, {}),
+    [openReports],
+  );
+  const selectedReportedSlot =
+    data.slots.find((slot) => slot.id === selectedReportSlotId) ?? null;
 
   const utilization = data.status?.total
     ? Math.round(
@@ -232,6 +262,114 @@ export function AdminDashboard() {
   const leaveSlot =
     occupiedSlots.find((slot) => slot.id === effectiveLeaveSlotId) ?? null;
   const operationDisabled = mutationPending !== null;
+
+  async function loadDrawerReports(slotId = selectedReportSlotId) {
+    if (!slotId) return;
+    setDrawerLoading(true);
+    setDrawerError(null);
+    try {
+      const result = await parkSmartApi.getAdminReports({
+        slotId,
+        limit: 100,
+      });
+      setDrawerReports(result);
+    } catch (error) {
+      setDrawerError(
+        formatApiErrorForOperator(error, "Không thể tải chi tiết báo cáo."),
+      );
+    } finally {
+      setDrawerLoading(false);
+    }
+  }
+
+  function openReportedSlot(slotId: string) {
+    setSelectedReportSlotId(slotId);
+    setDrawerReports([]);
+    setDrawerError(null);
+    void loadDrawerReports(slotId);
+  }
+
+  async function mutateReport(
+    report: WrongParkingReport,
+    action: ReportMutationAction,
+    mutation: () => Promise<unknown>,
+  ): Promise<boolean> {
+    if (reportMutationLockRef.current) return false;
+    reportMutationLockRef.current = true;
+    setPendingReportMutation({ reportId: report.id, action });
+    setDrawerError(null);
+    try {
+      await mutation();
+      await Promise.all([
+        loadReports(undefined, false),
+        loadDrawerReports(report.slot_id),
+      ]);
+      setOperationNotice(
+        action === "resolve"
+          ? `Đã resolve report ${report.id}.`
+          : action === "reopen"
+            ? `Đã reopen report ${report.id}.`
+            : `Đã xóa vĩnh viễn report ${report.id}.`,
+      );
+      return true;
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "REPORT_VERSION_CONFLICT") {
+        try {
+          const latest = await parkSmartApi.getAdminReport(report.id);
+          setDrawerReports((current) => [
+            latest,
+            ...current.filter((candidate) => candidate.id !== latest.id),
+          ]);
+          await loadReports(undefined, false);
+        } catch {
+          await Promise.all([
+            loadReports(undefined, false),
+            loadDrawerReports(report.slot_id),
+          ]);
+        }
+        setDrawerError(
+          "Report đã thay đổi trên server. Dữ liệu mới nhất đã được tải lại; hãy kiểm tra trước khi thao tác tiếp.",
+        );
+      } else {
+        setDrawerError(
+          formatApiErrorForOperator(error, "Không thể cập nhật report."),
+        );
+      }
+      return false;
+    } finally {
+      reportMutationLockRef.current = false;
+      setPendingReportMutation(null);
+    }
+  }
+
+  function resolveReport(
+    report: WrongParkingReport,
+    resolutionNote: string | null,
+  ) {
+    return mutateReport(report, "resolve", () =>
+      parkSmartApi.resolveAdminReport(report.id, {
+        status: "RESOLVED",
+        resolution_note: resolutionNote,
+        expected_version: report.version,
+      }),
+    );
+  }
+
+  function reopenReport(report: WrongParkingReport) {
+    return mutateReport(report, "reopen", () =>
+      parkSmartApi.reopenAdminReport(report.id, {
+        expected_version: report.version,
+      }),
+    );
+  }
+
+  function deleteReport(report: WrongParkingReport) {
+    return mutateReport(report, "delete", () =>
+      parkSmartApi.deleteAdminReport(report.id, {
+        expected_version: report.version,
+      }),
+    );
+  }
 
   async function runMutation(
     name: MutationName,
@@ -404,6 +542,8 @@ export function AdminDashboard() {
                   heading="Bản đồ vận hành tầng F1"
                   description="Lọc theo khu, trạng thái hoặc khả năng sạc điện"
                   showSummary={false}
+                  openReportCountBySlot={openReportCountBySlot}
+                  onOpenReportedSlot={openReportedSlot}
                 />
               )}
               {filteredSlots.length === 0 && (
@@ -457,6 +597,21 @@ export function AdminDashboard() {
             <div className="admin-section-heading">
               <div><p className="eyebrow green">PHẢN ÁNH TỪ NGƯỜI DÙNG</p><h2>Báo cáo xe đỗ sai vị trí</h2></div>
               <div className="admin-report-refresh">
+                <label>
+                  Trạng thái report
+                  <select
+                    value={reportFilter}
+                    onChange={(event) =>
+                      setReportFilter(
+                        event.target.value as FilterValue<WrongParkingReportStatus>,
+                      )
+                    }
+                  >
+                    <option value="OPEN">Đang mở</option>
+                    <option value="RESOLVED">Đã xử lý</option>
+                    <option value="ALL">Tất cả</option>
+                  </select>
+                </label>
                 <span aria-live="polite">
                   Tự động cập nhật
                   {reportsLastUpdatedAt
@@ -472,11 +627,22 @@ export function AdminDashboard() {
             {!reportsLoading && !reportsError && reports.length > 0 && (
               <div className="admin-report-list">
                 {reports.map((report) => (
-                  <article key={report.id}>
-                    <div><b>{formatParkingLocation(report.slot_id)}</b><small>{report.observed_plate_number ? `Biển số: ${report.observed_plate_number}` : "Không cung cấp biển số"}</small></div>
-                    <p>{report.description}</p>
+                  <button
+                    type="button"
+                    key={report.id}
+                    className="admin-report-row"
+                    onClick={() => openReportedSlot(report.slot_id)}
+                  >
+                    <div>
+                      <b>{formatParkingLocation(report.slot_id)}</b>
+                      <small>{formatWrongParkingReason(report.reason_code)}</small>
+                    </div>
+                    <p>{report.description ?? "Không có mô tả bổ sung"}</p>
+                    <span className={`report-status status-${report.status.toLowerCase()}`}>
+                      {formatWrongParkingReportStatus(report.status)}
+                    </span>
                     <time dateTime={report.created_at}>{formatUpdatedAt(report.created_at)}</time>
-                  </article>
+                  </button>
                 ))}
               </div>
             )}
@@ -504,6 +670,22 @@ export function AdminDashboard() {
             )}
           </section>
         </>
+      )}
+      {selectedReportSlotId && (
+        <ReportDetailDrawer
+          slot={selectedReportedSlot}
+          reports={drawerReports}
+          loading={drawerLoading}
+          error={drawerError}
+          pendingMutation={pendingReportMutation}
+          onClose={() => {
+            if (!pendingReportMutation) setSelectedReportSlotId(null);
+          }}
+          onRefresh={() => loadDrawerReports(selectedReportSlotId)}
+          onResolve={resolveReport}
+          onReopen={reopenReport}
+          onDelete={deleteReport}
+        />
       )}
     </main>
   );

@@ -164,7 +164,13 @@ class SimulatorService:
                 continue
             if baseline_is_ready and slot.id == BASELINE_SLOT_ID:
                 continue
-            await self._manual_leave(slot.id, slot.occupied_by_vehicle_id or "")
+            if slot.occupied_by_vehicle_id is None:
+                await self.state_service.clear_user_observed_occupancy(
+                    slot.id,
+                    actor_id=SIMULATOR_ACTOR_ID,
+                )
+            else:
+                await self._manual_leave(slot.id, slot.occupied_by_vehicle_id)
 
         if not baseline_is_ready:
             await self._manual_park(BASELINE_SLOT_ID, BASELINE_VEHICLE_ID)
@@ -206,6 +212,8 @@ class SimulatorService:
             if slot.status is not SlotStatus.OCCUPIED:
                 continue
             vehicle_id = slot.occupied_by_vehicle_id
+            if vehicle_id is None and await self.state_service.is_user_observed_occupancy(slot):
+                continue
             vehicle = await self.session.get(Vehicle, vehicle_id) if vehicle_id else None
             if (
                 vehicle is None

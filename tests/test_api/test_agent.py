@@ -264,6 +264,16 @@ async def test_happy_chat_response(agent_api):
             "current_location": "F1-CP3",
             "recommended_slot_ids": ["F1-C03"],
             "route": None,
+            "ui_actions": [
+                {
+                    "id": "select-slot:f1-c03",
+                    "type": "SELECT_SLOT",
+                    "label": "Chọn ô C03",
+                    "payload": {"slot_id": "F1-C03"},
+                    "style": "primary",
+                    "requires_confirmation": False,
+                }
+            ],
         },
         "message": None,
     }
@@ -586,4 +596,5 @@ def test_agent_router_appears_in_openapi():
         "current_location",
         "recommended_slot_ids",
         "route",
+        "ui_actions",
     } <= response_schema["properties"].keys()

@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Annotated, Literal
@@ -62,6 +63,37 @@ class ParkingEventType(StrEnum):
     VEHICLE_EXITED = "VEHICLE_EXITED"
 
 
+class WrongParkingReportStatus(StrEnum):
+    OPEN = "OPEN"
+    RESOLVED = "RESOLVED"
+
+
+class WrongParkingReason(StrEnum):
+    WRONG_SLOT = "WRONG_SLOT"
+    CROSSED_LINE = "CROSSED_LINE"
+    BLOCKING_ACCESS = "BLOCKING_ACCESS"
+    OCCUPYING_CHARGER = "OCCUPYING_CHARGER"
+    OTHER = "OTHER"
+
+
+class ChatUIActionType(StrEnum):
+    SELECT_LOCATION = "SELECT_LOCATION"
+    SELECT_PARKING_PREFERENCE = "SELECT_PARKING_PREFERENCE"
+    SELECT_SLOT = "SELECT_SLOT"
+    RESERVE_AND_ROUTE = "RESERVE_AND_ROUTE"
+    CONFIRM_PARKING = "CONFIRM_PARKING"
+    FIND_VEHICLE = "FIND_VEHICLE"
+    COMPLETE_SESSION = "COMPLETE_SESSION"
+    OPEN_WRONG_PARKING_REPORT = "OPEN_WRONG_PARKING_REPORT"
+    CANCEL = "CANCEL"
+
+
+class ChatUIActionStyle(StrEnum):
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+    DANGER = "danger"
+
+
 class ErrorCode(StrEnum):
     INVALID_TRANSITION = "INVALID_TRANSITION"
     SLOT_NOT_FOUND = "SLOT_NOT_FOUND"
@@ -80,6 +112,9 @@ class ErrorCode(StrEnum):
     LOCATION_NODE_NOT_FOUND = "LOCATION_NODE_NOT_FOUND"
     CURRENT_LOCATION_NOT_FOUND = "CURRENT_LOCATION_NOT_FOUND"
     INVALID_LOCATION_NODE_TYPE = "INVALID_LOCATION_NODE_TYPE"
+    REPORT_NOT_FOUND = "REPORT_NOT_FOUND"
+    REPORT_VERSION_CONFLICT = "REPORT_VERSION_CONFLICT"
+    INVALID_REPORT_TRANSITION = "INVALID_REPORT_TRANSITION"
     AGENT_TOOL_UNAVAILABLE = "AGENT_TOOL_UNAVAILABLE"
     SPEECH_AUDIO_INVALID = "SPEECH_AUDIO_INVALID"
     SPEECH_AUDIO_TOO_LARGE = "SPEECH_AUDIO_TOO_LARGE"
@@ -210,9 +245,16 @@ class WrongParkingReport(ContractModel):
     id: EntityId
     reporter_user_id: EntityId
     slot_id: FloorScopedId
+    reason_code: WrongParkingReason
+    status: WrongParkingReportStatus
     observed_plate_number: str | None = None
-    description: str
+    description: str | None = None
     created_at: AwareDatetime
+    updated_at: AwareDatetime
+    resolved_at: AwareDatetime | None = None
+    resolved_by: EntityId | None = None
+    resolution_note: str | None = None
+    version: int = Field(ge=0)
 
 
 class ChatRequest(BaseModel):
@@ -233,6 +275,36 @@ class ChatRequest(BaseModel):
         return stripped
 
 
+class ChatUIAction(ContractModel):
+    id: str = Field(min_length=1, max_length=128, pattern=r"^[a-z0-9:-]+$")
+    type: ChatUIActionType
+    label: str = Field(min_length=1, max_length=100)
+    payload: dict[str, str] = Field(default_factory=dict)
+    style: ChatUIActionStyle = ChatUIActionStyle.SECONDARY
+    requires_confirmation: bool = False
+
+    @field_validator("payload")
+    @classmethod
+    def payload_uses_allowlisted_fields(cls, value: dict[str, str]) -> dict[str, str]:
+        allowed_fields = {"node_id", "slot_id", "preference"}
+        unknown_fields = set(value) - allowed_fields
+        if unknown_fields:
+            raise ValueError("ui action payload contains unsupported fields")
+        allowed_preferences = {"ANY", "EV", "ACCESSIBLE", "NEAR_ELEVATOR"}
+        preference = value.get("preference")
+        if preference is not None and preference not in allowed_preferences:
+            raise ValueError("ui action preference is not supported")
+        slot_id = value.get("slot_id")
+        if slot_id is not None and re.fullmatch(
+            r"^F1-[A-D](?:0[1-9]|10)$", slot_id
+        ) is None:
+            raise ValueError("ui action slot_id is not canonical")
+        node_id = value.get("node_id")
+        if node_id is not None and re.fullmatch(r"^F1-[A-Z0-9-]+$", node_id) is None:
+            raise ValueError("ui action node_id is not canonical")
+        return value
+
+
 class ChatResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -244,6 +316,7 @@ class ChatResponse(BaseModel):
     current_location: FloorScopedId | None = None
     recommended_slot_ids: list[FloorScopedId] = Field(default_factory=list)
     route: RouteResult | None = None
+    ui_actions: list[ChatUIAction] = Field(default_factory=list, max_length=5)
 
 
 class SpeechTranscriptionResponse(BaseModel):

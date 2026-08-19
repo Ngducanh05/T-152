@@ -23,6 +23,7 @@ from src.core.db_models import (
     ParkingUser,
     Vehicle,
 )
+from src.core.db_models import WrongParkingReport as WrongParkingReportRow
 from src.core.parking_state import ParkingStateService
 from src.core.reservation import ReservationService
 from src.core.seed import seed_if_missing
@@ -511,6 +512,7 @@ async def test_user_can_report_wrong_parking_and_admin_can_read_it(
         json={
             "user_id": "USER-001",
             "slot_id": "F1-D01",
+            "reason_code": "CROSSED_LINE",
             "observed_plate_number": "  51a-123.45  ",
             "description": "Xe đang đỗ chéo và lấn sang ô bên cạnh.",
         },
@@ -521,9 +523,16 @@ async def test_user_can_report_wrong_parking_and_admin_can_read_it(
     assert report["id"].startswith("REPORT-")
     assert report["reporter_user_id"] == "USER-001"
     assert report["slot_id"] == "F1-D01"
+    assert report["reason_code"] == "CROSSED_LINE"
+    assert report["status"] == "OPEN"
     assert report["observed_plate_number"] == "51A-123.45"
     assert report["description"] == "Xe đang đỗ chéo và lấn sang ô bên cạnh."
     assert report["created_at"].endswith("Z")
+    assert report["updated_at"].endswith("Z")
+    assert report["resolved_at"] is None
+    assert report["resolved_by"] is None
+    assert report["resolution_note"] is None
+    assert report["version"] == 0
 
     admin_response = await simulator_api.client.get(
         "/api/v1/admin/reports", params={"limit": 1}
@@ -540,6 +549,7 @@ async def test_user_can_report_wrong_parking_and_admin_can_read_it(
             {
                 "user_id": "USER-MISSING",
                 "slot_id": "F1-D01",
+                "reason_code": "OTHER",
                 "description": "Xe đỗ không đúng vị trí.",
             },
             404,
@@ -549,6 +559,7 @@ async def test_user_can_report_wrong_parking_and_admin_can_read_it(
             {
                 "user_id": "USER-001",
                 "slot_id": "F1-Z99",
+                "reason_code": "OTHER",
                 "description": "Xe đỗ không đúng vị trí.",
             },
             404,
@@ -558,6 +569,7 @@ async def test_user_can_report_wrong_parking_and_admin_can_read_it(
             {
                 "user_id": "USER-001",
                 "slot_id": "F1-D01",
+                "reason_code": "OTHER",
                 "description": "   ",
             },
             422,
@@ -578,3 +590,322 @@ async def test_wrong_parking_report_validates_input(
 
     assert response.status_code == expected_status
     assert response.json()["error"]["code"] == expected_code
+
+
+@pytest.mark.asyncio
+async def test_standard_wrong_parking_reason_allows_no_description_and_keeps_slot_state(
+    simulator_api: SimulatorApi,
+):
+    before = await simulator_api.client.get("/api/v1/parking/slots/F1-C03")
+
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        json={
+            "user_id": "USER-001",
+            "slot_id": "F1-C03",
+            "reason_code": "BLOCKING_ACCESS",
+            "observed_plate_number": "  30a-000.01 ",
+        },
+    )
+    after = await simulator_api.client.get("/api/v1/parking/slots/F1-C03")
+
+    assert response.status_code == 201
+    report = response.json()["data"]
+    assert report["description"] is None
+    assert report["observed_plate_number"] == "30A-000.01"
+    assert report["reason_code"] == "BLOCKING_ACCESS"
+    assert report["status"] == "OPEN"
+    assert report["version"] == 0
+    assert after.json()["data"] == before.json()["data"]
+
+
+@pytest.mark.asyncio
+async def test_other_wrong_parking_reason_requires_meaningful_description(
+    simulator_api: SimulatorApi,
+):
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        json={
+            "user_id": "USER-001",
+            "slot_id": "F1-D01",
+            "reason_code": "OTHER",
+            "description": "  no ",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+async def _create_lifecycle_report(
+    api: SimulatorApi,
+    *,
+    slot_id: str = "F1-D01",
+) -> dict[str, object]:
+    response = await api.client.post(
+        "/api/v1/reports/wrong-parking",
+        json={
+            "user_id": "USER-001",
+            "slot_id": slot_id,
+            "reason_code": "WRONG_SLOT",
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["data"]
+
+
+@pytest.mark.asyncio
+async def test_admin_report_lifecycle_filters_conflicts_reopens_and_hard_deletes(
+    simulator_api: SimulatorApi,
+):
+    report = await _create_lifecycle_report(simulator_api)
+    report_id = str(report["id"])
+
+    detail = await simulator_api.client.get(f"/api/v1/admin/reports/{report_id}")
+    open_reports = await simulator_api.client.get(
+        "/api/v1/admin/reports",
+        params={"status": "OPEN", "slot_id": "F1-D01", "limit": 1},
+    )
+    assert detail.status_code == 200
+    assert detail.json()["data"] == report
+    assert open_reports.json()["data"] == [report]
+
+    resolved_response = await simulator_api.client.patch(
+        f"/api/v1/admin/reports/{report_id}",
+        json={
+            "status": "RESOLVED",
+            "resolution_note": "  Đã kiểm tra hiện trường.  ",
+            "expected_version": 0,
+        },
+    )
+    assert resolved_response.status_code == 200
+    resolved = resolved_response.json()["data"]
+    assert resolved["status"] == "RESOLVED"
+    assert resolved["resolved_at"].endswith("Z")
+    assert resolved["resolved_by"] == "DEMO-ADMIN"
+    assert resolved["resolution_note"] == "Đã kiểm tra hiện trường."
+    assert resolved["version"] == 1
+
+    stale_resolve = await simulator_api.client.patch(
+        f"/api/v1/admin/reports/{report_id}",
+        json={"status": "RESOLVED", "expected_version": 0},
+    )
+    repeated_resolve = await simulator_api.client.patch(
+        f"/api/v1/admin/reports/{report_id}",
+        json={"status": "RESOLVED", "expected_version": 1},
+    )
+    invalid_patch_reopen = await simulator_api.client.patch(
+        f"/api/v1/admin/reports/{report_id}",
+        json={"status": "OPEN", "expected_version": 1},
+    )
+    assert stale_resolve.status_code == 409
+    assert stale_resolve.json()["error"]["code"] == "REPORT_VERSION_CONFLICT"
+    assert repeated_resolve.status_code == 409
+    assert repeated_resolve.json()["error"]["code"] == "INVALID_REPORT_TRANSITION"
+    assert invalid_patch_reopen.status_code == 422
+
+    reopened_response = await simulator_api.client.post(
+        f"/api/v1/admin/reports/{report_id}/reopen",
+        json={"expected_version": 1},
+    )
+    assert reopened_response.status_code == 200
+    reopened = reopened_response.json()["data"]
+    assert reopened["status"] == "OPEN"
+    assert reopened["resolved_at"] is None
+    assert reopened["resolved_by"] is None
+    assert reopened["resolution_note"] is None
+    assert reopened["version"] == 2
+
+    repeated_reopen = await simulator_api.client.post(
+        f"/api/v1/admin/reports/{report_id}/reopen",
+        json={"expected_version": 2},
+    )
+    assert repeated_reopen.status_code == 409
+    assert repeated_reopen.json()["error"]["code"] == "INVALID_REPORT_TRANSITION"
+
+    stale_delete = await simulator_api.client.delete(
+        f"/api/v1/admin/reports/{report_id}",
+        params={"expected_version": 1},
+    )
+    assert stale_delete.status_code == 409
+    assert stale_delete.json()["error"]["code"] == "REPORT_VERSION_CONFLICT"
+
+    deleted = await simulator_api.client.delete(
+        f"/api/v1/admin/reports/{report_id}",
+        params={"expected_version": 2},
+    )
+    missing = await simulator_api.client.get(f"/api/v1/admin/reports/{report_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["data"] == {"deleted_report_id": report_id}
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "REPORT_NOT_FOUND"
+    async with simulator_api.session_factory() as session:
+        assert await session.get(WrongParkingReportRow, report_id) is None
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_resolve_reopen_or_delete_reports_outside_demo(
+    simulator_api: SimulatorApi,
+):
+    report = await _create_lifecycle_report(simulator_api, slot_id="F1-C01")
+    report_id = str(report["id"])
+
+    async def resident_user() -> CurrentUser:
+        return CurrentUser(
+            id=uuid4(),
+            email="resident@example.com",
+            full_name="Resident",
+            app_role=AppRole.RESIDENT,
+        )
+
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
+        demo_mode=False
+    )
+    simulator_api.application.dependency_overrides[get_optional_current_user] = (
+        resident_user
+    )
+
+    responses = [
+        await simulator_api.client.patch(
+            f"/api/v1/admin/reports/{report_id}",
+            json={"status": "RESOLVED", "expected_version": 0},
+        ),
+        await simulator_api.client.post(
+            f"/api/v1/admin/reports/{report_id}/reopen",
+            json={"expected_version": 0},
+        ),
+        await simulator_api.client.delete(
+            f"/api/v1/admin/reports/{report_id}",
+            params={"expected_version": 0},
+        ),
+    ]
+
+    assert [response.status_code for response in responses] == [403, 403, 403]
+    assert all(
+        response.json()["error"]["code"] == "ADMIN_REQUIRED"
+        for response in responses
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, 101])
+async def test_admin_reports_validate_limit_bounds(
+    simulator_api: SimulatorApi,
+    limit: int,
+):
+    response = await simulator_api.client.get(
+        "/api/v1/admin/reports",
+        params={"limit": limit},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "path_suffix", "kwargs"),
+    [
+        ("GET", "", {}),
+        (
+            "PATCH",
+            "",
+            {"json": {"status": "RESOLVED", "expected_version": 0}},
+        ),
+        ("POST", "/reopen", {"json": {"expected_version": 0}}),
+        ("DELETE", "", {"params": {"expected_version": 0}}),
+    ],
+)
+async def test_admin_report_endpoints_return_stable_not_found(
+    simulator_api: SimulatorApi,
+    method: str,
+    path_suffix: str,
+    kwargs: dict[str, object],
+):
+    response = await simulator_api.client.request(
+        method,
+        f"/api/v1/admin/reports/REPORT-MISSING{path_suffix}",
+        **kwargs,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "REPORT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_report_resolution_uses_authenticated_admin_id_in_demo(
+    simulator_api: SimulatorApi,
+):
+    report = await _create_lifecycle_report(simulator_api, slot_id="F1-A01")
+    admin_id = uuid4()
+
+    async def admin_user() -> CurrentUser:
+        return CurrentUser(
+            id=admin_id,
+            email="admin@example.com",
+            full_name="Admin",
+            app_role=AppRole.ADMIN,
+        )
+
+    simulator_api.application.dependency_overrides[get_optional_current_user] = admin_user
+    response = await simulator_api.client.patch(
+        f"/api/v1/admin/reports/{report['id']}",
+        json={"status": "RESOLVED", "expected_version": 0},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["resolved_by"] == str(admin_id)
+
+
+@pytest.mark.asyncio
+async def test_report_logs_identifiers_without_sensitive_report_text(
+    simulator_api: SimulatorApi,
+    caplog: pytest.LogCaptureFixture,
+):
+    caplog.set_level("INFO")
+    create_response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        json={
+            "user_id": "USER-001",
+            "slot_id": "F1-B01",
+            "reason_code": "OTHER",
+            "observed_plate_number": "SECRET-PLATE",
+            "description": "SECRET-DESCRIPTION",
+        },
+    )
+    report_id = create_response.json()["data"]["id"]
+    await simulator_api.client.patch(
+        f"/api/v1/admin/reports/{report_id}",
+        json={
+            "status": "RESOLVED",
+            "resolution_note": "SECRET-RESOLUTION-NOTE",
+            "expected_version": 0,
+        },
+    )
+
+    assert "wrong_parking_report_action action=create" in caplog.text
+    assert "wrong_parking_report_action action=resolve" in caplog.text
+    assert f"report_id={report_id}" in caplog.text
+    assert "slot_id=F1-B01" in caplog.text
+    assert "request_id=" in caplog.text
+    assert "SECRET-PLATE" not in caplog.text
+    assert "SECRET-DESCRIPTION" not in caplog.text
+    assert "SECRET-RESOLUTION-NOTE" not in caplog.text
+
+
+def test_admin_report_lifecycle_is_exposed_in_openapi():
+    application = create_app()
+    openapi = application.openapi()
+    paths = openapi["paths"]
+
+    assert "get" in paths["/api/v1/admin/reports"]
+    query_parameters = {
+        parameter["name"]
+        for parameter in paths["/api/v1/admin/reports"]["get"]["parameters"]
+    }
+    assert {"status", "slot_id", "limit"} <= query_parameters
+    detail_operations = paths["/api/v1/admin/reports/{report_id}"]
+    assert {"get", "patch", "delete"} <= detail_operations.keys()
+    assert "post" in paths["/api/v1/admin/reports/{report_id}/reopen"]
+    create_schema = openapi["components"]["schemas"]["WrongParkingReportRequest"]
+    assert "reason_code" in create_schema["required"]

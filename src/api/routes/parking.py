@@ -1,14 +1,16 @@
 """Read-only ParkSmart parking-state and canonical-map routes."""
 
-from typing import Annotated
+import logging
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db_session
 from src.core.parking_map import build_canonical_f1_map
 from src.core.parking_state import ParkingStateError, ParkingStateService
+from src.core.slot_observation import SlotObservationService
 from src.models.common import SuccessResponse
 from src.models.schemas import (
     ErrorCode,
@@ -21,6 +23,7 @@ from src.models.schemas import (
 
 router = APIRouter(prefix="/parking", tags=["Parking"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
+logger = logging.getLogger(__name__)
 
 
 class ParkingStatusResponse(BaseModel):
@@ -35,6 +38,14 @@ class ParkingMapResponse(BaseModel):
     nodes: list[MapNode]
     edges: list[MapEdge]
     slots: list[ParkingSlot]
+
+
+class AdjacentSlotObservationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str = Field(min_length=1)
+    observed_status: Literal[SlotStatus.AVAILABLE, SlotStatus.OCCUPIED]
+    expected_version: int = Field(ge=0)
 
 
 def _slot_response(slot: object) -> ParkingSlot:
@@ -82,6 +93,34 @@ async def parking_slot(
         slot = await ParkingStateService(session).get_slot(slot_id)
     except ParkingStateError as error:
         raise _domain_error(error) from error
+    return SuccessResponse(data=_slot_response(slot))
+
+
+@router.post(
+    "/slots/{slot_id}/observation",
+    response_model=SuccessResponse[ParkingSlot],
+)
+async def observe_adjacent_parking_slot(
+    slot_id: str,
+    request: AdjacentSlotObservationRequest,
+    session: SessionDependency,
+) -> SuccessResponse[ParkingSlot]:
+    try:
+        async with session.begin():
+            slot = await SlotObservationService(session).observe_adjacent_slot(
+                user_id=request.user_id,
+                slot_id=slot_id,
+                observed_status=request.observed_status,
+                expected_version=request.expected_version,
+            )
+    except ParkingStateError as error:
+        raise _domain_error(error) from error
+    logger.info(
+        "adjacent_slot_observation slot_id=%s actor_id=%s observed_status=%s outcome=success",
+        slot_id,
+        request.user_id,
+        request.observed_status.value,
+    )
     return SuccessResponse(data=_slot_response(slot))
 
 

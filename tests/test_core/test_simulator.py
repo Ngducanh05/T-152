@@ -319,6 +319,13 @@ async def test_reset_produces_expected_baseline(simulator_db: SimulatorDatabase)
     try:
         await simulator.manual_park("F1-A04", "SIM-CAR-01")
         await simulator.manual_park("F1-D07", "SIM-CAR-03")
+        await state_service.apply_user_slot_observation(
+            "F1-A02",
+            observed_status=SlotStatus.OCCUPIED,
+            user_id="USER-001",
+            observer_session_id="SESSION-OBSERVE",
+            expected_version=0,
+        )
         await simulator.reset_demo()
         status = await state_service.get_parking_status()
         slots = {slot.id: slot for slot in await state_service.list_slots()}
@@ -329,6 +336,7 @@ async def test_reset_produces_expected_baseline(simulator_db: SimulatorDatabase)
     assert slots["F1-B03"].status is SlotStatus.OCCUPIED
     assert slots["F1-B03"].occupied_by_vehicle_id == "SIM-CAR-02"
     assert slots["F1-A04"].status is SlotStatus.AVAILABLE
+    assert slots["F1-A02"].status is SlotStatus.AVAILABLE
     assert slots["F1-D07"].status is SlotStatus.AVAILABLE
     assert slots["F1-D01"].status is SlotStatus.AVAILABLE
     assert all(

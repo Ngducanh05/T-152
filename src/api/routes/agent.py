@@ -17,6 +17,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.agents.context import AgentRuntimeContext
 from src.agents.tools import PARKING_TOOLS
+from src.api.ui_actions import derive_chat_ui_actions
 from src.core.database import get_session_factory
 from src.core.route_guidance import vietnamese_route_guidance
 from src.models.common import ErrorResponse, SuccessResponse
@@ -371,6 +372,18 @@ async def chat(
         route=(
             result.get("route") or None if "get_route" in successful_tools else None
         ),
+    )
+    response.ui_actions.extend(
+        derive_chat_ui_actions(
+            current_location=response.current_location,
+            recommended_slot_ids=response.recommended_slot_ids,
+            selected_slot=response.selected_slot,
+            intent=response.intent,
+            successful_tool_names=successful_tools,
+            active_reservation_id=result.get("active_reservation_id") or None,
+            active_session_id=result.get("active_session_id") or None,
+            route=response.route,
+        )
     )
     logger.info(
         "agent_chat_completed request_id=%s user_id=%s thread_id=%s tool_count=%s",

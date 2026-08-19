@@ -248,3 +248,72 @@ trên. Ngược lại, manual LLM run không thay thế unit/integration regress
 - [ ] Chạy lại toàn bộ manual cases sau khi working tree được commit.
 - [ ] Thu thập latency cho toàn bộ case bằng cùng một phương pháp.
 - [ ] Thu thập user feedback riêng; không suy diễn satisfaction từ test kỹ thuật.
+
+---
+
+## 7. Phase 10 P10-02 — report alert evidence
+
+### Thông tin lần chạy
+
+| Thuộc tính | Giá trị |
+|---|---|
+| Ngày chạy | 2026-08-19, Asia/Saigon |
+| Migration | `20260819_0006` từ `20260815_0005` |
+| UI runtime | Next.js 16.3 production build, Chromium Playwright |
+| API/database | FastAPI + PostgreSQL `parksmart_e2e`, không mock report API |
+| Demo identity | `USER-001`; admin actor `DEMO-ADMIN` |
+
+### Demo flow và actual evidence
+
+Luồng thao tác trình diễn tại `/` là: **Báo xe đỗ sai** → chọn canonical slot →
+**Gửi: Xe đỗ chéo vạch**. Không mở “Thêm thông tin”, không nhập description và API trả
+HTTP 201. Trang `/admin` đang mở nhận tín hiệu refresh, đọc lại backend, giữ màu trạng thái
+slot và thêm warning đỏ/badge `1`. Click slot mở drawer chứa đúng report vừa tạo.
+
+Các scenario real-stack chạy ngày 2026-08-19 cho kết quả:
+
+| Scenario | Actual result |
+|---|---|
+| User quick report | Standard reason + `description=null` trả 201; admin thấy warning mà không reload |
+| Resolve report cuối | PATCH thành công; refetch cho OPEN count `0`; warning biến mất |
+| Hai report cùng slot | Badge `2`; resolve một còn `1`; resolve report cuối thì warning biến mất |
+| Hard delete | Cancel giữ report và GET còn 200; confirm xóa; refetch bỏ report; GET trả `404 REPORT_NOT_FOUND` |
+
+Hard delete khác resolve: resolve giữ row với status `RESOLVED`; delete xóa row. Backend
+integration test kiểm tra thêm trực tiếp bằng SQLAlchemy rằng `session.get(report_id)` trả
+`None` sau DELETE. Report create/resolve/reopen/delete không thay đổi `ParkingSlot.status`.
+
+### Verification commands
+
+```text
+uv run alembic upgrade head                              PASS
+uv run ruff check src tests scripts alembic              PASS
+uv run pytest tests/test_core tests/test_api tests/test_agents -q
+                                                          302 passed, 1 skipped
+npm test                                                 95 passed
+npm run lint                                             PASS
+npm run build                                            PASS
+npm run test:e2e                                         10 passed, 1 skipped
+```
+
+Playwright skip duy nhất là live-Agent case có điều kiện, vì lần chạy không bật
+`RUN_LIVE_AGENT_E2E=1`/LLM credential. Mười scenario deterministic còn lại, bao gồm toàn bộ
+bốn report flows nêu trên, đã chạy trên production frontend và API/database thật.
+
+### Follow-up UX verification — 2026-08-19
+
+- Reusable selection/shortcut actions remain enabled after completion; double-click in-flight
+  vẫn chỉ tạo một request.
+- “Tôi đã đến nơi” gọi location confirmation cho reserved slot trước, refetch version, rồi
+  confirm parking; Playwright quan sát cả hai response HTTP 200 và session card xuất hiện.
+- Turn-by-turn labels/icons được suy ra deterministic từ route geometry. Unit tests bao phủ
+  rẽ trái, rẽ phải, đi thẳng, đến nơi và fallback “Tiếp tục” khi thiếu tọa độ.
+- Important reservation/session state and its actions remain in a sticky priority dock below
+  the header, so a long conversation cannot push confirm/complete controls out of reach.
+- After parking is confirmed, the user may optionally mark the two same-row adjacent slots
+  as available or occupied. The UI uses the authoritative slot version, prevents duplicate
+  submission, and refetches after success; it does not update optimistically.
+- Demo reset recognizes only occupancy whose latest event is an adjacent user observation;
+  verified vehicle/session occupancy remains protected.
+- Verification: `npm test` 95 passed; lint/build passed; `npm run test:e2e` 10 passed,
+  1 conditional live-Agent test skipped.
