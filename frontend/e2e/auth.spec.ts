@@ -47,6 +47,39 @@ function supabaseUser(account: Account) {
   };
 }
 
+function base64UrlJson(value: unknown) {
+  return Buffer.from(JSON.stringify(value), "utf-8").toString("base64url");
+}
+
+function makeAccessToken(account: Account, sequence: number) {
+  const now = Math.floor(Date.now() / 1000);
+
+  const header = {
+    alg: "HS256",
+    typ: "JWT",
+  };
+
+  const payload = {
+    iss: "http://supabase.parksmart.test/auth/v1",
+    sub: account.id,
+    aud: "authenticated",
+    exp: now + 3600,
+    iat: now,
+    email: account.email,
+    role: "authenticated",
+    aal: "aal1",
+    session_id: `e2e-${account.role}-${sequence}`,
+    is_anonymous: false,
+  };
+
+  const signature = Buffer.from(
+    `parksmart-e2e-${account.role}-${sequence}`,
+    "utf-8",
+  ).toString("base64url");
+
+  return `${base64UrlJson(header)}.${base64UrlJson(payload)}.${signature}`;
+}
+
 function sessionPayload(account: Account, accessToken: string, refreshToken: string) {
   return {
     access_token: accessToken,
@@ -56,6 +89,13 @@ function sessionPayload(account: Account, accessToken: string, refreshToken: str
     refresh_token: refreshToken,
     user: supabaseUser(account),
   };
+}
+
+function accountFromAccessToken(
+  accessToken: string,
+  tokens: Map<string, Account>,
+): Account | undefined {
+  return tokens.get(accessToken);
 }
 
 function success(data: unknown) {
@@ -115,7 +155,7 @@ async function installAuthMocks(page: Page) {
         }
 
         sequence += 1;
-        const accessToken = `access-${account.role}-${sequence}`;
+        const accessToken = makeAccessToken(account, sequence);
         const refreshToken = `refresh-${account.role}-${sequence}`;
         tokens.set(accessToken, account);
         refreshTokens.set(refreshToken, account);
@@ -136,13 +176,32 @@ async function installAuthMocks(page: Page) {
           return;
         }
         sequence += 1;
-        const accessToken = `access-${account.role}-refreshed-${sequence}`;
+        const accessToken = makeAccessToken(account, sequence);
         const refreshToken = `refresh-${account.role}-refreshed-${sequence}`;
         tokens.set(accessToken, account);
         refreshTokens.set(refreshToken, account);
         await fulfillJson(route, sessionPayload(account, accessToken, refreshToken));
         return;
       }
+    }
+
+    if (url.pathname === "/auth/v1/user") {
+      const headers = await request.allHeaders();
+      const authorization = headers.authorization ?? "";
+      const accessToken = authorization.replace(/^Bearer\s+/i, "");
+      const account = accountFromAccessToken(accessToken, tokens);
+
+      if (!account) {
+        await fulfillJson(
+          route,
+          { code: "bad_jwt", message: "Invalid JWT" },
+          401,
+        );
+        return;
+      }
+
+      await fulfillJson(route, supabaseUser(account));
+      return;
     }
 
     if (url.pathname === "/auth/v1/logout") {
@@ -161,9 +220,10 @@ async function installAuthMocks(page: Page) {
     }
 
     const url = new URL(request.url());
-    const authorization = request.headers()["authorization"] ?? "";
+    const headers = await request.allHeaders();
+    const authorization = headers.authorization ?? "";
     const token = authorization.replace(/^Bearer\s+/i, "");
-    const account = tokens.get(token);
+    const account = accountFromAccessToken(token, tokens);
 
     if (url.pathname === "/api/v1/auth/me") {
       if (!account) {
@@ -260,7 +320,9 @@ test("invalid login shows a safe error without role selection", async ({ page })
   await page.getByLabel("Mật khẩu").fill("wrong-password");
   await page.getByRole("button", { name: "Đăng nhập" }).click();
 
-  await expect(page.getByRole("alert")).toHaveText("Email hoặc mật khẩu không đúng.");
+  await expect(
+    page.locator('p[role="alert"]'),
+  ).toHaveText("Email hoặc mật khẩu không đúng.");
   await expect(page.locator("select")).toHaveCount(0);
 });
 

@@ -13,8 +13,15 @@ import {
 } from "react";
 
 import { ApiError, parkSmartApi } from "@/lib/api";
-import type { AuthenticatedProfile, AuthStatus, ParkingIdentity } from "@/lib/auth";
-import { MVP_DEMO_USER_ID, MVP_DEMO_VEHICLE_ID } from "@/lib/demo";
+import type {
+  AuthenticatedProfile,
+  AuthStatus,
+  ParkingIdentity,
+} from "@/lib/auth";
+import {
+  MVP_DEMO_USER_ID,
+  MVP_DEMO_VEHICLE_ID,
+} from "@/lib/demo";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 const DEMO_PROFILE: AuthenticatedProfile = {
@@ -45,22 +52,30 @@ function safeProfileError(error: unknown) {
   if (error instanceof ApiError && error.status === 403) {
     return "Tài khoản đã đăng nhập nhưng chưa được cấu hình quyền ParkSmart hợp lệ.";
   }
+
   return "Không thể xác minh tài khoản ParkSmart. Vui lòng đăng nhập lại.";
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
   const [status, setStatus] = useState<AuthStatus>(() =>
     demoMode ? "authenticated" : "loading",
   );
+
   const [profile, setProfile] = useState<AuthenticatedProfile | null>(() =>
     demoMode ? DEMO_PROFILE : null,
   );
+
   const [initializationError, setInitializationError] =
     useState<string | null>(null);
+
   const supabaseRef = useRef<SupabaseClient | null>(null);
+  const accessTokenRef = useRef<string | null>(null);
+  const signInInFlightRef = useRef(false);
 
   const becomeGuest = useCallback((error: string | null = null) => {
+    accessTokenRef.current = null;
     setProfile(null);
     setInitializationError(error);
     setStatus("guest");
@@ -68,83 +83,161 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadBackendProfile = useCallback(async () => {
     const currentProfile = await parkSmartApi.getCurrentUser();
+
     setProfile(currentProfile);
     setInitializationError(null);
     setStatus("authenticated");
+
     return currentProfile;
   }, []);
 
   useEffect(() => {
     if (demoMode) {
+      accessTokenRef.current = null;
       parkSmartApi.setAuthProvider(null);
-      return () => parkSmartApi.setAuthProvider(null);
+
+      return () => {
+        accessTokenRef.current = null;
+        parkSmartApi.setAuthProvider(null);
+      };
     }
 
     let active = true;
     let supabase: SupabaseClient;
+
     try {
       supabase = createBrowserSupabaseClient();
     } catch {
       queueMicrotask(() => {
-        if (active) becomeGuest("Supabase chưa được cấu hình cho frontend.");
+        if (active) {
+          becomeGuest("Supabase chưa được cấu hình cho frontend.");
+        }
       });
+
       return;
     }
+
     supabaseRef.current = supabase;
 
     parkSmartApi.setAuthProvider({
       async getAccessToken() {
+        if (accessTokenRef.current) {
+          return accessTokenRef.current;
+        }
+
         const { data, error } = await supabase.auth.getSession();
-        if (error) return null;
-        return data.session?.access_token ?? null;
+
+        if (error || !data.session) {
+          accessTokenRef.current = null;
+          return null;
+        }
+
+        accessTokenRef.current = data.session.access_token;
+        return data.session.access_token;
       },
+
       async refreshAccessToken() {
         const { data, error } = await supabase.auth.refreshSession();
-        if (error) return null;
-        return data.session?.access_token ?? null;
+
+        if (error || !data.session) {
+          accessTokenRef.current = null;
+          return null;
+        }
+
+        accessTokenRef.current = data.session.access_token;
+        return data.session.access_token;
       },
+
       async onAuthenticationFailure() {
+        accessTokenRef.current = null;
         await supabase.auth.signOut();
-        if (active) becomeGuest();
+
+        if (active) {
+          becomeGuest();
+        }
       },
     });
 
-    async function bootstrap() {
-      const { data, error } = await supabase.auth.getSession();
-      if (!active) return;
-      if (error || !data.session) {
-        becomeGuest();
-        return;
-      }
-      try {
-        await loadBackendProfile();
-      } catch (profileError) {
-        await supabase.auth.signOut();
-        if (active) becomeGuest(safeProfileError(profileError));
-      }
-    }
-
-    void bootstrap();
-
+    /*
+     * Do not run a separate bootstrap(getSession()) here.
+     *
+     * Supabase emits INITIAL_SESSION after its own initialization completes.
+     * Using both a manual bootstrap and INITIAL_SESSION creates two competing
+     * initialization flows. A delayed null bootstrap/initial event can
+     * overwrite a successful sign-in and return the UI to "guest".
+     *
+     * INITIAL_SESSION is therefore the single source of truth for startup.
+     */
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!active) return;
+      if (!active) {
+        return;
+      }
+
+      if (event === "INITIAL_SESSION") {
+        if (!session) {
+          becomeGuest();
+          return;
+        }
+
+        accessTokenRef.current = session.access_token;
+        setStatus("loading");
+
+        window.setTimeout(() => {
+          if (!active) {
+            return;
+          }
+
+          void loadBackendProfile().catch(async (profileError) => {
+            accessTokenRef.current = null;
+            await supabase.auth.signOut();
+
+            if (active) {
+              becomeGuest(safeProfileError(profileError));
+            }
+          });
+        }, 0);
+
+        return;
+      }
+
       if (event === "SIGNED_OUT" || !session) {
         becomeGuest();
         return;
       }
+
+      /*
+       * Keep the latest Supabase JWT in memory. This is the token the
+       * ParkSmart API client should attach to Authorization: Bearer.
+       */
+      accessTokenRef.current = session.access_token;
+
+      /*
+       * signIn() itself owns the first /auth/me call because LoginForm needs
+       * the authoritative ParkSmart profile returned from signIn().
+       */
+      if (event === "SIGNED_IN" && signInInFlightRef.current) {
+        return;
+      }
+
       if (
         event === "SIGNED_IN" ||
         event === "TOKEN_REFRESHED" ||
-        event === "USER_UPDATED" ||
-        event === "INITIAL_SESSION"
+        event === "USER_UPDATED"
       ) {
         window.setTimeout(() => {
-          if (!active) return;
+          if (!active) {
+            return;
+          }
+
           void loadBackendProfile().catch(async (profileError) => {
+            accessTokenRef.current = null;
             await supabase.auth.signOut();
-            if (active) becomeGuest(safeProfileError(profileError));
+
+            if (active) {
+              becomeGuest(safeProfileError(profileError));
+            }
           });
         }, 0);
       }
@@ -154,6 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       active = false;
       subscription.unsubscribe();
       supabaseRef.current = null;
+      accessTokenRef.current = null;
       parkSmartApi.setAuthProvider(null);
     };
   }, [becomeGuest, demoMode, loadBackendProfile]);
@@ -161,12 +255,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(
     async (email: string, password: string): Promise<SignInResult> => {
       if (demoMode) {
+        accessTokenRef.current = null;
         setProfile(DEMO_PROFILE);
+        setInitializationError(null);
         setStatus("authenticated");
-        return { profile: DEMO_PROFILE, error: null };
+
+        return {
+          profile: DEMO_PROFILE,
+          error: null,
+        };
       }
 
       const supabase = supabaseRef.current;
+
       if (!supabase) {
         return {
           profile: null,
@@ -174,25 +275,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-      if (error || !data.session) {
-        return {
-          profile: null,
-          error: "Email hoặc mật khẩu không đúng.",
-        };
-      }
+      signInInFlightRef.current = true;
 
       try {
-        const currentProfile = await loadBackendProfile();
-        return { profile: currentProfile, error: null };
-      } catch (profileError) {
-        await supabase.auth.signOut();
-        const message = safeProfileError(profileError);
-        becomeGuest(message);
-        return { profile: null, error: message };
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+
+        if (error || !data.session) {
+          accessTokenRef.current = null;
+
+          return {
+            profile: null,
+            error: "Email hoặc mật khẩu không đúng.",
+          };
+        }
+
+        /*
+         * signInWithPassword already returns the newly issued session.
+         * Use that JWT immediately for the first ParkSmart /auth/me request.
+         */
+        accessTokenRef.current = data.session.access_token;
+
+        try {
+          const currentProfile = await loadBackendProfile();
+
+          return {
+            profile: currentProfile,
+            error: null,
+          };
+        } catch (profileError) {
+          accessTokenRef.current = null;
+          await supabase.auth.signOut();
+
+          const message = safeProfileError(profileError);
+          becomeGuest(message);
+
+          return {
+            profile: null,
+            error: message,
+          };
+        }
+      } finally {
+        signInInFlightRef.current = false;
       }
     },
     [becomeGuest, demoMode, loadBackendProfile],
@@ -200,14 +326,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     const supabase = supabaseRef.current;
+
+    accessTokenRef.current = null;
+
     if (supabase) {
       await supabase.auth.signOut();
     }
+
     becomeGuest();
   }, [becomeGuest]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, profile, initializationError, signIn, signOut }),
+    () => ({
+      status,
+      profile,
+      initializationError,
+      signIn,
+      signOut,
+    }),
     [initializationError, profile, signIn, signOut, status],
   );
 
@@ -216,16 +352,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const value = useContext(AuthContext);
+
   if (!value) {
     throw new Error("useAuth must be used inside AuthProvider.");
   }
+
   return value;
 }
 
 export function parkingIdentityFromProfile(
   profile: AuthenticatedProfile,
 ): ParkingIdentity | null {
-  if (profile.role !== "user" || !profile.parking_user_id) return null;
+  if (profile.role !== "user" || !profile.parking_user_id) {
+    return null;
+  }
+
   return {
     userId: profile.parking_user_id,
     vehicleId: profile.default_vehicle_id,
