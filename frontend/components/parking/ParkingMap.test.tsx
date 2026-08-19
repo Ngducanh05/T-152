@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ParkingMap as ParkingMapData,
@@ -65,5 +65,36 @@ describe("ParkingMap", () => {
     expect(screen.getByTestId("route-polyline").getAttribute("points")).toBe(
       "0,50 15,50 50,50 55,50 55,61",
     );
+  });
+
+  it("keeps the slot status styling while adding an accessible OPEN report warning", () => {
+    const { map, slots, status } = fixture();
+    const onOpenReportedSlot = vi.fn();
+    const onSelectSlot = vi.fn();
+    render(
+      <ParkingMap
+        map={map}
+        slots={slots}
+        status={status}
+        openReportCountBySlot={{ "F1-A01": 2 }}
+        onOpenReportedSlot={onOpenReportedSlot}
+        onSelectSlot={onSelectSlot}
+      />,
+    );
+
+    const warnedSlot = screen.getByRole("button", {
+      name: /F1-A01.*Đã giữ.*2 báo cáo đang mở/,
+    });
+    expect(warnedSlot).toHaveClass("status-reserved", "has-open-reports");
+    expect(warnedSlot.querySelector(".map-slot-report-warning")).toHaveTextContent("2");
+    fireEvent.click(warnedSlot);
+    expect(onOpenReportedSlot).toHaveBeenCalledWith("F1-A01");
+    expect(onSelectSlot).not.toHaveBeenCalled();
+
+    const normalSlot = screen.getByRole("button", { name: /F1-A02, Khu A/ });
+    expect(normalSlot).toHaveClass("status-available");
+    expect(normalSlot).not.toHaveClass("has-open-reports");
+    fireEvent.click(normalSlot);
+    expect(onSelectSlot).toHaveBeenCalledWith("F1-A02");
   });
 });

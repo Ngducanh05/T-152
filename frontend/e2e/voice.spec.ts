@@ -139,6 +139,7 @@ function successEnvelope(message: string) {
       current_location: "F1-ENTRANCE",
       recommended_slot_ids: [],
       route: null,
+      ui_actions: [],
     },
     message: null,
   };
@@ -163,7 +164,7 @@ test("sends a reviewed voice transcript through the existing Agent contract and 
 
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Tìm chỗ đỗ phù hợp" }),
+    page.getByRole("heading", { name: "Trợ lý ParkSmart" }),
   ).toBeVisible();
   await confirmLocation(page, "F1-ENTRANCE");
 
@@ -183,8 +184,8 @@ test("sends a reviewed voice transcript through the existing Agent contract and 
   expect(agentCallCount).toBe(0);
 
   await page.getByRole("button", { name: "Gửi tin nhắn" }).click();
-  await expect(page.locator(".message.user")).toContainText(VOICE_TRANSCRIPT);
-  await expect(page.locator(".message.agent")).toContainText(AGENT_RESPONSE);
+  await expect(page.locator(".message-user")).toContainText(VOICE_TRANSCRIPT);
+  await expect(page.locator(".message-agent").last()).toContainText(AGENT_RESPONSE);
 
   expect(agentCallCount).toBe(1);
   expect(agentPayload).toEqual({
@@ -222,7 +223,7 @@ test("shows the permission fallback and keeps the text composer usable", async (
 
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Tìm chỗ đỗ phù hợp" }),
+    page.getByRole("heading", { name: "Trợ lý ParkSmart" }),
   ).toBeVisible();
   await page
     .getByRole("button", { name: "Bắt đầu nhập bằng giọng nói" })
@@ -238,8 +239,8 @@ test("shows the permission fallback and keeps the text composer usable", async (
   await composer.fill(keyboardMessage);
   await page.getByRole("button", { name: "Gửi tin nhắn" }).click();
 
-  await expect(page.locator(".message.user")).toContainText(keyboardMessage);
-  await expect(page.locator(".message.agent")).toContainText(
+  await expect(page.locator(".message-user")).toContainText(keyboardMessage);
+  await expect(page.locator(".message-agent").last()).toContainText(
     "Đã nhận yêu cầu nhập bằng chữ.",
   );
   const spoken = await page.evaluate(() => {

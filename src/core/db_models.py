@@ -25,6 +25,8 @@ from src.models.schemas import (
     ParkingSessionStatus,
     ReservationStatus,
     SlotStatus,
+    WrongParkingReason,
+    WrongParkingReportStatus,
 )
 
 
@@ -297,8 +299,19 @@ class ParkingEvent(Base):
 class WrongParkingReport(Base):
     __tablename__ = "wrong_parking_reports"
     __table_args__ = (
+        CheckConstraint(
+            "version >= 0",
+            name="ck_wrong_parking_reports_version_nonnegative",
+        ),
         Index("ix_wrong_parking_reports_created", "created_at"),
         Index("ix_wrong_parking_reports_slot_created", "slot_id", "created_at"),
+        Index("ix_wrong_parking_reports_status_created", "status", "created_at"),
+        Index(
+            "ix_wrong_parking_reports_slot_status_created",
+            "slot_id",
+            "status",
+            "created_at",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -308,10 +321,44 @@ class WrongParkingReport(Base):
     slot_id: Mapped[str] = mapped_column(
         ForeignKey("parking_slots.id", ondelete="RESTRICT"), nullable=False
     )
+    reason_code: Mapped[WrongParkingReason] = mapped_column(
+        Enum(
+            WrongParkingReason,
+            name="wrong_parking_reason_enum",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=WrongParkingReason.OTHER,
+        server_default=text("'OTHER'"),
+    )
+    status: Mapped[WrongParkingReportStatus] = mapped_column(
+        Enum(
+            WrongParkingReportStatus,
+            name="wrong_parking_report_status_enum",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=WrongParkingReportStatus.OPEN,
+        server_default=text("'OPEN'"),
+    )
     observed_plate_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolved_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resolution_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
     )
 
 
@@ -332,5 +379,7 @@ __all__ = [
     "ReservationStatus",
     "SlotStatus",
     "Vehicle",
+    "WrongParkingReason",
     "WrongParkingReport",
+    "WrongParkingReportStatus",
 ]

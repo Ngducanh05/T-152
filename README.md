@@ -139,8 +139,12 @@ npm run dev
 
 Mở:
 
-- `http://localhost:3000` cho giao diện người dùng.
-- `http://localhost:3000/admin` cho dashboard vận hành.
+- `http://localhost:3000` cho web app chat mobile-first của người dùng. Trang này không hiển
+  thị bản đồ hay mật độ vận hành; route được trình bày bằng điểm đến, khoảng cách và danh
+  sách chỉ dẫn có icon đi thẳng/rẽ trái/rẽ phải. Hướng rẽ được tính deterministic từ
+  `route.polyline`, không được suy diễn từ LLM prose.
+- `http://localhost:3000/admin` cho dashboard vận hành có map. Ô có report `OPEN` giữ màu
+  trạng thái và có viền/icon/badge đỏ; click ô để resolve, reopen hoặc hard-delete report.
 
 Backend và PostgreSQL phải đang chạy. `/admin` hoạt động không bearer token chỉ
 khi `DEMO_MODE=true`; ngoài demo mode, backend yêu cầu role `admin`.
@@ -190,7 +194,8 @@ Set-Location ..
 ```
 
 Runner tạo lại database test riêng `parksmart_e2e`, build frontend, khởi động
-stack ở cổng 3100/8100 và chạy happy path ba vòng cùng error path cạnh tranh ô.
+stack ở cổng 3100/8100 và chạy parking happy path, cạnh tranh ô, quick report,
+admin resolve nhiều report và hard-delete có xác nhận.
 Nó không thay đổi database `parksmart` dùng để demo thủ công.
 
 Live Agent E2E là tùy chọn. Lệnh sau đọc key từ `.env` mà không in key ra log:
@@ -241,11 +246,35 @@ Invoke-RestMethod `
 ```
 
 Response dùng success envelope và chứa ít nhất `message`, `intent`,
-`tool_names`, `current_location`, `recommended_slot_ids` và `route`. Không dựa
+`tool_names`, `current_location`, `recommended_slot_ids`, `route` và `ui_actions`. Không dựa
 vào wording cố định của `message`; khi kiểm thử cần đối chiếu cả tool và dữ liệu
 có cấu trúc.
 
-## 12. Evaluation evidence
+## 12. Demo report lifecycle
+
+1. Tại `/`, chạm **Báo xe đỗ sai**, chọn ô rồi chạm một reason chuẩn để gửi; không cần nhập
+   mô tả và report không làm thay đổi trạng thái ô.
+2. Tại `/admin`, tìm viền đỏ và badge OPEN trên map, click ô để mở drawer.
+3. Resolve report với version hiện tại. Cảnh báo chỉ biến mất khi ô không còn report OPEN;
+   reopen làm cảnh báo xuất hiện lại.
+4. **Xóa vĩnh viễn** khác resolve: admin phải xác nhận, row bị xóa khỏi database và
+   `GET /api/v1/admin/reports/{id}` sau đó trả `404 REPORT_NOT_FOUND`.
+
+Backend là nguồn sự thật. Polling và refetch sau mutation quyết định UI; browser broadcast
+chỉ là tín hiệu làm mới.
+
+Các shortcut đọc/chọn như tìm ô, chọn vị trí, chọn slot, tìm xe và mở report có thể dùng lại
+nhiều lần; guard in-flight vẫn chặn double-click gọi API song song. Với reservation đang
+active, nút **Tôi đã đến nơi** xác nhận vị trí tại đúng slot, refetch version authoritative,
+rồi mới gọi confirm parking trong cùng một thao tác chủ đích. Chọn slot trong LocationPicker
+riêng lẻ vẫn không tự động xác nhận đỗ.
+
+Reservation/session, lỗi và thông báo mutation được giữ trong priority dock sticky dưới
+header, nên vẫn thao tác được khi lịch sử chat dài. Sau khi xác nhận đỗ, user có thể tùy chọn
+báo hai ô liền kề cùng hàng là **Trống** hoặc **Có xe**. API chỉ chấp nhận observation từ
+active session, kiểm tra adjacency/version và không cho ghi đè trạng thái đã được bảo vệ.
+
+## 13. Evaluation evidence
 
 - Bộ case deterministic: [`eval/vietnamese_agent_cases.py`](eval/vietnamese_agent_cases.py).
 - Automated Agent tests: [`tests/test_agents/test_vietnamese_evals.py`](tests/test_agents/test_vietnamese_evals.py).

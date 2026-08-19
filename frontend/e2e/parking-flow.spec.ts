@@ -3,10 +3,8 @@ import { expect, test } from "@playwright/test";
 import {
   apiUrl,
   confirmLocation,
-  expectParkingCounts,
   requestCandidate,
   resetDemo,
-  slotButton,
   waitForRouteResponse,
 } from "./helpers";
 
@@ -15,71 +13,82 @@ test.describe.configure({ mode: "serial" });
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Tìm chỗ đỗ phù hợp" }),
+    page.getByRole("heading", { name: "Trợ lý ParkSmart" }),
   ).toBeVisible();
 });
 
-test("repeats the deterministic parking happy path three times", async ({
+test("completes the tap-first parking path without exposing an operational map", async ({
   page,
 }) => {
-  for (let iteration = 1; iteration <= 3; iteration += 1) {
-    await test.step(`happy-path iteration ${iteration}`, async () => {
-      await resetDemo(page);
-      await confirmLocation(page, "F1-ENTRANCE");
+  await resetDemo(page);
+  await confirmLocation(page, "F1-ENTRANCE");
 
-      const { candidate, slotId } = await requestCandidate(page);
-      await expectParkingCounts(page, 39, 0, 1);
-      await expect(
-        page.getByRole("status", { name: "Chỗ đỗ đã giữ", exact: true }),
-      ).toHaveCount(0);
-      await expect(slotButton(page, slotId)).toHaveAccessibleName(/Đang trống/);
+  const { candidate, slotId } = await requestCandidate(page);
+  await candidate.click();
+  const reservationResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/v1/reservations") &&
+      response.request().method() === "POST",
+  );
+  const routeResponse = waitForRouteResponse(page);
+  await page.getByRole("button", { name: /Giữ ô và chỉ đường/ }).click();
+  expect((await reservationResponse).status()).toBe(201);
+  const route = await routeResponse;
+  expect(route.path.at(-1)).toBe(slotId);
 
-      await candidate.click();
-      const reservationResponse = page.waitForResponse(
-        (response) =>
-          response.url().includes("/api/v1/reservations") &&
-          response.request().method() === "POST",
-      );
-      await page.getByRole("button", { name: "Chọn làm điểm đỗ" }).click();
-      expect((await reservationResponse).status()).toBe(201);
-      await expect(slotButton(page, slotId)).toHaveAccessibleName(/Đã giữ/);
-      await expect(
-        page.getByRole("status", { name: "Chỗ đỗ đã giữ", exact: true }),
-      ).toContainText(slotId);
-      await expectParkingCounts(page, 38, 1, 1);
+  await expect(
+    page.getByRole("article", { name: "Chỗ đỗ đã giữ" }),
+  ).toContainText(slotId);
+  const routeCard = page.getByRole("article", { name: "Chỉ đường trong bãi" });
+  await expect(routeCard.locator("li")).toHaveCount(route.path.length);
+  for (const nodeId of route.path) await expect(routeCard).toContainText(nodeId);
+  await expect(routeCard).toContainText(/Rẽ trái|Rẽ phải|Đi thẳng/);
+  await expect(page.locator(".api-parking-map, .parking-summary, .sidebar")).toHaveCount(0);
 
-      const routeResponse = waitForRouteResponse(page);
-      await page.getByRole("button", { name: "Chỉ đường", exact: true }).click();
-      const route = await routeResponse;
-      expect(route.path.at(-1)).toBe(slotId);
-      await expect(page.getByTestId("route-polyline")).toBeVisible();
-      await expect(page.getByTestId("route-polyline")).not.toHaveAttribute(
-        "points",
-        "",
-      );
+  const arrivalResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/v1/locations/confirm") &&
+      response.request().method() === "POST",
+  );
+  const parkingResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/v1/sessions/confirm-parking") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Tôi đã đến nơi" }).click();
+  expect((await arrivalResponse).status()).toBe(200);
+  expect((await parkingResponse).status()).toBe(200);
+  await expect(
+    page.getByRole("article", { name: "Xe đang đỗ trong bãi" }),
+  ).toContainText(slotId);
+  const priorityDock = page.getByRole("region", {
+    name: "Thông tin và thao tác quan trọng",
+  });
+  await expect(priorityDock).toHaveCSS("position", "sticky");
 
-      await page.getByRole("button", { name: "Xác nhận đã đỗ" }).click();
-      const sessionBanner = page.getByRole("status", {
-        name: "Xe đang đỗ trong bãi",
-        exact: true,
-      });
-      await expect(sessionBanner).toContainText(slotId);
-      await expect(slotButton(page, slotId)).toHaveAccessibleName(/Đã có xe/);
-      await expectParkingCounts(page, 38, 0, 2);
-
-      await confirmLocation(page, "F1-CP3");
-      const vehicleRouteResponse = waitForRouteResponse(page);
-      await sessionBanner
-        .getByRole("button", { name: "Chỉ đường tới xe" })
-        .click();
-      const vehicleRoute = await vehicleRouteResponse;
-      expect(vehicleRoute.path.at(-1)).toBe(slotId);
-      await expect(page.getByTestId("route-polyline")).toBeVisible();
-    });
-  }
+  const occupiedObservation = priorityDock
+    .getByRole("button", { name: /Báo F1-[A-D]\d{2} có xe đỗ/ })
+    .first();
+  const observedSlotId = (await occupiedObservation.getAttribute("aria-label"))?.match(
+    /F1-[A-D]\d{2}/,
+  )?.[0];
+  expect(observedSlotId).toBeTruthy();
+  const observationResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/parking/slots/${observedSlotId}/observation`) &&
+      response.request().method() === "POST",
+  );
+  await occupiedObservation.click();
+  expect((await observationResponse).status()).toBe(200);
+  const observedSlot = await page.request.get(
+    `${apiUrl}/parking/slots/${observedSlotId}`,
+  );
+  expect(((await observedSlot.json()) as { data: { status: string } }).data.status).toBe(
+    "OCCUPIED",
+  );
 });
 
-test("refreshes authoritative state after a recommended slot becomes occupied", async ({
+test("does not request a route when the selected slot becomes occupied", async ({
   page,
   request,
 }) => {
@@ -88,29 +97,24 @@ test("refreshes authoritative state after a recommended slot becomes occupied", 
   const { candidate, slotId } = await requestCandidate(page);
   await candidate.click();
 
-  await page.waitForResponse(
-    (response) =>
-      response.url().includes("/api/v1/parking/status") &&
-      response.request().method() === "GET",
-  );
   const simulatorResponse = await request.post(`${apiUrl}/simulator/park`, {
     data: { slot_id: slotId, vehicle_id: "SIM-CAR-99" },
   });
   expect(simulatorResponse.status()).toBe(200);
+  let routeCalls = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/routes")) routeCalls += 1;
+  });
 
   const reservationResponse = page.waitForResponse(
     (response) =>
       response.url().includes("/api/v1/reservations") &&
       response.request().method() === "POST",
   );
-  await page.getByRole("button", { name: "Chọn làm điểm đỗ" }).click();
+  await page.getByRole("button", { name: /Giữ ô và chỉ đường/ }).click();
   expect((await reservationResponse).status()).toBe(409);
-
-  const alert = page.locator(".page-alert");
-  await expect(alert).toContainText("Ô vừa thay đổi hoặc không còn trống");
-  await expect(alert).toContainText("hãy chọn một ô đang trống khác");
-  await expect(slotButton(page, slotId)).toHaveAccessibleName(/Đã có xe/);
-  await expect(
-    page.getByRole("status", { name: "Chỗ đỗ đã giữ", exact: true }),
-  ).toHaveCount(0);
+  await expect(page.locator(".conversation-notice")).toContainText(
+    "chọn một ô đang trống khác",
+  );
+  expect(routeCalls).toBe(0);
 });

@@ -80,6 +80,36 @@ describe("operator-safe errors", () => {
   });
 });
 
+describe("adjacent slot observations", () => {
+  it("submits a typed status observation with optimistic version", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope({ id: "F1-D02", status: "OCCUPIED" })),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+    });
+
+    await api.observeAdjacentSlot("F1-D02", {
+      user_id: "USER-001",
+      observed_status: "OCCUPIED",
+      expected_version: 7,
+    });
+
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      "http://api.test/api/v1/parking/slots/F1-D02/observation",
+    );
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        user_id: "USER-001",
+        observed_status: "OCCUPIED",
+        expected_version: 7,
+      }),
+    });
+  });
+});
+
 describe("admin operations client", () => {
   it("uses typed simulator paths and payloads", async () => {
     const fetcher = vi.fn<typeof fetch>(async () =>
@@ -145,10 +175,19 @@ describe("admin operations client", () => {
     await api.reportWrongParking({
       user_id: "USER-001",
       slot_id: "F1-D01",
+      reason_code: "CROSSED_LINE",
       observed_plate_number: "51A-123.45",
       description: "Xe đỗ chéo sang ô bên cạnh.",
     });
-    await api.getAdminReports(10);
+    await api.getAdminReports({ status: "OPEN", slotId: "F1-D01", limit: 10 });
+    await api.getAdminReport("REPORT-001");
+    await api.resolveAdminReport("REPORT-001", {
+      status: "RESOLVED",
+      resolution_note: "Đã xử lý.",
+      expected_version: 0,
+    });
+    await api.reopenAdminReport("REPORT-001", { expected_version: 1 });
+    await api.deleteAdminReport("REPORT-001", { expected_version: 2 });
 
     expect(String(fetcher.mock.calls[0]?.[0])).toBe(
       "http://api.test/api/v1/reports/wrong-parking",
@@ -157,12 +196,23 @@ describe("admin operations client", () => {
       JSON.stringify({
         user_id: "USER-001",
         slot_id: "F1-D01",
+        reason_code: "CROSSED_LINE",
         observed_plate_number: "51A-123.45",
         description: "Xe đỗ chéo sang ô bên cạnh.",
       }),
     );
     expect(String(fetcher.mock.calls[1]?.[0])).toBe(
-      "http://api.test/api/v1/admin/reports?limit=10",
+      "http://api.test/api/v1/admin/reports?status=OPEN&slot_id=F1-D01&limit=10",
     );
+    expect(fetcher.mock.calls.slice(2).map(([input]) => String(input))).toEqual([
+      "http://api.test/api/v1/admin/reports/REPORT-001",
+      "http://api.test/api/v1/admin/reports/REPORT-001",
+      "http://api.test/api/v1/admin/reports/REPORT-001/reopen",
+      "http://api.test/api/v1/admin/reports/REPORT-001?expected_version=2",
+    ]);
+    expect(fetcher.mock.calls[2]?.[1]?.method).toBeUndefined();
+    expect(fetcher.mock.calls[3]?.[1]?.method).toBe("PATCH");
+    expect(fetcher.mock.calls[4]?.[1]?.method).toBe("POST");
+    expect(fetcher.mock.calls[5]?.[1]?.method).toBe("DELETE");
   });
 });

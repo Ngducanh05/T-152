@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.db_models import (
     ParkingEvent,
     ParkingReservation,
+    ParkingSession,
     ParkingSlot,
     ParkingUser,
     Vehicle,
@@ -19,6 +20,7 @@ from src.models.schemas import (
     ActorType,
     ErrorCode,
     ParkingEventType,
+    ParkingSessionStatus,
     ReservationStatus,
     SlotStatus,
 )
@@ -296,6 +298,107 @@ class ParkingStateService:
             actor_type=actor_type,
             actor_id=actor_id,
             event_metadata={"vehicle_id": vehicle_id},
+            now=current_time,
+        )
+        await self.session.flush()
+        return slot
+
+    async def apply_user_slot_observation(
+        self,
+        slot_id: str,
+        *,
+        observed_status: SlotStatus,
+        user_id: str,
+        observer_session_id: str,
+        expected_version: int,
+        now: datetime | None = None,
+    ) -> ParkingSlot:
+        """Apply a guarded adjacent-slot observation from an actively parked user."""
+        if observed_status not in {SlotStatus.AVAILABLE, SlotStatus.OCCUPIED}:
+            self._raise_invalid(
+                "User observations only support AVAILABLE or OCCUPIED",
+                slot_id,
+            )
+        current_time = _utc_now(now)
+        slot = await self._lock_slot(slot_id)
+        self._check_expected_version(slot, expected_version)
+        if slot.status is SlotStatus.RESERVED:
+            self._raise_invalid("User observation cannot override a reserved slot", slot_id)
+        if slot.status is observed_status:
+            return slot
+
+        if observed_status is SlotStatus.AVAILABLE:
+            active_session = await self.session.scalar(
+                select(ParkingSession).where(
+                    ParkingSession.slot_id == slot_id,
+                    ParkingSession.status == ParkingSessionStatus.ACTIVE,
+                )
+            )
+            if active_session is not None or slot.occupied_by_vehicle_id is not None:
+                self._raise_invalid(
+                    "User observation cannot clear verified vehicle occupancy",
+                    slot_id,
+                )
+            slot.occupied_by_vehicle_id = None
+            event_type = ParkingEventType.VEHICLE_LEFT_SLOT
+        else:
+            slot.occupied_by_vehicle_id = None
+            event_type = ParkingEventType.VEHICLE_PARKED
+
+        self._transition_slot(
+            slot,
+            new_status=observed_status,
+            event_type=event_type,
+            actor_type=ActorType.USER,
+            actor_id=user_id,
+            event_metadata={
+                "source": "adjacent_user_observation",
+                "observer_session_id": observer_session_id,
+            },
+            now=current_time,
+        )
+        await self.session.flush()
+        return slot
+
+    async def is_user_observed_occupancy(self, slot: ParkingSlot) -> bool:
+        """Return whether an anonymous occupancy came from the adjacent-slot UI."""
+        if slot.status is not SlotStatus.OCCUPIED or slot.occupied_by_vehicle_id is not None:
+            return False
+        latest_event = await self.session.scalar(
+            select(ParkingEvent)
+            .where(ParkingEvent.slot_id == slot.id)
+            .order_by(ParkingEvent.created_at.desc(), ParkingEvent.id.desc())
+            .limit(1)
+        )
+        return bool(
+            latest_event is not None
+            and latest_event.event_type is ParkingEventType.VEHICLE_PARKED
+            and latest_event.event_metadata.get("source")
+            == "adjacent_user_observation"
+        )
+
+    async def clear_user_observed_occupancy(
+        self,
+        slot_id: str,
+        *,
+        actor_id: str,
+        now: datetime | None = None,
+    ) -> ParkingSlot:
+        """Clear only an unverified adjacent observation during a controlled reset."""
+        current_time = _utc_now(now)
+        slot = await self._lock_slot(slot_id)
+        if not await self.is_user_observed_occupancy(slot):
+            self._raise_invalid(
+                "Only user-observed occupancy can be cleared without a vehicle",
+                slot_id,
+            )
+        self._transition_slot(
+            slot,
+            new_status=SlotStatus.AVAILABLE,
+            event_type=ParkingEventType.VEHICLE_LEFT_SLOT,
+            actor_type=ActorType.SYSTEM,
+            actor_id=actor_id,
+            event_metadata={"source": "demo_reset"},
             now=current_time,
         )
         await self.session.flush()

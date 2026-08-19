@@ -1,4 +1,10 @@
-import type { ActorType, ParkingEventType, SlotStatus } from "./types";
+import type {
+  ActorType,
+  ParkingEventType,
+  SlotStatus,
+  WrongParkingReason,
+  WrongParkingReportStatus,
+} from "./types";
 
 const LOCATION_NAMES: Record<string, string> = {
   "F1-ENTRANCE": "Cổng vào tầng F1",
@@ -14,6 +20,8 @@ export function formatParkingLocation(id: string | null | undefined): string {
   if (slot) return `Ô ${slot[1]}${slot[2]} (${id})`;
   const zoneLane = /^F1-([A-D])-(?:E|W)$/.exec(id);
   if (zoneLane) return `Lối xe khu ${zoneLane[1]} (${id})`;
+  const checkpoint = /^F1-CP(\d+)$/.exec(id);
+  if (checkpoint) return `Điểm kiểm tra số ${checkpoint[1]} (${id})`;
   const name = LOCATION_NAMES[id];
   return name ? `${name} (${id})` : id;
 }
@@ -45,4 +53,20 @@ export function formatActorType(actorType: ActorType): string {
     CAMERA: "Thiết bị ghi hình",
     SYSTEM: "Hệ thống",
   }[actorType];
+}
+
+export function formatWrongParkingReason(reason: WrongParkingReason): string {
+  return {
+    WRONG_SLOT: "Xe đỗ sai ô",
+    CROSSED_LINE: "Xe đỗ chéo vạch",
+    BLOCKING_ACCESS: "Xe chắn lối đi",
+    OCCUPYING_CHARGER: "Xe chiếm chỗ sạc",
+    OTHER: "Lý do khác",
+  }[reason];
+}
+
+export function formatWrongParkingReportStatus(
+  status: WrongParkingReportStatus,
+): string {
+  return status === "OPEN" ? "Đang mở" : "Đã xử lý";
 }

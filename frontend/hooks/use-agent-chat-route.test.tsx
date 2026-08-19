@@ -32,11 +32,13 @@ describe("Agent structured UI effects", () => {
     const api = {
       confirmLocation: vi.fn(),
       recommend: vi.fn(),
-      createReservation: vi.fn(),
+    createReservation: vi.fn(),
+    cancelReservation: vi.fn(),
       getRoute: vi.fn(),
       confirmParking: vi.fn(),
       getActiveSession: vi.fn(),
       completeSession: vi.fn(),
+      observeAdjacentSlot: vi.fn(),
       resetDemo: vi.fn(),
       chat: vi.fn().mockResolvedValue({
         ...agentChatResponse,

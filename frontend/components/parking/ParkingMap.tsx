@@ -30,6 +30,8 @@ export interface ParkingMapProps {
   currentLocationNodeId?: FloorScopedId | null;
   route?: RouteResult | null;
   onSelectSlot?: (slotId: string) => void;
+  openReportCountBySlot?: Record<string, number>;
+  onOpenReportedSlot?: (slotId: string) => void;
   heading?: string;
   description?: string;
   showSummary?: boolean;
@@ -46,6 +48,8 @@ export function ParkingMap({
   currentLocationNodeId = null,
   route = null,
   onSelectSlot,
+  openReportCountBySlot = {},
+  onOpenReportedSlot,
   heading = "Sơ đồ bãi xe",
   description = "Trạng thái các ô được cập nhật tự động",
   showSummary = true,
@@ -197,7 +201,9 @@ export function ParkingMap({
                   activeReservation={activeReservationSlotId === slot.id}
                   parkedVehicle={parkedVehicleSlotId === slot.id}
                   currentLocation={currentLocationNodeId === slot.id}
+                  openReportCount={openReportCountBySlot[slot.id] ?? 0}
                   onSelect={onSelectSlot}
+                  onOpenReportedSlot={onOpenReportedSlot}
                 />
               );
             })}

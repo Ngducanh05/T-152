@@ -59,6 +59,14 @@ export interface ParkingSlot {
   occupied_by_vehicle_id: EntityId | null;
 }
 
+export type AdjacentSlotObservedStatus = "AVAILABLE" | "OCCUPIED";
+
+export interface AdjacentSlotObservationRequest {
+  user_id: EntityId;
+  observed_status: AdjacentSlotObservedStatus;
+  expected_version: number;
+}
+
 export interface MapNode {
   id: FloorScopedId;
   floor_id: FloorId;
@@ -191,6 +199,39 @@ export interface ChatRequest {
   message: string;
 }
 
+export type ChatUiActionStyle = "primary" | "secondary" | "danger";
+export type ParkingPreference =
+  | "ANY"
+  | "EV"
+  | "ACCESSIBLE"
+  | "NEAR_ELEVATOR";
+
+interface ChatUiActionBase<TType extends string, TPayload> {
+  id: string;
+  type: TType;
+  label: string;
+  payload: TPayload;
+  style: ChatUiActionStyle;
+  requires_confirmation: boolean;
+}
+
+export type ChatUiAction =
+  | ChatUiActionBase<"SELECT_LOCATION", { node_id?: FloorScopedId }>
+  | ChatUiActionBase<
+      "SELECT_PARKING_PREFERENCE",
+      { preference: ParkingPreference }
+    >
+  | ChatUiActionBase<"SELECT_SLOT", { slot_id: FloorScopedId }>
+  | ChatUiActionBase<"RESERVE_AND_ROUTE", { slot_id: FloorScopedId }>
+  | ChatUiActionBase<"CONFIRM_PARKING", Record<string, never>>
+  | ChatUiActionBase<"FIND_VEHICLE", Record<string, never>>
+  | ChatUiActionBase<"COMPLETE_SESSION", Record<string, never>>
+  | ChatUiActionBase<
+      "OPEN_WRONG_PARKING_REPORT",
+      { slot_id?: FloorScopedId }
+    >
+  | ChatUiActionBase<"CANCEL", { slot_id?: FloorScopedId }>;
+
 export interface ChatResponse {
   thread_id: string;
   message: string;
@@ -200,6 +241,7 @@ export interface ChatResponse {
   current_location: FloorScopedId | null;
   recommended_slot_ids: FloorScopedId[];
   route: RouteResult | null;
+  ui_actions: ChatUiAction[];
 }
 
 export interface SpeechTranscriptionResponse {
@@ -244,16 +286,58 @@ export interface WrongParkingReport {
   id: EntityId;
   reporter_user_id: EntityId;
   slot_id: FloorScopedId;
+  reason_code: WrongParkingReason;
+  status: WrongParkingReportStatus;
   observed_plate_number: string | null;
-  description: string;
+  description: string | null;
   created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
+  version: number;
 }
+
+export type WrongParkingReportStatus = "OPEN" | "RESOLVED";
+export type WrongParkingReason =
+  | "WRONG_SLOT"
+  | "CROSSED_LINE"
+  | "BLOCKING_ACCESS"
+  | "OCCUPYING_CHARGER"
+  | "OTHER";
 
 export interface CreateWrongParkingReportRequest {
   user_id: EntityId;
   slot_id: FloorScopedId;
+  reason_code: WrongParkingReason;
   observed_plate_number?: string | null;
-  description: string;
+  description?: string | null;
+}
+
+export interface AdminReportFilters {
+  status?: WrongParkingReportStatus;
+  slotId?: FloorScopedId;
+  limit?: number;
+}
+
+export interface ResolveWrongParkingReportRequest {
+  status: "RESOLVED";
+  resolution_note?: string | null;
+  expected_version: number;
+}
+export type ResolveWrongParkingReportResponse = WrongParkingReport;
+
+export interface ReopenWrongParkingReportRequest {
+  expected_version: number;
+}
+export type ReopenWrongParkingReportResponse = WrongParkingReport;
+
+export interface DeleteWrongParkingReportRequest {
+  expected_version: number;
+}
+
+export interface DeleteWrongParkingReportResponse {
+  deleted_report_id: EntityId;
 }
 
 export interface SlotFilters {
