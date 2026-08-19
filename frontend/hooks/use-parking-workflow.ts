@@ -16,7 +16,10 @@ import {
   rotateDemoThreadId,
 } from "@/lib/demo";
 import type {
+  ChatUiAction,
+  AdjacentSlotObservedStatus,
   FloorScopedId,
+  ParkingPreference,
   RecommendationCandidate,
   RouteResult,
 } from "@/lib/types";
@@ -25,26 +28,41 @@ export type WorkflowAction =
   | "location"
   | "recommend"
   | "reserve"
+  | "reserve-and-route"
+  | "cancel-reservation"
   | "route"
   | "confirm-parking"
   | "find-car"
   | "complete-session"
+  | "observe-adjacent-slot"
   | "reset"
   | "chat";
 
-export type WorkflowMessage = { role: "agent" | "user"; text: string };
+export interface WorkflowMessage {
+  id: string;
+  role: "agent" | "user";
+  text: string;
+  uiActions: ChatUiAction[];
+  consumedActionIds: string[];
+}
+
+export type WorkflowPanelRequest =
+  | { kind: "location" }
+  | { kind: "wrong-parking-report"; slotId: FloorScopedId | null };
 
 type WorkflowApi = Pick<
   ParkSmartApiClient,
   | "confirmLocation"
   | "recommend"
   | "createReservation"
+  | "cancelReservation"
   | "getRoute"
   | "confirmParking"
   | "getActiveSession"
   | "completeSession"
   | "resetDemo"
   | "chat"
+  | "observeAdjacentSlot"
 >;
 
 export interface WorkflowData
@@ -65,8 +83,10 @@ export interface ParkingWorkflow {
   messages: WorkflowMessage[];
   threadId: string | null;
   pending: WorkflowAction | null;
+  pendingAdjacentSlotId: FloorScopedId | null;
   notice: string | null;
   retryMessage: string | null;
+  requestedPanel: WorkflowPanelRequest | null;
   selectCandidate: (slotId: FloorScopedId) => void;
   clearRoute: () => void;
   confirmLocation: (nodeId: FloorScopedId) => Promise<boolean>;
@@ -76,13 +96,24 @@ export interface ParkingWorkflow {
     nearElevator: boolean;
   }) => Promise<void>;
   reserveSelected: () => Promise<void>;
+  reserveSelectedAndRoute: (slotId?: FloorScopedId) => Promise<void>;
+  cancelActiveReservation: () => Promise<void>;
   requestRouteToSelected: () => Promise<void>;
   confirmParking: () => Promise<void>;
   findVehicleAndRoute: () => Promise<void>;
   completeSession: () => Promise<void>;
+  updateAdjacentSlotStatus: (
+    slotId: FloorScopedId,
+    status: AdjacentSlotObservedStatus,
+  ) => Promise<void>;
   resetDemo: () => Promise<void>;
   sendAgentMessage: (message: string) => Promise<string | null>;
   retryAgentMessage: () => Promise<void>;
+  executeUiAction: (
+    messageId: string,
+    action: ChatUiAction,
+  ) => Promise<void>;
+  clearRequestedPanel: () => void;
 }
 
 function vietnameseError(error: unknown) {
@@ -103,6 +134,79 @@ const AUTHORITATIVE_REFRESH_TOOLS = new Set([
   "complete_parking_session",
 ]);
 
+const KNOWN_UI_ACTION_TYPES = new Set([
+  "SELECT_LOCATION",
+  "SELECT_PARKING_PREFERENCE",
+  "SELECT_SLOT",
+  "RESERVE_AND_ROUTE",
+  "CONFIRM_PARKING",
+  "FIND_VEHICLE",
+  "COMPLETE_SESSION",
+  "OPEN_WRONG_PARKING_REPORT",
+  "CANCEL",
+]);
+
+const REPEATABLE_UI_ACTION_TYPES = new Set<ChatUiAction["type"]>([
+  "SELECT_LOCATION",
+  "SELECT_PARKING_PREFERENCE",
+  "SELECT_SLOT",
+  "FIND_VEHICLE",
+  "OPEN_WRONG_PARKING_REPORT",
+]);
+
+const WELCOME_ACTIONS: ChatUiAction[] = [
+  {
+    id: "welcome-find-parking",
+    type: "SELECT_PARKING_PREFERENCE",
+    label: "Tìm ô đỗ",
+    payload: { preference: "ANY" },
+    style: "primary",
+    requires_confirmation: false,
+  },
+  {
+    id: "welcome-find-vehicle",
+    type: "FIND_VEHICLE",
+    label: "Xe của tôi",
+    payload: {},
+    style: "secondary",
+    requires_confirmation: false,
+  },
+  {
+    id: "welcome-location",
+    type: "SELECT_LOCATION",
+    label: "Xác nhận vị trí",
+    payload: {},
+    style: "secondary",
+    requires_confirmation: false,
+  },
+  {
+    id: "welcome-report",
+    type: "OPEN_WRONG_PARKING_REPORT",
+    label: "Báo xe đỗ sai",
+    payload: {},
+    style: "danger",
+    requires_confirmation: false,
+  },
+];
+
+function welcomeMessage(): WorkflowMessage {
+  return {
+    id: "welcome",
+    role: "agent",
+    text: "Chào bạn! Tôi có thể giúp tìm chỗ đỗ, chỉ đường hoặc tìm lại xe.",
+    uiActions: WELCOME_ACTIONS,
+    consumedActionIds: [],
+  };
+}
+
+function preferencesFor(value: ParkingPreference) {
+  return {
+    chargingRequired: value === "EV",
+    accessibleRequired: value === "ACCESSIBLE",
+    nearElevator: value === "NEAR_ELEVATOR",
+  };
+}
+
 export function useParkingWorkflow(
   data: WorkflowData,
   api: WorkflowApi = parkSmartApi,
@@ -114,12 +218,52 @@ export function useParkingWorkflow(
   const [agentCurrentLocationId, setAgentCurrentLocationId] =
     useState<FloorScopedId | null>(null);
   const [lastToolNames, setLastToolNames] = useState<string[]>([]);
-  const [messages, setMessages] = useState<WorkflowMessage[]>([]);
+  const [messages, setMessages] = useState<WorkflowMessage[]>([welcomeMessage()]);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [pending, setPending] = useState<WorkflowAction | null>(null);
+  const [pendingAdjacentSlotId, setPendingAdjacentSlotId] =
+    useState<FloorScopedId | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
+  const [requestedPanel, setRequestedPanel] =
+    useState<WorkflowPanelRequest | null>(null);
   const chatInFlightRef = useRef(false);
+  const actionInFlightRef = useRef(new Set<string>());
+  const reserveAndRouteInFlightRef = useRef(false);
+  const adjacentObservationInFlightRef = useRef(false);
+  const deferredPreferenceRef = useRef<ParkingPreference | null>(null);
+  const messageSequenceRef = useRef(0);
+
+  function nextMessageId(role: WorkflowMessage["role"]) {
+    messageSequenceRef.current += 1;
+    return `${role}-${messageSequenceRef.current}`;
+  }
+
+  function appendAgentMessage(text: string, uiActions: ChatUiAction[] = []) {
+    setMessages((current) => [
+      ...current,
+      {
+        id: nextMessageId("agent"),
+        role: "agent",
+        text,
+        uiActions: uiActions.slice(0, 5),
+        consumedActionIds: [],
+      },
+    ]);
+  }
+
+  function slotSelectionActions(
+    recommendations: RecommendationCandidate[],
+  ): ChatUiAction[] {
+    return recommendations.slice(0, 3).map((candidate) => ({
+      id: `select-slot:${candidate.slot_id.toLowerCase()}`,
+      type: "SELECT_SLOT" as const,
+      label: `Chọn ${candidate.slot_id.replace("F1-", "ô ")}`,
+      payload: { slot_id: candidate.slot_id },
+      style: "primary" as const,
+      requires_confirmation: false,
+    }));
+  }
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -173,6 +317,33 @@ export function useParkingWorkflow(
       await data.refresh();
       setAgentCurrentLocationId(null);
       setActiveRoute(null);
+      const deferredPreference = deferredPreferenceRef.current;
+      deferredPreferenceRef.current = null;
+      if (deferredPreference) {
+        try {
+          const result = await api.recommend({
+            user_id: MVP_DEMO_USER_ID,
+            start_node_id: nodeId,
+            charging_required: deferredPreference === "EV",
+            accessible_required: deferredPreference === "ACCESSIBLE",
+            near_elevator: deferredPreference === "NEAR_ELEVATOR",
+            limit: 3,
+          });
+          setCandidates(result.recommendations);
+          setRecommendedSlotIds(
+            result.recommendations.map((candidate) => candidate.slot_id),
+          );
+          setSelectedSlotId(null);
+          appendAgentMessage(
+            result.recommendations.length > 0
+              ? "Tôi đã tìm thấy các ô phù hợp. Hãy chọn một ô."
+              : "Hiện chưa có ô phù hợp với nhu cầu này.",
+            slotSelectionActions(result.recommendations),
+          );
+        } catch (error) {
+          setNotice(vietnameseError(error));
+        }
+      }
       return true;
     } catch (error) {
       await handleMutationFailure(error);
@@ -211,6 +382,12 @@ export function useParkingWorkflow(
       // reservation, and no slot status is changed locally.
       setSelectedSlotId(null);
       setActiveRoute(null);
+      appendAgentMessage(
+        result.recommendations.length > 0
+          ? "Tôi đã tìm thấy các ô phù hợp. Hãy chọn một ô."
+          : "Hiện chưa có ô phù hợp với nhu cầu này.",
+        slotSelectionActions(result.recommendations),
+      );
     } catch (error) {
       setNotice(vietnameseError(error));
     } finally {
@@ -246,6 +423,79 @@ export function useParkingWorkflow(
     }
   }
 
+  async function reserveSelectedAndRoute(slotId = selectedSlotId ?? undefined) {
+    if (reserveAndRouteInFlightRef.current) return;
+    const slot = data.slots.find((candidate) => candidate.id === slotId);
+    const startNodeId = data.currentLocation?.node_id;
+    if (!slot || !startNodeId) {
+      setNotice("Hãy xác nhận vị trí và chọn một ô đang trống trước.");
+      return;
+    }
+    if (slot.status !== "AVAILABLE") {
+      setSelectedSlotId(null);
+      setNotice(`Ô ${slot.id} vừa hết chỗ. Hãy chọn một ô đang trống khác.`);
+      return;
+    }
+
+    reserveAndRouteInFlightRef.current = true;
+    setPending("reserve-and-route");
+    setNotice(null);
+    let reservationCreated = false;
+    try {
+      await api.createReservation({
+        user_id: MVP_DEMO_USER_ID,
+        vehicle_id: MVP_DEMO_VEHICLE_ID,
+        slot_id: slot.id,
+        expected_version: slot.version,
+      });
+      reservationCreated = true;
+      const snapshot = await data.refresh();
+      clearRecommendations();
+      setSelectedSlotId(slot.id);
+      const route = await api.getRoute({
+        start_node_id: snapshot.currentLocation?.node_id ?? startNodeId,
+        destination_node_id: slot.id,
+      });
+      setActiveRoute(route);
+      setNotice(`Đã giữ ô ${slot.id} và tải chỉ đường.`);
+    } catch (error) {
+      if (reservationCreated) {
+        setNotice(
+          formatApiErrorForOperator(
+            error,
+            `Đã giữ ô ${slot.id}, nhưng chưa tải được chỉ đường. Bạn có thể thử lại.`,
+          ),
+        );
+      } else {
+        await handleMutationFailure(error);
+      }
+    } finally {
+      reserveAndRouteInFlightRef.current = false;
+      setPending(null);
+    }
+  }
+
+  async function cancelActiveReservation() {
+    const reservation = data.activeReservation;
+    if (!reservation) {
+      setNotice("Bạn không có chỗ đang giữ để hủy.");
+      return;
+    }
+    setPending("cancel-reservation");
+    setNotice(null);
+    try {
+      await api.cancelReservation(reservation.id, MVP_DEMO_USER_ID);
+      await data.refresh();
+      setSelectedSlotId(null);
+      setActiveRoute(null);
+      clearRecommendations();
+    } catch (error) {
+      await handleMutationFailure(error);
+    } finally {
+      setPending(null);
+    }
+  }
+
   async function requestRouteToSelected() {
     const startNodeId = data.currentLocation?.node_id;
     if (!startNodeId || !selectedSlotId) {
@@ -270,8 +520,10 @@ export function useParkingWorkflow(
 
   async function confirmParking() {
     const reservation = data.activeReservation;
-    const slot = data.slots.find((candidate) => candidate.id === reservation?.slot_id);
-    if (!reservation || !slot) {
+    const initialSlot = data.slots.find(
+      (candidate) => candidate.id === reservation?.slot_id,
+    );
+    if (!reservation || !initialSlot) {
       setNotice("Bạn chưa có chỗ đỗ đã giữ để xác nhận.");
       return;
     }
@@ -279,14 +531,28 @@ export function useParkingWorkflow(
     setNotice(null);
     clearRecommendations();
     try {
+      let authoritativeSlot = initialSlot;
+      if (data.currentLocation?.node_id !== reservation.slot_id) {
+        await api.confirmLocation({
+          user_id: MVP_DEMO_USER_ID,
+          node_id: reservation.slot_id,
+        });
+        const arrivalSnapshot = await data.refresh();
+        authoritativeSlot =
+          arrivalSnapshot.slots.find(
+            (candidate) => candidate.id === reservation.slot_id,
+          ) ?? initialSlot;
+        setAgentCurrentLocationId(null);
+      }
       await api.confirmParking({
         user_id: MVP_DEMO_USER_ID,
         vehicle_id: MVP_DEMO_VEHICLE_ID,
         reservation_id: reservation.id,
-        expected_version: slot.version,
+        expected_version: authoritativeSlot.version,
       });
       await data.refresh();
       setActiveRoute(null);
+      setNotice(`Đã xác nhận bạn đến ${reservation.slot_id} và hoàn tất đỗ xe.`);
     } catch (error) {
       await handleMutationFailure(error);
     } finally {
@@ -357,7 +623,7 @@ export function useParkingWorkflow(
       clearRecommendations();
       setSelectedSlotId(null);
       setActiveRoute(null);
-      setMessages([]);
+      setMessages([welcomeMessage()]);
       setAgentCurrentLocationId(null);
       setLastToolNames([]);
       setRetryMessage(null);
@@ -374,7 +640,16 @@ export function useParkingWorkflow(
     if (!trimmed || !threadId || chatInFlightRef.current) return null;
     chatInFlightRef.current = true;
     if (appendUserMessage) {
-      setMessages((current) => [...current, { role: "user", text: trimmed }]);
+      setMessages((current) => [
+        ...current,
+        {
+          id: nextMessageId("user"),
+          role: "user",
+          text: trimmed,
+          uiActions: [],
+          consumedActionIds: [],
+        },
+      ]);
     }
     setPending("chat");
     setNotice(null);
@@ -396,7 +671,13 @@ export function useParkingWorkflow(
       }
       setMessages((current) => [
         ...current,
-        { role: "agent", text: response.message },
+        {
+          id: nextMessageId("agent"),
+          role: "agent",
+          text: response.message,
+          uiActions: response.ui_actions ?? [],
+          consumedActionIds: [],
+        },
       ]);
       setCandidates([]);
       if (response.tool_names.includes("recommend_parking_slot")) {
@@ -437,6 +718,144 @@ export function useParkingWorkflow(
     await sendAgentMessage(retryMessage, false);
   }
 
+  async function updateAdjacentSlotStatus(
+    slotId: FloorScopedId,
+    status: AdjacentSlotObservedStatus,
+  ) {
+    if (adjacentObservationInFlightRef.current) return;
+    const slot = data.slots.find((candidate) => candidate.id === slotId);
+    if (!data.activeSession || !slot) {
+      setNotice("Chỉ có thể cập nhật ô bên cạnh sau khi bạn đã xác nhận đỗ xe.");
+      return;
+    }
+    adjacentObservationInFlightRef.current = true;
+    setPending("observe-adjacent-slot");
+    setPendingAdjacentSlotId(slot.id);
+    setNotice(null);
+    try {
+      await api.observeAdjacentSlot(slot.id, {
+        user_id: MVP_DEMO_USER_ID,
+        observed_status: status,
+        expected_version: slot.version,
+      });
+      await data.refresh();
+      setNotice(
+        `Cảm ơn bạn. Đã cập nhật ${slot.id} thành ${
+          status === "AVAILABLE" ? "đang trống" : "có xe đỗ"
+        }.`,
+      );
+    } catch (error) {
+      await refreshQuietly();
+      setNotice(
+        formatApiErrorForOperator(
+          error,
+          "Không thể cập nhật ô bên cạnh. Trạng thái mới nhất đã được tải lại.",
+        ),
+      );
+    } finally {
+      adjacentObservationInFlightRef.current = false;
+      setPendingAdjacentSlotId(null);
+      setPending(null);
+    }
+  }
+
+  function consumeAction(messageId: string, actionId: string) {
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === messageId && !message.consumedActionIds.includes(actionId)
+          ? {
+              ...message,
+              consumedActionIds: [...message.consumedActionIds, actionId],
+            }
+          : message,
+      ),
+    );
+  }
+
+  async function executeUiAction(messageId: string, action: ChatUiAction) {
+    const actionKey = `${messageId}:${action.id}`;
+    const sourceMessage = messages.find((message) => message.id === messageId);
+    const attachedAction = sourceMessage?.uiActions.find(
+      (candidate) => candidate.id === action.id,
+    );
+    if (
+      !sourceMessage ||
+      !attachedAction ||
+      sourceMessage.consumedActionIds.includes(action.id) ||
+      actionInFlightRef.current.has(actionKey)
+    ) {
+      return;
+    }
+
+    actionInFlightRef.current.add(actionKey);
+    if (!REPEATABLE_UI_ACTION_TYPES.has(attachedAction.type)) {
+      consumeAction(messageId, action.id);
+    }
+    try {
+      if (!KNOWN_UI_ACTION_TYPES.has(attachedAction.type)) {
+        setNotice("Thao tác này chưa được hỗ trợ và đã được bỏ qua an toàn.");
+        return;
+      }
+      switch (attachedAction.type) {
+        case "SELECT_LOCATION":
+          setRequestedPanel({ kind: "location" });
+          break;
+        case "SELECT_PARKING_PREFERENCE": {
+          const preference = attachedAction.payload.preference;
+          if (!data.currentLocation?.node_id) {
+            deferredPreferenceRef.current = preference;
+            setRequestedPanel({ kind: "location" });
+          } else {
+            await requestRecommendations(preferencesFor(preference));
+          }
+          break;
+        }
+        case "SELECT_SLOT": {
+          const slotId = attachedAction.payload.slot_id;
+          if (!data.slots.some((slot) => slot.id === slotId)) {
+            setNotice("Ô được chọn không còn trong dữ liệu hiện tại.");
+            break;
+          }
+          selectCandidate(slotId);
+          appendAgentMessage(`Bạn đã chọn ${slotId}.`, [
+            {
+              id: `reserve-and-route:${slotId.toLowerCase()}`,
+              type: "RESERVE_AND_ROUTE",
+              label: "Giữ ô và chỉ đường",
+              payload: { slot_id: slotId },
+              style: "primary",
+              requires_confirmation: true,
+            },
+          ]);
+          break;
+        }
+        case "RESERVE_AND_ROUTE":
+          await reserveSelectedAndRoute(attachedAction.payload.slot_id);
+          break;
+        case "CONFIRM_PARKING":
+          await confirmParking();
+          break;
+        case "FIND_VEHICLE":
+          await findVehicleAndRoute();
+          break;
+        case "COMPLETE_SESSION":
+          await completeSession();
+          break;
+        case "OPEN_WRONG_PARKING_REPORT":
+          setRequestedPanel({
+            kind: "wrong-parking-report",
+            slotId: attachedAction.payload.slot_id ?? selectedSlotId,
+          });
+          break;
+        case "CANCEL":
+          await cancelActiveReservation();
+          break;
+      }
+    } finally {
+      actionInFlightRef.current.delete(actionKey);
+    }
+  }
+
   return {
     candidates,
     recommendedSlotIds,
@@ -447,19 +866,26 @@ export function useParkingWorkflow(
     messages,
     threadId,
     pending,
+    pendingAdjacentSlotId,
     notice,
     retryMessage,
+    requestedPanel,
     selectCandidate,
     clearRoute: () => setActiveRoute(null),
     confirmLocation,
     requestRecommendations,
     reserveSelected,
+    reserveSelectedAndRoute,
+    cancelActiveReservation,
     requestRouteToSelected,
     confirmParking,
     findVehicleAndRoute,
     completeSession,
+    updateAdjacentSlotStatus,
     resetDemo,
     sendAgentMessage,
     retryAgentMessage,
+    executeUiAction,
+    clearRequestedPanel: () => setRequestedPanel(null),
   };
 }

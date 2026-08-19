@@ -1,5 +1,7 @@
 import type {
   ActiveParkingSession,
+  AdjacentSlotObservationRequest,
+  AdminReportFilters,
   AdminEventFilters,
   ApiEnvelope,
   ApiFailure,
@@ -7,6 +9,8 @@ import type {
   ChatResponse,
   CompleteSessionRequest,
   CreateWrongParkingReportRequest,
+  DeleteWrongParkingReportRequest,
+  DeleteWrongParkingReportResponse,
   ConfirmLocationRequest,
   ConfirmParkingRequest,
   CreateReservationRequest,
@@ -19,6 +23,10 @@ import type {
   ParkingStatus,
   RecommendationRequest,
   RecommendationResult,
+  ReopenWrongParkingReportRequest,
+  ReopenWrongParkingReportResponse,
+  ResolveWrongParkingReportRequest,
+  ResolveWrongParkingReportResponse,
   RouteRequest,
   RouteResponse,
   SimulatorStep,
@@ -287,6 +295,21 @@ export class ParkSmartApiClient {
     });
   }
 
+  observeAdjacentSlot(
+    slotId: string,
+    payload: AdjacentSlotObservationRequest,
+    signal?: AbortSignal,
+  ) {
+    return this.request<ParkingSlot>(
+      `/parking/slots/${encodeURIComponent(slotId)}/observation`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        signal,
+      },
+    );
+  }
+
   async transcribeSpeech(audio: Blob, signal?: AbortSignal) {
     const response = await this.fetcher(`${this.baseUrl}/speech/transcriptions`, {
       method: "POST",
@@ -350,11 +373,56 @@ export class ParkSmartApiClient {
     });
   }
 
-  getAdminReports(limit = 20, signal?: AbortSignal) {
-    const query = queryString({ limit });
+  getAdminReports(filters: AdminReportFilters = {}, signal?: AbortSignal) {
+    const query = queryString({
+      status: filters.status,
+      slot_id: filters.slotId,
+      limit: filters.limit ?? 20,
+    });
     return this.request<WrongParkingReport[]>(`/admin/reports${query}`, {
       signal,
     });
+  }
+
+  getAdminReport(reportId: string, signal?: AbortSignal) {
+    return this.request<WrongParkingReport>(
+      `/admin/reports/${encodeURIComponent(reportId)}`,
+      { signal },
+    );
+  }
+
+  resolveAdminReport(
+    reportId: string,
+    payload: ResolveWrongParkingReportRequest,
+    signal?: AbortSignal,
+  ) {
+    return this.request<ResolveWrongParkingReportResponse>(
+      `/admin/reports/${encodeURIComponent(reportId)}`,
+      { method: "PATCH", body: JSON.stringify(payload), signal },
+    );
+  }
+
+  reopenAdminReport(
+    reportId: string,
+    payload: ReopenWrongParkingReportRequest,
+    signal?: AbortSignal,
+  ) {
+    return this.request<ReopenWrongParkingReportResponse>(
+      `/admin/reports/${encodeURIComponent(reportId)}/reopen`,
+      { method: "POST", body: JSON.stringify(payload), signal },
+    );
+  }
+
+  deleteAdminReport(
+    reportId: string,
+    payload: DeleteWrongParkingReportRequest,
+    signal?: AbortSignal,
+  ) {
+    const query = queryString({ expected_version: payload.expected_version });
+    return this.request<DeleteWrongParkingReportResponse>(
+      `/admin/reports/${encodeURIComponent(reportId)}${query}`,
+      { method: "DELETE", signal },
+    );
   }
 }
 

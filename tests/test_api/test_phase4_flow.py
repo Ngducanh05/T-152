@@ -194,6 +194,76 @@ async def test_phase4_end_to_end_flow(phase4_api: Phase4Api):
 
 
 @pytest.mark.asyncio
+async def test_parked_user_can_observe_only_adjacent_slots(phase4_api: Phase4Api):
+    timestamp = datetime.now(UTC)
+    async with phase4_api.session_factory() as session, session.begin():
+        own_slot = await session.get(ParkingSlot, "F1-D03")
+        assert own_slot is not None
+        own_slot.status = SlotStatus.OCCUPIED
+        own_slot.occupied_by_vehicle_id = "VEHICLE-001"
+        own_slot.version = 2
+        session.add(
+            ParkingSession(
+                id="SESSION-OBSERVE",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F1-D03",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=timestamp,
+                completed_at=None,
+            )
+        )
+
+    observed = await phase4_api.client.post(
+        "/api/v1/parking/slots/F1-D02/observation",
+        json={
+            "user_id": "USER-001",
+            "observed_status": "OCCUPIED",
+            "expected_version": 0,
+        },
+    )
+    non_adjacent = await phase4_api.client.post(
+        "/api/v1/parking/slots/F1-D05/observation",
+        json={
+            "user_id": "USER-001",
+            "observed_status": "OCCUPIED",
+            "expected_version": 0,
+        },
+    )
+
+    assert observed.status_code == 200
+    assert observed.json()["data"]["status"] == "OCCUPIED"
+    assert observed.json()["data"]["version"] == 1
+    assert non_adjacent.status_code == 409
+    assert non_adjacent.json()["error"]["code"] == "INVALID_TRANSITION"
+    async with phase4_api.session_factory() as session:
+        event = await session.scalar(
+            select(ParkingEvent).where(ParkingEvent.slot_id == "F1-D02")
+        )
+    assert event is not None
+    assert event.actor_type.value == "USER"
+    assert event.event_metadata == {
+        "source": "adjacent_user_observation",
+        "observer_session_id": "SESSION-OBSERVE",
+    }
+
+
+@pytest.mark.asyncio
+async def test_adjacent_observation_requires_active_session(phase4_api: Phase4Api):
+    response = await phase4_api.client.post(
+        "/api/v1/parking/slots/F1-D02/observation",
+        json={
+            "user_id": "USER-001",
+            "observed_status": "OCCUPIED",
+            "expected_version": 0,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "ACTIVE_SESSION_NOT_FOUND"
+
+
+@pytest.mark.asyncio
 async def test_two_reservation_requests_for_same_slot_have_one_winner(
     phase4_api: Phase4Api,
 ):

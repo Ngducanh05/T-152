@@ -406,6 +406,7 @@ def test_system_prompt_contains_required_safety_contract():
         "mọi quy tắc nghiệp vụ thuộc Core Service",
         "Không bịa",
         "không tự động reserve",
+        "chỉ gọi recommend_parking_slot một lần",
         "người dùng đã chấp nhận rõ ràng",
         "chỉ hỏi đúng một câu",
         "vị trí đã được xác nhận",

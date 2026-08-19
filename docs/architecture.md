@@ -26,7 +26,7 @@ flowchart TB
     subgraph Browser["Next.js frontend"]
         UserUI["User UI — /"]
         AdminUI["Admin UI — /admin"]
-        Shared["Shared map, API client, types and polling"]
+        Shared["Shared API client, types and polling"]
         WebSpeech["Browser Web Speech — STT/TTS"]
     end
 
@@ -34,7 +34,7 @@ flowchart TB
         PublicAPI["Parking, location, reservation, routing and report APIs"]
         AgentAPI["POST /api/v1/agent/chat"]
         SpeechAPI["POST /api/v1/speech/transcriptions — fallback"]
-        AdminAPI["Admin events and simulator APIs"]
+        AdminAPI["Admin report, events and simulator APIs"]
         Agent["LangGraph Agent"]
         Tools["Agent Tools"]
         Core["Core business services"]
@@ -77,8 +77,8 @@ flowchart TB
 
 | Giao diện | Trách nhiệm | Không được làm |
 |---|---|---|
-| User UI `/` | Xem bản đồ, xác nhận vị trí bằng ID, tìm/giữ ô, route, phiên đỗ xe, báo cáo xe đỗ sai, chat và voice | Reset demo, điều khiển simulator, hiển thị tool/thread hoặc tự sửa trạng thái |
-| Admin UI `/admin` | KPI mật độ, mật độ theo khu, filter map, simulator controls, reports và parking events | Tự ghi database hoặc tính lại business transition ở frontend |
+| User UI `/` | Chat mobile-first, lựa chọn vị trí bằng thao tác chạm, tìm/giữ ô, route dạng turn-by-turn, phiên đỗ xe, báo cáo nhanh, text và voice | Hiển thị map/mật độ/dữ liệu vận hành, dùng GPS, reset demo, tự sửa trạng thái hoặc auto-send transcript |
+| Admin UI `/admin` | KPI mật độ, filter map, cảnh báo report OPEN theo slot, resolve/reopen/hard-delete, simulator controls và parking events | Tự ghi database, dùng localStorage làm source of truth hoặc tính business transition ở frontend |
 
 `/admin` dùng `CurrentUser.app_role` khi authentication được bật. Trong demo
 mode, backend có thể cho phép trang vận hành mà không cần bearer token; giao
@@ -123,9 +123,11 @@ sequenceDiagram
     DB-->>Core: Authoritative result
     Core-->>Tools: Structured result
     Tools-->>Agent: Safe tool output
-    Agent-->>API: Natural-language response + structured UI effects
+    Agent-->>API: Natural-language response + verified tool result
+    API->>API: Derive deterministic ui_actions
     API-->>UI: ChatResponse
-    UI-->>User: Text, map/route update và optional TTS
+    UI->>UI: Derive turn icons from verified route geometry
+    UI-->>User: Message, reusable tap action, turn-by-turn route và optional TTS
 ```
 
 Nếu Browser Speech Recognition không khả dụng, frontend có thể ghi âm và gửi
@@ -169,12 +171,22 @@ biểu đồ lịch sử hoặc dự đoán giả.
 
 ```mermaid
 flowchart LR
-    User["User selects a canonical slot"] --> ReportAPI["POST /api/v1/reports/wrong-parking"]
-    ReportAPI --> Validate["Validate user and slot"]
-    Validate --> DB[("wrong_parking_reports")]
-    DB --> AdminAPI["GET /api/v1/admin/reports"]
-    AdminAPI --> AdminUI["Admin report list"]
+    User["User selects canonical slot + reason"] --> ReportAPI["POST /api/v1/reports/wrong-parking"]
+    ReportAPI --> Validate["Validate user, slot and reason"]
+    Validate --> DB[("OPEN report v0")]
+    DB --> AdminAPI["Admin report APIs"]
+    AdminAPI --> AdminUI["Map warning + detail drawer"]
+    AdminUI --> Resolve["Resolve or reopen with expected_version"]
+    AdminUI --> Delete["Confirmed hard delete"]
+    Resolve --> DB
+    Delete --> DB
 ```
+
+Report state is independent from parking occupancy state. Creating, resolving, reopening or
+deleting a report does not change `AVAILABLE`, `RESERVED` or `OCCUPIED`. The admin map keeps
+the slot's status color and overlays a red warning whose badge is the authoritative count of
+OPEN reports. Polling and post-mutation refetches read PostgreSQL through the API;
+`BroadcastChannel` only requests an earlier refresh.
 
 ---
 
@@ -223,6 +235,33 @@ Agent không được:
 - truyền `user_id`, `vehicle_id` hoặc `request_id` do model sinh;
 - sửa database trực tiếp;
 - bịa dữ liệu khi tool thất bại.
+- sinh hoặc thực thi frontend action tùy ý từ prose.
+
+`ChatResponse.ui_actions` là presentation metadata do backend tạo bằng allowlist từ current
+location, canonical recommendation/selection và tool result đã xác minh. Helper này không
+chứa reservation/routing business logic; khi người dùng chạm action, frontend vẫn gọi Core
+API tương ứng và chỉ cập nhật state sau response thành công.
+
+Frontend chỉ giữ trạng thái consumed vĩnh viễn cho action mutation một lần. Action đọc/chọn
+được dùng lại sau khi request trước hoàn tất; khóa in-flight vẫn ngăn double-click. Nút
+“Tôi đã đến nơi” là confirmation rõ ràng gồm hai bước tuần tự: cập nhật location tới slot đã
+reserve, refetch snapshot, rồi confirm parking với version mới nhất. LocationPicker độc lập
+không tự tạo parking session.
+
+Turn-by-turn presentation không thay đổi Routing Service. UI lấy ba điểm liên tiếp trong
+`route.polyline` (fallback sang tọa độ canonical map), tính tích có hướng để phân loại đi
+thẳng/rẽ trái/rẽ phải/quay lại và hiển thị icon. Nếu thiếu hình học, UI chỉ nói “Tiếp tục”;
+LLM không được phát minh hướng rẽ.
+
+Reservation/session card, mutation notice và lỗi quan trọng nằm trong priority dock sticky
+ngay dưới header. Message history tiếp tục cuộn phía sau; các thao tác “Tôi đã đến nơi”, tìm
+xe và kết thúc phiên không bị đẩy khỏi tầm nhìn khi hội thoại dài.
+
+Sau khi user có active parking session, UI có thể đề nghị báo trạng thái hai slot trái/phải
+cùng hàng. Frontend chỉ gửi canonical slot ID, `AVAILABLE`/`OCCUPIED` và expected version.
+Backend tự xác minh active session và adjacency trước khi gọi Parking State Service. User
+observation không được ghi đè reservation, active session khác hoặc vehicle occupancy đã
+xác minh; mọi transition hợp lệ tạo ParkingEvent và chỉ hiển thị sau authoritative refetch.
 
 ---
 

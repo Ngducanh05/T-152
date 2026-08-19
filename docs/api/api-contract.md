@@ -26,7 +26,9 @@ ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 | MapNodeType | ENTRANCE, EXIT, CHECKPOINT, ELEVATOR, AISLE, SLOT |
 | ActorType | USER, SIMULATOR, CAMERA, SYSTEM |
 | ParkingEventType | VEHICLE_ENTERED, SLOT_RESERVED, RESERVATION_CANCELLED, RESERVATION_EXPIRED, VEHICLE_PARKED, VEHICLE_LEFT_SLOT, VEHICLE_EXITED |
-| ErrorCode | INVALID_TRANSITION, SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ROUTE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND, SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS, USER_NOT_FOUND, VEHICLE_NOT_FOUND, RESERVATION_NOT_FOUND, ACTIVE_RESERVATION_NOT_FOUND, RESERVATION_EXPIRED, ACTIVE_SESSION_EXISTS, SESSION_NOT_FOUND, LOCATION_NODE_NOT_FOUND, CURRENT_LOCATION_NOT_FOUND, INVALID_LOCATION_NODE_TYPE, AGENT_TOOL_UNAVAILABLE |
+| WrongParkingReportStatus | OPEN, RESOLVED |
+| WrongParkingReason | WRONG_SLOT, CROSSED_LINE, BLOCKING_ACCESS, OCCUPYING_CHARGER, OTHER |
+| ErrorCode | INVALID_TRANSITION, SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ROUTE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND, SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS, USER_NOT_FOUND, VEHICLE_NOT_FOUND, RESERVATION_NOT_FOUND, ACTIVE_RESERVATION_NOT_FOUND, RESERVATION_EXPIRED, ACTIVE_SESSION_EXISTS, SESSION_NOT_FOUND, LOCATION_NODE_NOT_FOUND, CURRENT_LOCATION_NOT_FOUND, INVALID_LOCATION_NODE_TYPE, REPORT_NOT_FOUND, REPORT_VERSION_CONFLICT, INVALID_REPORT_TRANSITION, AGENT_TOOL_UNAVAILABLE |
 
 ## Data schemas
 
@@ -46,6 +48,7 @@ The canonical Pydantic definitions live in src/models/schemas.py.
 | RecommendationCandidate | slot_id, score, distance_m, reasons |
 | RecommendationResult | recommendations, parking_state_version |
 | ParkingEvent | id, event_type, slot_id, actor_type, actor_id, old_status, new_status, created_at, metadata |
+| WrongParkingReport | id, user_id, slot_id, reason_code, status, observed_plate_number, description, created_at, updated_at, resolved_at, resolved_by, resolution_note, version |
 
 Nullable fields are User.current_node_id, ParkingSlot.occupied_by_vehicle_id,
 ParkingSession.completed_at, RecommendationRequest.zone_id, and the event fields that may
@@ -112,6 +115,13 @@ Voice transcription additionally uses:
 | 503 | SPEECH_TRANSCRIPTION_UNAVAILABLE |
 | 504 | SPEECH_TRANSCRIPTION_TIMEOUT |
 
+Wrong-parking report lifecycle additionally uses:
+
+| HTTP | Error code |
+|---:|---|
+| 404 | REPORT_NOT_FOUND |
+| 409 | REPORT_VERSION_CONFLICT, INVALID_REPORT_TRANSITION |
+
 Phase 4 lifecycle endpoints additionally use:
 
 | HTTP | Error code |
@@ -148,7 +158,20 @@ Success response:
     "message": "Tôi tìm thấy các ô phù hợp...",
     "intent": "RECOMMEND_SLOT",
     "selected_slot": null,
-    "tool_names": ["recommend_parking_slot"]
+    "tool_names": ["recommend_parking_slot"],
+    "current_location": "F1-ENTRANCE",
+    "recommended_slot_ids": ["F1-C01", "F1-C02"],
+    "route": null,
+    "ui_actions": [
+      {
+        "id": "select-slot-F1-C01",
+        "type": "SELECT_SLOT",
+        "label": "Chọn ô C01",
+        "payload": {"slot_id": "F1-C01"},
+        "style": "primary",
+        "requires_confirmation": false
+      }
+    ]
   },
   "message": null
 }
@@ -157,6 +180,14 @@ Success response:
 `tool_names` contains only validated tool names and exists for safe debugging. The response
 never contains analysis, chain-of-thought, system prompts, API keys, raw model metadata, or
 raw exceptions.
+
+`ui_actions` defaults to an empty list for backward compatibility and contains at most five
+presentation actions. Its type allowlist is `SELECT_LOCATION`,
+`SELECT_PARKING_PREFERENCE`, `SELECT_SLOT`, `RESERVE_AND_ROUTE`, `CONFIRM_PARKING`,
+`FIND_VEHICLE`, `COMPLETE_SESSION`, `OPEN_WRONG_PARKING_REPORT`, and `CANCEL`.
+The backend derives these actions deterministically from validated runtime/tool data. LLM
+prose is never parsed into buttons, URLs or tool names, and the final business mutation is
+still validated by its Core API.
 
 Thread checkpoints use the internal namespace `user_id:thread_id`. A public `thread_id` can
 belong to only one user while its checkpoint is retained; reuse by another user returns HTTP
@@ -192,3 +223,52 @@ server-side `LLM_API_KEY` credential. The credential is never sent to the browse
 transcript is returned to the editable composer and is not automatically submitted to the
 Agent endpoint. Transcription uses a 60-second timeout and one retry for transient network,
 rate-limit, or provider failures by default.
+
+## Wrong-parking reports
+
+### `POST /api/v1/reports/wrong-parking`
+
+Creates an `OPEN` report at version `0`. `reason_code` is required. `description` may be
+null for the four standard reasons; `OTHER` requires at least five trimmed characters.
+`observed_plate_number` is optional and normalized to uppercase. Creating a report never
+changes `ParkingSlot.status`.
+
+### Admin lifecycle endpoints
+
+All admin endpoints use `require_admin_or_demo`:
+
+- `GET /api/v1/admin/reports?status=OPEN&slot_id=F1-D01&limit=20` lists reports,
+  newest first. `status` and `slot_id` are optional; `limit` is 1–100.
+- `GET /api/v1/admin/reports/{report_id}` returns one report.
+- `PATCH /api/v1/admin/reports/{report_id}` accepts `status=RESOLVED`, optional
+  `resolution_note`, and required `expected_version`.
+- `POST /api/v1/admin/reports/{report_id}/reopen` requires `expected_version`.
+- `DELETE /api/v1/admin/reports/{report_id}?expected_version=N` permanently removes the
+  database row and returns `deleted_report_id` in `SuccessResponse`.
+
+Resolve records UTC `resolved_at`, the admin actor, trimmed note, and increments `version`.
+Reopen clears resolution metadata and increments `version`. Re-resolving or re-reopening is
+an invalid transition. Every mutation uses optimistic concurrency and a database transaction;
+a stale `expected_version` returns `REPORT_VERSION_CONFLICT`.
+
+## Adjacent-slot user observations
+
+### `POST /api/v1/parking/slots/{slot_id}/observation`
+
+An actively parked user may optionally report one physically adjacent slot as
+`AVAILABLE` or `OCCUPIED`:
+
+```json
+{
+  "user_id": "USER-001",
+  "observed_status": "OCCUPIED",
+  "expected_version": 3
+}
+```
+
+The backend requires an active parking session and independently derives the left/right
+neighbours within the same five-slot row. Non-adjacent targets, `RESERVED` slots, stale
+versions, active sessions belonging to another vehicle, and attempts to clear verified
+vehicle occupancy are rejected. Successful transitions increment slot version and write a
+`ParkingEvent` with actor `USER` and metadata source `adjacent_user_observation`. The browser
+never mutates slot state optimistically.

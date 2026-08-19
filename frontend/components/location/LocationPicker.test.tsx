@@ -23,7 +23,7 @@ function pickerMap() {
 }
 
 describe("LocationPicker", () => {
-  it("derives quick choices and all slot options from the map without aisles", async () => {
+  it("shows Vietnamese special locations and a tap-only zone/slot flow", async () => {
     const user = userEvent.setup();
     render(
       <LocationPicker
@@ -35,29 +35,24 @@ describe("LocationPicker", () => {
       />,
     );
 
-    const quickChoices = screen.getByRole("group", { name: "Vị trí nhanh" });
+    const quickChoices = screen.getByRole("group", { name: "Địa điểm đặc biệt" });
     expect(
-      Array.from(quickChoices.querySelectorAll("button"), (button) => button.textContent),
+      Array.from(
+        quickChoices.querySelectorAll("button"),
+        (button) => button.querySelector("b")?.textContent,
+      ),
     ).toEqual(
       ["F1-ENTRANCE", "F1-EXIT", "F1-CP1", "F1-CP2", "F1-CP3", "F1-ELEVATOR"].map(
         formatParkingLocation,
       ),
     );
-    expect(screen.queryByText("F1-A-W")).not.toBeInTheDocument();
-    const expectedSlotIds = pickerMap().nodes
-      .filter((node) => node.type === "SLOT")
-      .map((node) => node.id)
-      .toSorted((left, right) => left.localeCompare(right, undefined, { numeric: true }));
-    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(
-      expectedSlotIds.map(formatParkingLocation),
-    );
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
 
-    const combobox = screen.getByRole("combobox", { name: "Tìm ô đỗ theo ID" });
-    await user.type(combobox, "d0");
-
-    expect(screen.getAllByRole("option")).toHaveLength(9);
-    expect(screen.getByRole("option", { name: /F1-D01/ })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /F1-C01/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Tôi đang cạnh một ô đỗ" }));
+    await user.click(screen.getByRole("button", { name: "Khu D" }));
+    expect(screen.getByRole("group", { name: "Chọn ô khu D" })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: /Chọn ô \d{2} khu D/ })).toHaveLength(10);
   });
 
   it("shows a backend validation code and request ID inside the open picker", () => {
@@ -76,7 +71,7 @@ describe("LocationPicker", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("request-location-404");
   });
 
-  it("normalizes slot casing and whitespace and prevents duplicate submission", async () => {
+  it("sends the canonical slot ID and prevents duplicate submission", async () => {
     const user = userEvent.setup();
     let resolveConfirmation!: (success: boolean) => void;
     const onConfirm = vi.fn(
@@ -93,21 +88,47 @@ describe("LocationPicker", () => {
       />,
     );
 
-    const combobox = screen.getByRole("combobox", { name: "Tìm ô đỗ theo ID" });
-    await user.type(combobox, "  f1-d01  ");
-    const submit = screen.getByRole("button", { name: "Xác nhận vị trí ô đỗ" });
-    await user.dblClick(submit);
+    await user.click(screen.getByRole("button", { name: "Tôi đang cạnh một ô đỗ" }));
+    await user.click(screen.getByRole("button", { name: "Khu D" }));
+    const slot = screen.getByRole("button", { name: "Chọn ô 01 khu D" });
+    await user.dblClick(slot);
 
     expect(onConfirm).toHaveBeenCalledOnce();
     expect(onConfirm).toHaveBeenCalledWith("F1-D01");
-    expect(submit).toBeDisabled();
+    expect(slot).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent("Đang xác nhận Ô D01 (F1-D01)");
 
     resolveConfirmation(true);
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
-  it("supports keyboard navigation in the slot combobox", async () => {
+  it.each([
+    ["A", "01", "F1-A01"],
+    ["B", "10", "F1-B10"],
+    ["C", "01", "F1-C01"],
+    ["D", "10", "F1-D10"],
+  ])("builds canonical IDs for zone %s slot %s", async (zone, slot, expectedId) => {
+    const user = userEvent.setup();
+    const onConfirm = vi.fn(async () => false);
+    render(
+      <LocationPicker
+        map={pickerMap()}
+        currentLocationId="F1-ENTRANCE"
+        pending={false}
+        onClose={vi.fn()}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Tôi đang cạnh một ô đỗ" }));
+    await user.click(screen.getByRole("button", { name: `Khu ${zone}` }));
+    await user.click(screen.getByRole("button", { name: `Chọn ô ${slot} khu ${zone}` }));
+
+    expect(onConfirm).toHaveBeenCalledOnce();
+    expect(onConfirm).toHaveBeenCalledWith(expectedId);
+  });
+
+  it("confirms a special location without selecting or confirming a parking slot", async () => {
     const user = userEvent.setup();
     const onConfirm = vi.fn(async () => false);
     render(
@@ -120,12 +141,9 @@ describe("LocationPicker", () => {
       />,
     );
 
-    const combobox = screen.getByRole("combobox", { name: "Tìm ô đỗ theo ID" });
-    await user.type(combobox, "F1-D0");
-    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
-
-    expect(combobox).toHaveValue("F1-D02");
-    await user.keyboard("{Enter}");
-    expect(onConfirm).toHaveBeenCalledWith("F1-D02");
+    await user.click(
+      screen.getByRole("button", { name: formatParkingLocation("F1-CP3") }),
+    );
+    expect(onConfirm).toHaveBeenCalledWith("F1-CP3");
   });
 });

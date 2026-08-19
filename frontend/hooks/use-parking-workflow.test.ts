@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
 import { MVP_AGENT_THREAD_STORAGE_KEY } from "@/lib/demo";
-import type { ChatResponse, SlotStatus } from "@/lib/types";
+import type { ChatResponse, ChatUiAction, SlotStatus } from "@/lib/types";
 import { activeReservation } from "@/test/fixtures";
 import type { ParkSmartSnapshot } from "./use-parksmart-data";
 
@@ -25,6 +25,7 @@ function chatResponse(overrides: Partial<ChatResponse> = {}): ChatResponse {
     current_location: null,
     recommended_slot_ids: [],
     route: null,
+    ui_actions: [],
     ...overrides,
   };
 }
@@ -83,10 +84,12 @@ function fixture() {
     confirmLocation: vi.fn(),
     recommend: vi.fn(async () => recommendation),
     createReservation: vi.fn(),
+    cancelReservation: vi.fn(),
     getRoute: vi.fn(),
     confirmParking: vi.fn(),
     getActiveSession: vi.fn(),
     completeSession: vi.fn(),
+    observeAdjacentSlot: vi.fn(),
     resetDemo: vi.fn(),
     chat: vi.fn(),
   };
@@ -275,6 +278,84 @@ describe("useParkingWorkflow", () => {
     });
     expect(result.current.recommendedSlotIds).toEqual([]);
     expect(result.current.candidates).toEqual([]);
+  });
+
+  it("marks arrival at the reserved slot before confirming parking in one action", async () => {
+    const { api, data, refresh, slot } = fixture();
+    data.activeReservation = { ...activeReservation, slot_id: slot.id };
+    api.confirmLocation.mockResolvedValue({
+      user_id: "USER-001",
+      node_id: slot.id,
+    });
+    api.confirmParking.mockResolvedValue({
+      id: "SESSION-001",
+      user_id: "USER-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: slot.id,
+      status: "ACTIVE",
+      parked_at: "2026-08-19T04:00:00Z",
+      completed_at: null,
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      await result.current.confirmParking();
+    });
+
+    expect(api.confirmLocation).toHaveBeenCalledWith({
+      user_id: "USER-001",
+      node_id: slot.id,
+    });
+    expect(api.confirmParking).toHaveBeenCalledWith({
+      user_id: "USER-001",
+      vehicle_id: "VEHICLE-001",
+      reservation_id: activeReservation.id,
+      expected_version: slot.version,
+    });
+    expect(api.confirmLocation.mock.invocationCallOrder[0]).toBeLessThan(
+      api.confirmParking.mock.invocationCallOrder[0],
+    );
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(result.current.notice).toContain("hoàn tất đỗ xe");
+  });
+
+  it("updates an adjacent slot only after the backend succeeds and guards double-click", async () => {
+    const { api, data, refresh, slot } = fixture();
+    data.activeSession = {
+      session_id: "SESSION-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: "F1-D03",
+      destination_node_id: "F1-D03",
+    };
+    let finishObservation!: () => void;
+    api.observeAdjacentSlot.mockImplementation(
+      () => new Promise<void>((resolve) => { finishObservation = resolve; }),
+    );
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    let firstRequest!: Promise<void>;
+    act(() => {
+      firstRequest = result.current.updateAdjacentSlotStatus(slot.id, "OCCUPIED");
+      void result.current.updateAdjacentSlotStatus(slot.id, "OCCUPIED");
+    });
+
+    expect(api.observeAdjacentSlot).toHaveBeenCalledOnce();
+    expect(api.observeAdjacentSlot).toHaveBeenCalledWith(slot.id, {
+      user_id: "USER-001",
+      observed_status: "OCCUPIED",
+      expected_version: slot.version,
+    });
+    expect(refresh).not.toHaveBeenCalled();
+    expect(slot.status).toBe("AVAILABLE");
+    expect(result.current.pendingAdjacentSlotId).toBe(slot.id);
+
+    await act(async () => {
+      finishObservation();
+      await firstRequest;
+    });
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(result.current.pendingAdjacentSlotId).toBeNull();
+    expect(result.current.notice).toContain("có xe đỗ");
   });
 
   it("waits for reservation success before refreshing authoritative UI state", async () => {
@@ -481,9 +562,11 @@ describe("useParkingWorkflow", () => {
       await result.current.sendAgentMessage("Tìm ô giúp tôi");
     });
 
-    expect(result.current.messages).toEqual([
-      { role: "user", text: "Tìm ô giúp tôi" },
-    ]);
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: "user",
+      text: "Tìm ô giúp tôi",
+      uiActions: [],
+    });
     expect(result.current.retryMessage).toBe("Tìm ô giúp tôi");
     expect(result.current.notice).toContain("thử gửi lại");
     expect(result.current.notice).not.toContain("traceback");
@@ -514,7 +597,11 @@ describe("useParkingWorkflow", () => {
     expect(sessionStorage.getItem(MVP_AGENT_THREAD_STORAGE_KEY)).toBe(
       "22222222-2222-4222-8222-222222222222",
     );
-    expect(result.current.messages).toEqual([]);
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({
+      id: "welcome",
+      role: "agent",
+    });
     expect(refresh).toHaveBeenCalledOnce();
   });
 
@@ -546,8 +633,146 @@ describe("useParkingWorkflow", () => {
     expect(sessionStorage.getItem(MVP_AGENT_THREAD_STORAGE_KEY)).toBe(
       "thread-before-failure",
     );
-    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages).toHaveLength(3);
     expect(result.current.notice).toContain("Mã lỗi: INVALID_TRANSITION");
     expect(result.current.notice).toContain("Mã yêu cầu: request-reset-disabled");
+  });
+
+  it("keeps selection actions reusable while attaching them to the correct Agent message", async () => {
+    sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-actions");
+    const { api, data } = fixture();
+    const selectAction: ChatUiAction = {
+      id: "select-slot:f1-d01",
+      type: "SELECT_SLOT",
+      label: "Chọn ô D01",
+      payload: { slot_id: "F1-D01" },
+      style: "primary",
+      requires_confirmation: false,
+    };
+    api.chat.mockResolvedValue(chatResponse({ ui_actions: [selectAction] }));
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    await waitFor(() => expect(result.current.threadId).toBe("thread-actions"));
+
+    await act(async () => {
+      await result.current.sendAgentMessage("Tìm ô");
+    });
+    const agentMessage = result.current.messages.at(-1)!;
+    expect(agentMessage.uiActions).toEqual([selectAction]);
+
+    await act(async () => {
+      await result.current.executeUiAction(agentMessage.id, selectAction);
+      await result.current.executeUiAction(agentMessage.id, selectAction);
+    });
+    const consumedMessage = result.current.messages.find(
+      (message) => message.id === agentMessage.id,
+    );
+    expect(consumedMessage?.consumedActionIds).toEqual([]);
+    expect(result.current.selectedSlotId).toBe("F1-D01");
+    expect(result.current.messages.at(-1)?.uiActions[0]?.type).toBe(
+      "RESERVE_AND_ROUTE",
+    );
+    expect(
+      result.current.messages.filter(
+        (message) => message.uiActions[0]?.type === "RESERVE_AND_ROUTE",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("reserves before routing, refreshes authoritative state, and guards double-click", async () => {
+    sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-reserve-route");
+    const { api, data, refresh } = fixture();
+    const action: ChatUiAction = {
+      id: "reserve-and-route:f1-d01",
+      type: "RESERVE_AND_ROUTE",
+      label: "Giữ ô và chỉ đường",
+      payload: { slot_id: "F1-D01" },
+      style: "primary",
+      requires_confirmation: true,
+    };
+    api.chat.mockResolvedValue(
+      chatResponse({ selected_slot: "F1-D01", ui_actions: [action] }),
+    );
+    api.createReservation.mockResolvedValue({ id: "RESERVATION-NEW" });
+    api.getRoute.mockResolvedValue({
+      start_node_id: "F1-ENTRANCE",
+      destination_node_id: "F1-D01",
+      path: ["F1-ENTRANCE", "F1-D-W", "F1-D01"],
+      distance_m: 76,
+      polyline: [],
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    await waitFor(() => expect(result.current.threadId).toBe("thread-reserve-route"));
+    await act(async () => {
+      await result.current.sendAgentMessage("Chọn ô này");
+    });
+    const message = result.current.messages.at(-1)!;
+
+    await act(async () => {
+      await Promise.all([
+        result.current.executeUiAction(message.id, action),
+        result.current.executeUiAction(message.id, action),
+      ]);
+    });
+
+    expect(api.createReservation).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(api.getRoute).toHaveBeenCalledOnce();
+    expect(api.createReservation.mock.invocationCallOrder[0]).toBeLessThan(
+      api.getRoute.mock.invocationCallOrder[0],
+    );
+    expect(result.current.activeRoute?.path.at(-1)).toBe("F1-D01");
+  });
+
+  it("does not request a route and lets the user reselect after reservation conflict", async () => {
+    const { api, data, refresh } = fixture();
+    api.createReservation.mockRejectedValue(
+      new ApiError({
+        code: "SLOT_NOT_AVAILABLE",
+        message: "Slot changed.",
+        status: 409,
+      }),
+    );
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    act(() => result.current.selectCandidate("F1-D01"));
+
+    await act(async () => {
+      await result.current.reserveSelectedAndRoute("F1-D01");
+    });
+
+    expect(api.getRoute).not.toHaveBeenCalled();
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(result.current.selectedSlotId).toBeNull();
+    expect(result.current.notice).toContain("chọn một ô đang trống khác");
+  });
+
+  it("ignores an unknown action type safely without calling an API", async () => {
+    sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-unknown-action");
+    const { api, data } = fixture();
+    const unknownAction = {
+      id: "future-action",
+      type: "FUTURE_ACTION",
+      label: "Future",
+      payload: {},
+      style: "secondary",
+      requires_confirmation: false,
+    } as unknown as ChatUiAction;
+    api.chat.mockResolvedValue(chatResponse({ ui_actions: [unknownAction] }));
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    await waitFor(() =>
+      expect(result.current.threadId).toBe("thread-unknown-action"),
+    );
+    await act(async () => {
+      await result.current.sendAgentMessage("Future");
+    });
+    const message = result.current.messages.at(-1)!;
+
+    await act(async () => {
+      await result.current.executeUiAction(message.id, unknownAction);
+    });
+
+    expect(result.current.notice).toContain("bỏ qua an toàn");
+    expect(message.uiActions).toEqual([unknownAction]);
+    expect(api.createReservation).not.toHaveBeenCalled();
+    expect(api.getRoute).not.toHaveBeenCalled();
   });
 });

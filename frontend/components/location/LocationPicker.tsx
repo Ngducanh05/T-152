@@ -1,15 +1,9 @@
 "use client";
 
-import {
-  FormEvent,
-  KeyboardEvent,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { formatParkingLocation } from "@/lib/parking-display";
-import type { FloorScopedId, MapNode, ParkingMap } from "@/lib/types";
+import type { FloorScopedId, MapNode, ParkingMap, ZoneId } from "@/lib/types";
 
 const SPECIAL_TYPES = new Set<MapNode["type"]>([
   "ENTRANCE",
@@ -23,6 +17,7 @@ const SPECIAL_TYPE_ORDER: Record<string, number> = {
   CHECKPOINT: 2,
   ELEVATOR: 3,
 };
+const ZONES: ZoneId[] = ["A", "B", "C", "D"];
 
 interface LocationPickerProps {
   map: ParkingMap | null;
@@ -33,10 +28,6 @@ interface LocationPickerProps {
   onConfirm: (nodeId: FloorScopedId) => Promise<boolean>;
 }
 
-function normalizedId(value: string): FloorScopedId {
-  return value.trim().toUpperCase();
-}
-
 export function LocationPicker({
   map,
   currentLocationId,
@@ -45,10 +36,10 @@ export function LocationPicker({
   onClose,
   onConfirm,
 }: LocationPickerProps) {
-  const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(-1);
-  const [validationMessage, setValidationMessage] = useState<string | null>(null);
-  const [submittingTarget, setSubmittingTarget] = useState<FloorScopedId | null>(null);
+  const [showSlotChoices, setShowSlotChoices] = useState(false);
+  const [selectedZone, setSelectedZone] = useState<ZoneId | null>(null);
+  const [submittingTarget, setSubmittingTarget] =
+    useState<FloorScopedId | null>(null);
   const submittingRef = useRef(false);
 
   const specialNodes = useMemo(
@@ -62,82 +53,27 @@ export function LocationPicker({
         ),
     [map],
   );
-  const slotNodes = useMemo(
+  const zoneSlots = useMemo(
     () =>
-      (map?.nodes ?? [])
-        .filter((node) => node.type === "SLOT")
+      (map?.slots ?? [])
+        .filter((slot) => slot.zone_id === selectedZone)
         .toSorted((left, right) =>
           left.id.localeCompare(right.id, undefined, { numeric: true }),
         ),
-    [map],
-  );
-  const normalizedQuery = normalizedId(query);
-  const filteredSlots = useMemo(
-    () =>
-      normalizedQuery
-        ? slotNodes.filter((node) => node.id.includes(normalizedQuery))
-        : slotNodes,
-    [normalizedQuery, slotNodes],
+    [map, selectedZone],
   );
   const busy = pending || submittingTarget !== null;
 
-  async function submitLocation(nodeId: string) {
-    const normalizedNodeId = normalizedId(nodeId);
-    if (!normalizedNodeId || busy || submittingRef.current) return;
-
+  async function submitLocation(nodeId: FloorScopedId) {
+    if (busy || submittingRef.current) return;
     submittingRef.current = true;
-    setSubmittingTarget(normalizedNodeId);
-    setValidationMessage(null);
+    setSubmittingTarget(nodeId);
     try {
-      const success = await onConfirm(normalizedNodeId);
+      const success = await onConfirm(nodeId);
       if (success) onClose();
     } finally {
       submittingRef.current = false;
       setSubmittingTarget(null);
-    }
-  }
-
-  function submitSlot(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const normalizedNodeId = normalizedId(query);
-    const exists = slotNodes.some((node) => node.id === normalizedNodeId);
-    if (!exists) {
-      setValidationMessage(
-        "Không tìm thấy ID ô đỗ trong bản đồ hiện tại. Hãy chọn một ô trong danh sách.",
-      );
-      return;
-    }
-    void submitLocation(normalizedNodeId);
-  }
-
-  function chooseSlot(nodeId: FloorScopedId) {
-    setQuery(nodeId);
-    setActiveIndex(-1);
-    setValidationMessage(null);
-  }
-
-  function handleComboboxKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex((current) =>
-        filteredSlots.length === 0 ? -1 : Math.min(current + 1, filteredSlots.length - 1),
-      );
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex((current) =>
-        filteredSlots.length === 0
-          ? -1
-          : current <= 0
-            ? filteredSlots.length - 1
-            : current - 1,
-      );
-      return;
-    }
-    if (event.key === "Enter" && activeIndex >= 0) {
-      event.preventDefault();
-      chooseSlot(filteredSlots[activeIndex].id);
     }
   }
 
@@ -153,7 +89,7 @@ export function LocationPicker({
         if (event.key === "Escape") requestClose();
       }}
     >
-      <div
+      <section
         className="modal location-picker"
         role="dialog"
         aria-modal="true"
@@ -162,6 +98,7 @@ export function LocationPicker({
         onClick={(event) => event.stopPropagation()}
       >
         <button
+          type="button"
           className="modal-close"
           onClick={requestClose}
           aria-label="Đóng chọn vị trí"
@@ -172,89 +109,81 @@ export function LocationPicker({
         <p className="eyebrow green">VỊ TRÍ TRONG BÃI</p>
         <h2 id="location-picker-title">Xác nhận vị trí hiện tại</h2>
         <p id="location-picker-description">
-          Chọn một địa điểm nhanh hoặc tìm một trong 40 ô đỗ từ bản đồ. Việc xác
-          nhận vị trí không giữ chỗ và không xác nhận đã đỗ xe.
+          Chọn nơi bạn đang đứng. ParkSmart không dùng GPS và việc chọn vị trí
+          không tự giữ ô hay xác nhận đã đỗ.
         </p>
 
-        <section className="location-picker-section" aria-labelledby="quick-location-title">
-          <h3 id="quick-location-title">Địa điểm nhanh</h3>
-          <div className="location-choice-grid" role="group" aria-label="Vị trí nhanh">
-            {specialNodes.map((node) => (
-              <button
-                key={node.id}
-                type="button"
-                aria-pressed={currentLocationId === node.id}
-                onClick={() => void submitLocation(node.id)}
-                disabled={busy}
-              >
-                {formatParkingLocation(node.id)}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <form className="slot-location-form" onSubmit={submitSlot}>
-          <label htmlFor="slot-location-search">Tìm ô đỗ theo ID</label>
-          <div className="slot-location-controls">
-            <input
-              id="slot-location-search"
-              role="combobox"
-              aria-autocomplete="list"
-              aria-expanded="true"
-              aria-controls="slot-location-options"
-              aria-activedescendant={
-                activeIndex >= 0 ? `slot-location-option-${filteredSlots[activeIndex].id}` : undefined
-              }
-              value={query}
-              placeholder="Ví dụ: F1-D01"
-              autoComplete="off"
+        <div className="location-tap-list" role="group" aria-label="Địa điểm đặc biệt">
+          {specialNodes.map((node) => (
+            <button
+              key={node.id}
+              type="button"
+              aria-pressed={currentLocationId === node.id}
+              onClick={() => void submitLocation(node.id)}
               disabled={busy}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setActiveIndex(-1);
-                setValidationMessage(null);
-              }}
-              onKeyDown={handleComboboxKeyDown}
-            />
-            <button type="submit" disabled={busy || slotNodes.length === 0}>
-              Xác nhận vị trí ô đỗ
+            >
+              <span aria-hidden="true">⌖</span>
+              <b>{formatParkingLocation(node.id)}</b>
             </button>
-          </div>
-          <div
-            id="slot-location-options"
-            className="slot-location-options"
-            role="listbox"
-            aria-label="Các ô đỗ khớp tìm kiếm"
-          >
-            {filteredSlots.map((node, index) => (
-              <button
-                id={`slot-location-option-${node.id}`}
-                key={node.id}
-                type="button"
-                role="option"
-                aria-selected={normalizedQuery === node.id}
-                className={activeIndex === index ? "active" : ""}
-                tabIndex={-1}
-                onClick={() => chooseSlot(node.id)}
-                disabled={busy}
-              >
-                {formatParkingLocation(node.id)}
-              </button>
-            ))}
-            {filteredSlots.length === 0 && (
-              <p role="status">Không có ô đỗ nào khớp tìm kiếm.</p>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          className="slot-nearby-toggle"
+          aria-expanded={showSlotChoices}
+          onClick={() => setShowSlotChoices((current) => !current)}
+          disabled={busy || !map}
+        >
+          <span aria-hidden="true">P</span>
+          <b>Tôi đang cạnh một ô đỗ</b>
+        </button>
+
+        {showSlotChoices && (
+          <div className="slot-tap-picker">
+            <p>Bước 1 · Chọn khu</p>
+            <div className="zone-tap-grid" role="group" aria-label="Chọn khu đỗ xe">
+              {ZONES.map((zone) => (
+                <button
+                  key={zone}
+                  type="button"
+                  aria-pressed={selectedZone === zone}
+                  onClick={() => setSelectedZone(zone)}
+                  disabled={busy}
+                >
+                  Khu {zone}
+                </button>
+              ))}
+            </div>
+            {selectedZone && (
+              <>
+                <p>Bước 2 · Chọn số ô</p>
+                <div className="slot-number-grid" role="group" aria-label={`Chọn ô khu ${selectedZone}`}>
+                  {zoneSlots.map((slot) => (
+                    <button
+                      key={slot.id}
+                      type="button"
+                      aria-label={`Chọn ô ${slot.id.slice(-2)} khu ${selectedZone}`}
+                      aria-pressed={currentLocationId === slot.id}
+                      onClick={() => void submitLocation(slot.id)}
+                      disabled={busy}
+                    >
+                      {slot.id.slice(-2)}
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
           </div>
-          {validationMessage && <p className="location-validation" role="alert">{validationMessage}</p>}
-          {errorMessage && <p className="location-api-error" role="alert">{errorMessage}</p>}
-        </form>
+        )}
 
+        {errorMessage && <p className="location-api-error" role="alert">{errorMessage}</p>}
         {submittingTarget && (
           <p className="location-pending" role="status" aria-live="polite">
             Đang xác nhận {formatParkingLocation(submittingTarget)}…
           </p>
         )}
-      </div>
+      </section>
     </div>
   );
 }

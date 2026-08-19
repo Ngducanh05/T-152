@@ -167,6 +167,7 @@ export const agentChatResponse: ChatResponse = {
   current_location: "F1-ENTRANCE",
   recommended_slot_ids: ["F1-D01"],
   route: routeResponse,
+  ui_actions: [],
 };
 
 export function successEnvelope<T>(data: T): ApiEnvelope<T> {

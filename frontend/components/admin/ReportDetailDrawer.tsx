@@ -1,0 +1,242 @@
+"use client";
+
+import { useMemo, useState } from "react";
+
+import {
+  formatParkingLocation,
+  formatSlotStatus,
+  formatWrongParkingReason,
+  formatWrongParkingReportStatus,
+} from "@/lib/parking-display";
+import type { ParkingSlot, WrongParkingReport } from "@/lib/types";
+
+export type ReportMutationAction = "resolve" | "reopen" | "delete";
+export interface PendingReportMutation {
+  reportId: string;
+  action: ReportMutationAction;
+}
+
+interface ReportDetailDrawerProps {
+  slot: ParkingSlot | null;
+  reports: WrongParkingReport[];
+  loading: boolean;
+  error: string | null;
+  pendingMutation: PendingReportMutation | null;
+  onClose: () => void;
+  onRefresh: () => Promise<void>;
+  onResolve: (
+    report: WrongParkingReport,
+    resolutionNote: string | null,
+  ) => Promise<boolean>;
+  onReopen: (report: WrongParkingReport) => Promise<boolean>;
+  onDelete: (report: WrongParkingReport) => Promise<boolean>;
+}
+
+function formatReportTime(value: string) {
+  return new Intl.DateTimeFormat("vi-VN", {
+    dateStyle: "short",
+    timeStyle: "medium",
+  }).format(new Date(value));
+}
+
+export function ReportDetailDrawer({
+  slot,
+  reports,
+  loading,
+  error,
+  pendingMutation,
+  onClose,
+  onRefresh,
+  onResolve,
+  onReopen,
+  onDelete,
+}: ReportDetailDrawerProps) {
+  const [resolutionNotes, setResolutionNotes] = useState<Record<string, string>>({});
+  const [deleteCandidate, setDeleteCandidate] =
+    useState<WrongParkingReport | null>(null);
+  const orderedReports = useMemo(
+    () =>
+      [...reports].toSorted(
+        (left, right) =>
+          new Date(right.created_at).getTime() - new Date(left.created_at).getTime(),
+      ),
+    [reports],
+  );
+  const anyMutationPending = pendingMutation !== null;
+
+  async function confirmDelete() {
+    if (!deleteCandidate || anyMutationPending) return;
+    const deleted = await onDelete(deleteCandidate);
+    if (deleted) setDeleteCandidate(null);
+  }
+
+  return (
+    <div className="admin-drawer-backdrop" onClick={() => !anyMutationPending && onClose()}>
+      <aside
+        className="report-detail-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="report-drawer-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <p className="eyebrow green">CHI TIẾT PHẢN ÁNH</p>
+            <h2 id="report-drawer-title">
+              {formatParkingLocation(slot?.id)}
+            </h2>
+            <p>
+              Trạng thái ô thực tế: <b>{slot ? formatSlotStatus(slot.status) : "Không xác định"}</b>
+            </p>
+          </div>
+          <button
+            type="button"
+            className="modal-close"
+            aria-label="Đóng chi tiết báo cáo"
+            onClick={onClose}
+            disabled={anyMutationPending}
+          >
+            ×
+          </button>
+        </header>
+
+        <div className="drawer-refresh-row">
+          <span>{orderedReports.length} báo cáo tại ô này</span>
+          <button type="button" onClick={() => void onRefresh()} disabled={loading || anyMutationPending}>
+            {loading ? "Đang tải…" : "Tải lại"}
+          </button>
+        </div>
+
+        {error && <div className="report-drawer-error" role="alert">{error}</div>}
+        {loading && <p className="report-drawer-empty" role="status">Đang tải chi tiết báo cáo…</p>}
+        {!loading && orderedReports.length === 0 && (
+          <p className="report-drawer-empty">Không còn báo cáo tại ô này.</p>
+        )}
+
+        <div className="report-detail-list">
+          {orderedReports.map((report) => {
+            const pending = pendingMutation?.reportId === report.id;
+            return (
+              <article key={report.id} data-report-id={report.id}>
+                <div className="report-detail-heading">
+                  <div>
+                    <b>{formatWrongParkingReason(report.reason_code)}</b>
+                    <code>{report.id}</code>
+                  </div>
+                  <span className={`report-status status-${report.status.toLowerCase()}`}>
+                    {formatWrongParkingReportStatus(report.status)}
+                  </span>
+                </div>
+                <time dateTime={report.created_at}>{formatReportTime(report.created_at)}</time>
+                {report.observed_plate_number && (
+                  <p><strong>Biển số:</strong> {report.observed_plate_number}</p>
+                )}
+                {report.description && <p>{report.description}</p>}
+                {report.resolution_note && (
+                  <p className="resolution-note"><strong>Ghi chú xử lý:</strong> {report.resolution_note}</p>
+                )}
+
+                {report.status === "OPEN" && (
+                  <label>
+                    Ghi chú xử lý (không bắt buộc)
+                    <textarea
+                      value={resolutionNotes[report.id] ?? ""}
+                      maxLength={500}
+                      disabled={anyMutationPending}
+                      onChange={(event) =>
+                        setResolutionNotes((current) => ({
+                          ...current,
+                          [report.id]: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                )}
+
+                <div className="report-detail-actions">
+                  {report.status === "OPEN" ? (
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={anyMutationPending}
+                      onClick={() =>
+                        void onResolve(
+                          report,
+                          resolutionNotes[report.id]?.trim() || null,
+                        )
+                      }
+                    >
+                      {pending && pendingMutation?.action === "resolve"
+                        ? "Đang resolve…"
+                        : "Resolve report"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={anyMutationPending}
+                      onClick={() => void onReopen(report)}
+                    >
+                      {pending && pendingMutation?.action === "reopen"
+                        ? "Đang mở lại…"
+                        : "Reopen report"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="danger-button"
+                    disabled={anyMutationPending}
+                    onClick={() => setDeleteCandidate(report)}
+                  >
+                    {pending && pendingMutation?.action === "delete"
+                      ? "Đang xóa…"
+                      : "Xóa vĩnh viễn"}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+
+        {deleteCandidate && (
+          <div className="delete-confirm-backdrop">
+            <section
+              className="delete-confirm-dialog"
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="delete-report-title"
+              aria-describedby="delete-report-description"
+            >
+              <h3 id="delete-report-title">Xóa vĩnh viễn report?</h3>
+              <p id="delete-report-description">
+                Thao tác này xóa vĩnh viễn report khỏi database và không thể hoàn tác.
+              </p>
+              <dl>
+                <div><dt>Report ID</dt><dd>{deleteCandidate.id}</dd></div>
+                <div><dt>Ô đỗ</dt><dd>{formatParkingLocation(deleteCandidate.slot_id)}</dd></div>
+              </dl>
+              <div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={anyMutationPending}
+                  onClick={() => setDeleteCandidate(null)}
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  className="danger-button"
+                  disabled={anyMutationPending}
+                  onClick={() => void confirmDelete()}
+                >
+                  {pendingMutation?.action === "delete" ? "Đang xóa…" : "Xác nhận xóa vĩnh viễn"}
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
+      </aside>
+    </div>
+  );
+}
