@@ -444,6 +444,21 @@ body .admin-event-list span, body .admin-event-list small, body .admin-event-lis
 
 .report-reasons { padding: 0; display: grid; gap: 8px; border: 0; }.report-reasons legend { margin-bottom: 7px; font-size: 12px; font-weight: 800; }.report-reasons button { min-height: 44px; padding: 9px 12px; border: 1px solid #cbdad2; border-radius: 10px; color: #244638; background: #f8fbf9; font-size: 12px; font-weight: 750; text-align: left; cursor: pointer; }.report-reasons button::after { content: " →"; float: right; }.report-reasons:disabled button { opacity: .5; cursor: not-allowed; }.report-more-toggle { min-height: 40px; border: 1px dashed #a9bdb3; border-radius: 10px; color: #365f4d; background: #fff; font-weight: 750; cursor: pointer; }.report-extra-fields { padding: 12px; display: grid; gap: 12px; border-radius: 12px; background: #f5f8f6; }.report-submit-status { min-height: 18px; color: var(--muted); font-size: 11px; }
 
+/* Floor selector tabs */
+.floor-tabs { display: flex; gap: 6px; padding: 0 16px 12px; }
+.floor-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 8px 12px; border: 1.5px solid #cddbd4; border-radius: 11px; background: #fff; color: var(--ink); font-size: 13px; cursor: pointer; transition: all .18s ease; }
+.floor-tab:hover { border-color: #9bcdb5; background: #f4f8f6; }
+.floor-tab--active { border-color: var(--green); background: var(--green); color: #fff; box-shadow: 0 2px 8px rgba(34, 139, 78, .18); }
+.floor-tab--active:hover { background: var(--green); }
+.floor-tab strong { font-weight: 800; font-size: 13px; }
+.floor-tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 38px; padding: 2px 7px; border-radius: 20px; font-size: 11px; font-weight: 700; background: #e8f0ec; color: var(--muted); }
+.floor-tab--active .floor-tab-badge { background: rgba(255, 255, 255, .25); color: #fff; }
+
+/* Ramp & inter-floor indicators */
+.ramp-node { fill: #b07d10; }
+.ramp-path { stroke: #b07d10 !important; stroke-dasharray: 3 2; }
+.interfloor-label { fill: var(--muted); font-size: 3.5px; font-weight: 700; letter-spacing: .2px; }
+
 @media (min-width: 720px) {
   .chat-app-header { padding-inline: max(24px, calc((100vw - 960px) / 2)); }
   .chat-conversation { padding: 26px 20px 142px; }

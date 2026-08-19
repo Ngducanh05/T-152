@@ -1,4 +1,4 @@
-"""Idempotent seed for the canonical F1 map and minimal demo identity."""
+"""Idempotent seed for the canonical F1-F3 map and minimal demo identity."""
 
 from dataclasses import dataclass
 
@@ -12,7 +12,7 @@ from src.core.db_models import (
     ParkingUser,
     Vehicle,
 )
-from src.core.parking_map import build_canonical_f1_map, validate_canonical_f1_map
+from src.core.parking_map import build_canonical_parking_map, validate_canonical_parking_map
 
 DEMO_USER_ID = "USER-001"
 DEMO_VEHICLE_ID = "VEHICLE-001"
@@ -52,14 +52,14 @@ def _require(condition: bool, message: str) -> None:
 
 
 async def _seed_if_missing(session: AsyncSession) -> SeedResult:
-    canonical_map = build_canonical_f1_map()
-    validate_canonical_f1_map(canonical_map)
+    canonical_map = build_canonical_parking_map()
+    validate_canonical_parking_map(canonical_map)
 
     canonical_nodes = {node.id: node for node in canonical_map.nodes}
     existing_nodes = {node.id: node for node in await session.scalars(select(MapNode))}
     _require(
         set(existing_nodes) <= set(canonical_nodes),
-        "existing map_nodes contain IDs outside the canonical F1 contract",
+        "existing map_nodes contain IDs outside the canonical F1-F3 contract",
     )
     for node_id, existing in existing_nodes.items():
         expected = canonical_nodes[node_id]
@@ -83,7 +83,7 @@ async def _seed_if_missing(session: AsyncSession) -> SeedResult:
     }
     _require(
         set(existing_edges) <= set(canonical_edges),
-        "existing map_edges contain endpoints outside the canonical F1 contract",
+        "existing map_edges contain endpoints outside the canonical F1-F3 contract",
     )
     for edge_key, existing in existing_edges.items():
         expected = canonical_edges[edge_key]
@@ -100,6 +100,7 @@ async def _seed_if_missing(session: AsyncSession) -> SeedResult:
             distance_m=edge.distance_m,
             bidirectional=edge.bidirectional,
             enabled=edge.enabled,
+            allowed_mode=edge.allowed_mode,
         )
         for edge in canonical_map.edges
         if (edge.from_node, edge.to_node) not in existing_edges
@@ -153,7 +154,7 @@ async def _seed_if_missing(session: AsyncSession) -> SeedResult:
     existing_slots = {slot.id: slot for slot in await session.scalars(select(ParkingSlot))}
     _require(
         set(existing_slots) <= set(canonical_slots),
-        "existing parking_slots contain IDs outside the canonical F1 contract",
+        "existing parking_slots contain IDs outside the canonical F1-F3 contract",
     )
     for slot_id, existing in existing_slots.items():
         expected = canonical_slots[slot_id]

@@ -1,27 +1,50 @@
 import type {
   ActorType,
+  FloorId,
   ParkingEventType,
   SlotStatus,
   WrongParkingReason,
   WrongParkingReportStatus,
 } from "./types";
 
-const LOCATION_NAMES: Record<string, string> = {
-  "F1-ENTRANCE": "Cổng vào tầng F1",
-  "F1-EXIT": "Lối ra tầng F1",
-  "F1-ELEVATOR": "Thang máy tầng F1",
-  "F1-CP1": "Điểm kiểm tra số 1",
-  "F1-CP2": "Điểm kiểm tra số 2",
+const FLOOR_NAMES: Record<FloorId, string> = {
+  F1: "Tầng 1",
+  F2: "Tầng 2",
+  F3: "Tầng 3",
 };
+
+const LOCATION_NAMES: Record<string, string> = {
+  "F1-ENTRANCE": "Cổng vào (F1)",
+  "F1-EXIT": "Lối ra (F1)",
+  "F1-ELEVATOR": "Thang máy tầng 1",
+  "F2-ELEVATOR": "Thang máy tầng 2",
+  "F3-ELEVATOR": "Thang máy tầng 3",
+  "F1-RAMP": "Đường dốc tầng 1",
+  "F2-RAMP": "Đường dốc tầng 2",
+  "F3-RAMP": "Đường dốc tầng 3",
+  "F1-CP1": "Điểm kiểm tra số 1 (F1)",
+  "F1-CP2": "Điểm kiểm tra số 2 (F1)",
+  "F1-CP3": "Điểm kiểm tra số 3 (F1)",
+  "F2-CP1": "Điểm kiểm tra số 1 (F2)",
+  "F2-CP2": "Điểm kiểm tra số 2 (F2)",
+  "F2-CP3": "Điểm kiểm tra số 3 (F2)",
+  "F3-CP1": "Điểm kiểm tra số 1 (F3)",
+  "F3-CP2": "Điểm kiểm tra số 2 (F3)",
+  "F3-CP3": "Điểm kiểm tra số 3 (F3)",
+};
+
+export function formatFloorName(floorId: FloorId): string {
+  return FLOOR_NAMES[floorId] ?? floorId;
+}
 
 export function formatParkingLocation(id: string | null | undefined): string {
   if (!id) return "Chưa xác nhận";
-  const slot = /^F1-([A-D])(\d{2})$/.exec(id);
-  if (slot) return `Ô ${slot[1]}${slot[2]} (${id})`;
-  const zoneLane = /^F1-([A-D])-(?:E|W)$/.exec(id);
-  if (zoneLane) return `Lối xe khu ${zoneLane[1]} (${id})`;
-  const checkpoint = /^F1-CP(\d+)$/.exec(id);
-  if (checkpoint) return `Điểm kiểm tra số ${checkpoint[1]} (${id})`;
+  const slot = /^F([1-3])-([A-D])(\d{2})$/.exec(id);
+  if (slot) return `Ô ${slot[2]}${slot[3]} — ${FLOOR_NAMES[`F${slot[1]}` as FloorId]} (${id})`;
+  const zoneLane = /^F([1-3])-([A-D])-(?:E|W)$/.exec(id);
+  if (zoneLane) return `Lối xe khu ${zoneLane[2]} — ${FLOOR_NAMES[`F${zoneLane[1]}` as FloorId]} (${id})`;
+  const checkpoint = /^F([1-3])-CP(\d+)$/.exec(id);
+  if (checkpoint) return `Điểm kiểm tra số ${checkpoint[2]} — ${FLOOR_NAMES[`F${checkpoint[1]}` as FloorId]} (${id})`;
   const name = LOCATION_NAMES[id];
   return name ? `${name} (${id})` : id;
 }

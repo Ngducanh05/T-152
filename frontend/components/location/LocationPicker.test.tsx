@@ -96,7 +96,7 @@ describe("LocationPicker", () => {
     expect(onConfirm).toHaveBeenCalledOnce();
     expect(onConfirm).toHaveBeenCalledWith("F1-D01");
     expect(slot).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("Đang xác nhận Ô D01 (F1-D01)");
+    expect(screen.getByRole("status")).toHaveTextContent("Đang xác nhận Ô D01 — Tầng 1 (F1-D01)");
 
     resolveConfirmation(true);
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());

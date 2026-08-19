@@ -60,7 +60,7 @@ def test_parking_migration_follows_profiles_revision():
     wrong_parking_report_revision = scripts.get_revision("20260815_0005")
     report_lifecycle_revision = scripts.get_revision("20260819_0006")
 
-    assert scripts.get_current_head() == "20260819_0006"
+    assert scripts.get_current_head() == "0007"
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
     assert location_cleanup_revision is not None

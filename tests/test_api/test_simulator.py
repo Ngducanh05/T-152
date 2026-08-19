@@ -121,8 +121,8 @@ async def _assert_current_baseline(api: SimulatorApi) -> None:
 
     status = status_response.json()["data"]
     assert (status["total"], status["available"], status["reserved"], status["occupied"]) == (
-        40,
-        39,
+        120,
+        119,
         0,
         1,
     )
@@ -297,7 +297,7 @@ async def test_fixed_scenario_updates_parking_status(simulator_api: SimulatorApi
         "PARK",
     ]
     status = status_response.json()["data"]
-    assert (status["available"], status["reserved"], status["occupied"]) == (38, 0, 2)
+    assert (status["available"], status["reserved"], status["occupied"]) == (118, 0, 2)
 
 
 @pytest.mark.asyncio
@@ -344,7 +344,7 @@ async def test_simulator_disabled_rejects_endpoint(
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "INVALID_TRANSITION"
     status = status_response.json()["data"]
-    assert (status["available"], status["reserved"], status["occupied"]) == (40, 0, 0)
+    assert (status["available"], status["reserved"], status["occupied"]) == (120, 0, 0)
 
 
 @pytest.mark.asyncio
