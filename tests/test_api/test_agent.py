@@ -95,6 +95,51 @@ class UnavailableAgent:
         }
 
 
+class RecommendationThenUnavailableAgent:
+    async def ainvoke(self, input_state, config, *, context):
+        call_id = "recommend-before-model-failure"
+        return {
+            "messages": [
+                *input_state["messages"],
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "recommend_parking_slot",
+                            "args": {"zone_id": "C"},
+                            "id": call_id,
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+                ToolMessage(
+                    content=json.dumps(
+                        {
+                            "ok": True,
+                            "data": {
+                                "recommendations": [
+                                    {
+                                        "slot_id": "F1-C01",
+                                        "score": 91.0,
+                                        "distance_m": 41.0,
+                                        "reasons": ["Slot is available"],
+                                    }
+                                ],
+                                "parking_state_version": 0,
+                            },
+                        }
+                    ),
+                    tool_call_id=call_id,
+                    name="recommend_parking_slot",
+                ),
+                AIMessage(content="internal model fallback"),
+            ],
+            "intent": "RECOMMEND_SLOT",
+            "recommended_slot_ids": ["F1-C01"],
+            "error": "AGENT_TOOL_UNAVAILABLE: Model invocation failed.",
+        }
+
+
 class StructuredRouteAgent:
     def __init__(self, *, ok: bool = True) -> None:
         self.ok = ok
@@ -454,6 +499,19 @@ async def test_missing_api_key_state_returns_standard_503():
     assert response.json()["error"]["code"] == "AGENT_TOOL_UNAVAILABLE"
     assert "LLM_API_KEY" not in response.text
     assert "internal fallback" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_successful_recommendation_survives_later_model_failure():
+    response = await _request_with_agent(RecommendationThenUnavailableAgent())
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["recommended_slot_ids"] == ["F1-C01"]
+    assert data["tool_names"] == ["recommend_parking_slot"]
+    assert "F1-C01" in data["message"]
+    assert "đánh dấu" in data["message"]
+    assert "internal model fallback" not in response.text
 
 
 @pytest.mark.asyncio

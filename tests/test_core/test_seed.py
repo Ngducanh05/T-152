@@ -15,6 +15,7 @@ from src.core.db_models import (
     ParkingSlot,
     ParkingUser,
     Vehicle,
+    WrongParkingReport,
 )
 from src.core.seed import SeedValidationError, seed_if_missing
 from src.models.schemas import MapNodeType, SlotStatus
@@ -32,6 +33,7 @@ async def seed_session() -> AsyncGenerator[AsyncSession, None]:
         )
         async with factory() as session:
             for model in (
+                WrongParkingReport,
                 ParkingEvent,
                 ParkingSession,
                 ParkingReservation,

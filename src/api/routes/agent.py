@@ -241,6 +241,25 @@ def _successful_route_guidance(messages: list[Any]) -> str | None:
     return None
 
 
+def _recommendation_fallback(slot_ids: list[str]) -> str:
+    """Build a safe answer when recommendation data outlives an LLM failure."""
+    if not slot_ids:
+        return (
+            "Hiện không có ô trống phù hợp với yêu cầu của bạn. "
+            "Bạn có muốn thay đổi khu vực hoặc tiêu chí tìm kiếm không?"
+        )
+    if len(slot_ids) == 1:
+        return (
+            f"Tôi đã tìm thấy ô {slot_ids[0]} đang trống và đánh dấu ô này "
+            "trên bản đồ. Bạn có muốn đỗ xe ở ô này không?"
+        )
+    formatted_slots = ", ".join(slot_ids)
+    return (
+        f"Tôi đã tìm thấy các ô đang trống: {formatted_slots} và đánh dấu chúng "
+        "trên bản đồ. Bạn muốn chọn ô nào?"
+    )
+
+
 @router.post(
     "/chat",
     response_model=SuccessResponse[ChatResponse],
@@ -304,30 +323,48 @@ async def chat(
 
     if not isinstance(result, dict):
         raise _service_unavailable("The agent returned an invalid response.")
+    current_messages = _messages_after_current_input(result, message_id)
+    successful_tools = _successful_tool_names(current_messages)
+    recommendation_ids = result.get("recommended_slot_ids") or []
     error_text = str(result.get("error", ""))
+    recovered_recommendation = (
+        error_text.startswith(ErrorCode.AGENT_TOOL_UNAVAILABLE.value)
+        and "recommend_parking_slot" in successful_tools
+    )
     if error_text.startswith(ErrorCode.AGENT_TOOL_UNAVAILABLE.value):
+        if not recovered_recommendation:
+            logger.warning(
+                "agent_chat_unavailable request_id=%s user_id=%s thread_id=%s",
+                request_id,
+                payload.user_id,
+                payload.thread_id,
+            )
+            raise _service_unavailable(
+                "The parking assistant is temporarily unavailable. Please try again."
+            )
         logger.warning(
-            "agent_chat_unavailable request_id=%s user_id=%s thread_id=%s",
+            "agent_chat_recovered_recommendation request_id=%s user_id=%s "
+            "thread_id=%s recommendation_count=%s",
             request_id,
             payload.user_id,
             payload.thread_id,
-        )
-        raise _service_unavailable(
-            "The parking assistant is temporarily unavailable. Please try again."
+            len(recommendation_ids),
         )
 
-    current_messages = _messages_after_current_input(result, message_id)
-    successful_tools = _successful_tool_names(current_messages)
     route_guidance = _successful_route_guidance(current_messages)
     response = ChatResponse(
         thread_id=payload.thread_id,
-        message=route_guidance or _public_message(current_messages),
+        message=(
+            _recommendation_fallback(recommendation_ids)
+            if recovered_recommendation
+            else route_guidance or _public_message(current_messages)
+        ),
         intent=result.get("intent") or None,
         selected_slot=result.get("selected_slot") or None,
         tool_names=_safe_tool_names(current_messages),
         current_location=result.get("current_location") or None,
         recommended_slot_ids=(
-            result.get("recommended_slot_ids") or []
+            recommendation_ids
             if "recommend_parking_slot" in successful_tools
             else []
         ),
