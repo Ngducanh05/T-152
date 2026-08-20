@@ -12,6 +12,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    UniqueConstraint,
     func,
     text,
 )
@@ -39,15 +40,17 @@ class Base(DeclarativeBase):
 
 
 class AppRoleEnum(StrEnum):
-    RESIDENT = "resident"
-    SECURITY = "security"
+    USER = "user"
     ADMIN = "admin"
 
 
 class Profile(Base):
-    """Existing profile linked one-to-one with a Supabase Auth user."""
+    """Profile linked one-to-one with a Supabase Auth user."""
 
     __tablename__ = "profiles"
+    __table_args__ = (
+        UniqueConstraint("parking_user_id", name="uq_profiles_parking_user_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -55,7 +58,16 @@ class Profile(Base):
     app_role: Mapped[AppRoleEnum] = mapped_column(
         Enum(AppRoleEnum, name="app_role_enum", values_callable=_enum_values),
         nullable=False,
-        default=AppRoleEnum.RESIDENT,
+        default=AppRoleEnum.USER,
+        index=True,
+    )
+    parking_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("parking_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    default_vehicle_id: Mapped[str | None] = mapped_column(
+        ForeignKey("vehicles.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
