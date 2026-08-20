@@ -4,6 +4,13 @@ import { useState } from "react";
 
 import { AgentComposer } from "@/components/assistant/AgentComposer";
 import { ConversationActionList } from "@/components/assistant/ConversationActionList";
+import {
+  parkingIdentityFromProfile,
+  useAuth,
+} from "@/components/auth/AuthProvider";
+import { LogoutButton } from "@/components/auth/LogoutButton";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import authStyles from "@/components/auth/auth.module.css";
 import { LocationPicker } from "@/components/location/LocationPicker";
 import { AdjacentSlotObservation } from "@/components/parking/AdjacentSlotObservation";
 import {
@@ -13,14 +20,36 @@ import {
 import { useParkSmartData } from "@/hooks/use-parksmart-data";
 import { useParkingWorkflow } from "@/hooks/use-parking-workflow";
 import { formatApiErrorForOperator, parkSmartApi } from "@/lib/api";
-import { MVP_DEMO_USER_ID } from "@/lib/demo";
 import { formatParkingLocation } from "@/lib/parking-display";
 import { notifyWrongParkingReportCreated } from "@/lib/report-updates";
 import { buildRouteInstructions } from "@/lib/route-instructions";
 
 export default function Home() {
-  const data = useParkSmartData();
-  const workflow = useParkingWorkflow(data);
+  return (
+    <ProtectedRoute requiredRole="user">
+      <AuthenticatedHome />
+    </ProtectedRoute>
+  );
+}
+
+function AuthenticatedHome() {
+  const { profile } = useAuth();
+  const identity = profile ? parkingIdentityFromProfile(profile) : null;
+
+  if (!identity) {
+    return null;
+  }
+
+  return <ParkSmartUserApp identity={identity} />;
+}
+
+function ParkSmartUserApp({
+  identity,
+}: {
+  identity: { userId: string; vehicleId: string | null };
+}) {
+  const data = useParkSmartData(parkSmartApi, identity.userId);
+  const workflow = useParkingWorkflow(data, parkSmartApi, identity);
   const [manualLocationPicker, setManualLocationPicker] = useState(false);
   const [manualReportDialog, setManualReportDialog] = useState(false);
 
@@ -64,7 +93,7 @@ export default function Home() {
 
   async function submitWrongParkingReport(draft: WrongParkingReportDraft) {
     await parkSmartApi.reportWrongParking({
-      user_id: MVP_DEMO_USER_ID,
+      user_id: identity.userId,
       slot_id: draft.slotId,
       reason_code: draft.reasonCode,
       observed_plate_number: draft.observedPlateNumber,
@@ -80,18 +109,21 @@ export default function Home() {
           <span className="brand-mark" aria-hidden="true">P</span>
           <strong>ParkSmart<span>AI</span></strong>
         </div>
-        <button
-          type="button"
-          className="chat-location-button"
-          onClick={() => setManualLocationPicker(true)}
-          aria-label={`Vị trí hiện tại: ${formatParkingLocation(workflow.currentLocationId)}. Thay đổi vị trí`}
-        >
-          <span aria-hidden="true">⌖</span>
-          <span>
-            <small>Vị trí hiện tại</small>
-            <b>{formatParkingLocation(workflow.currentLocationId)}</b>
-          </span>
-        </button>
+        <div className={authStyles.userHeaderActions}>
+          <button
+            type="button"
+            className="chat-location-button"
+            onClick={() => setManualLocationPicker(true)}
+            aria-label={`Vị trí hiện tại: ${formatParkingLocation(workflow.currentLocationId)}. Thay đổi vị trí`}
+          >
+            <span aria-hidden="true">⌖</span>
+            <span>
+              <small>Vị trí hiện tại</small>
+              <b>{formatParkingLocation(workflow.currentLocationId)}</b>
+            </span>
+          </button>
+          <LogoutButton />
+        </div>
       </header>
 
       <section className="chat-workspace" aria-label="Trò chuyện với ParkSmart">
@@ -127,66 +159,66 @@ export default function Home() {
 
               {data.activeReservation && (
                 <article className="conversation-state-card reservation-state-card" aria-label="Chỗ đỗ đã giữ">
-              <span className="state-card-icon" aria-hidden="true">R</span>
-              <div>
-                <small>CHỖ ĐỖ ĐÃ GIỮ</small>
-                <h2>{formatParkingLocation(data.activeReservation.slot_id)}</h2>
-                <p>
-                  {reservationLocationMatches
-                    ? "Vị trí của bạn trùng với ô đã giữ."
-                    : "Khi đến cạnh đúng ô, hãy cập nhật vị trí để xác nhận đã đỗ."}
-                </p>
-              </div>
-              {reservationLocationMatches ? (
-                <button
-                  type="button"
-                  onClick={() => void workflow.confirmParking()}
-                  disabled={workflow.pending === "confirm-parking"}
-                >
-                  {workflow.pending === "confirm-parking"
-                    ? "Đang xác nhận…"
-                    : "Xác nhận đã đỗ"}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => void workflow.confirmParking()}
-                  disabled={workflow.pending === "confirm-parking"}
-                >
-                  {workflow.pending === "confirm-parking"
-                    ? "Đang xác nhận đến nơi…"
-                    : "Tôi đã đến nơi"}
-                </button>
-              )}
+                  <span className="state-card-icon" aria-hidden="true">R</span>
+                  <div>
+                    <small>CHỖ ĐỖ ĐÃ GIỮ</small>
+                    <h2>{formatParkingLocation(data.activeReservation.slot_id)}</h2>
+                    <p>
+                      {reservationLocationMatches
+                        ? "Vị trí của bạn trùng với ô đã giữ."
+                        : "Khi đến cạnh đúng ô, hãy cập nhật vị trí để xác nhận đã đỗ."}
+                    </p>
+                  </div>
+                  {reservationLocationMatches ? (
+                    <button
+                      type="button"
+                      onClick={() => void workflow.confirmParking()}
+                      disabled={workflow.pending === "confirm-parking"}
+                    >
+                      {workflow.pending === "confirm-parking"
+                        ? "Đang xác nhận…"
+                        : "Xác nhận đã đỗ"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void workflow.confirmParking()}
+                      disabled={workflow.pending === "confirm-parking"}
+                    >
+                      {workflow.pending === "confirm-parking"
+                        ? "Đang xác nhận đến nơi…"
+                        : "Tôi đã đến nơi"}
+                    </button>
+                  )}
                 </article>
               )}
 
               {data.activeSession && (
                 <>
                   <article className="conversation-state-card session-state-card" aria-label="Xe đang đỗ trong bãi">
-              <span className="state-card-icon" aria-hidden="true">P</span>
-              <div>
-                <small>XE CỦA BẠN</small>
-                <h2>{formatParkingLocation(data.activeSession.slot_id)}</h2>
-                <p>Phiên đỗ xe đang hoạt động.</p>
-              </div>
-              <div className="state-card-actions">
-                <button
-                  type="button"
-                  onClick={() => void workflow.findVehicleAndRoute()}
-                  disabled={workflow.pending === "find-car"}
-                >
-                  Chỉ đường tới xe
-                </button>
-                <button
-                  type="button"
-                  className="danger-text-button"
-                  onClick={() => void workflow.completeSession()}
-                  disabled={workflow.pending === "complete-session"}
-                >
-                  Kết thúc phiên
-                </button>
-              </div>
+                    <span className="state-card-icon" aria-hidden="true">P</span>
+                    <div>
+                      <small>XE CỦA BẠN</small>
+                      <h2>{formatParkingLocation(data.activeSession.slot_id)}</h2>
+                      <p>Phiên đỗ xe đang hoạt động.</p>
+                    </div>
+                    <div className="state-card-actions">
+                      <button
+                        type="button"
+                        onClick={() => void workflow.findVehicleAndRoute()}
+                        disabled={workflow.pending === "find-car"}
+                      >
+                        Chỉ đường tới xe
+                      </button>
+                      <button
+                        type="button"
+                        className="danger-text-button"
+                        onClick={() => void workflow.completeSession()}
+                        disabled={workflow.pending === "complete-session"}
+                      >
+                        Kết thúc phiên
+                      </button>
+                    </div>
                   </article>
                   <AdjacentSlotObservation
                     parkedSlotId={data.activeSession.slot_id}
