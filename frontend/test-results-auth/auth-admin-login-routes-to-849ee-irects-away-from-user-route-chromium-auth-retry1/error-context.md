@@ -7,7 +7,7 @@
 # Test info
 
 - Name: auth.spec.ts >> admin login routes to dashboard and redirects away from user route
-- Location: e2e\auth.spec.ts:343:5
+- Location: e2e\auth.spec.ts:732:5
 
 # Error details
 
@@ -42,110 +42,114 @@ Call log:
 # Test source
 
 ```ts
-  245 |     }
-  246 | 
-  247 |     if (!account) {
-  248 |       await fulfillJson(route, failure("AUTH_REQUIRED", "Authentication required."), 401);
-  249 |       return;
-  250 |     }
-  251 | 
-  252 |     if (url.pathname === "/api/v1/parking/map") {
-  253 |       await fulfillJson(
-  254 |         route,
-  255 |         success({ floor_id: "F1", nodes: [], edges: [], slots: [] }),
-  256 |       );
-  257 |       return;
-  258 |     }
-  259 |     if (url.pathname === "/api/v1/parking/slots") {
-  260 |       await fulfillJson(route, success([]));
-  261 |       return;
-  262 |     }
-  263 |     if (url.pathname === "/api/v1/parking/status") {
-  264 |       await fulfillJson(
-  265 |         route,
-  266 |         success({
-  267 |           total: 40,
-  268 |           available: 40,
-  269 |           reserved: 0,
-  270 |           occupied: 0,
-  271 |           by_zone: {
-  272 |             A: { AVAILABLE: 10, RESERVED: 0, OCCUPIED: 0 },
-  273 |             B: { AVAILABLE: 10, RESERVED: 0, OCCUPIED: 0 },
-  274 |             C: { AVAILABLE: 10, RESERVED: 0, OCCUPIED: 0 },
-  275 |             D: { AVAILABLE: 10, RESERVED: 0, OCCUPIED: 0 },
-  276 |           },
-  277 |         }),
-  278 |       );
-  279 |       return;
-  280 |     }
-  281 |     if (
-  282 |       url.pathname === "/api/v1/locations/current" ||
-  283 |       url.pathname === "/api/v1/reservations/active" ||
-  284 |       url.pathname === "/api/v1/sessions/active"
-  285 |     ) {
-  286 |       await fulfillJson(route, failure("NOT_FOUND", "Not found."), 404);
-  287 |       return;
-  288 |     }
-  289 |     if (url.pathname.startsWith("/api/v1/admin/")) {
-  290 |       await fulfillJson(route, success([]));
-  291 |       return;
-  292 |     }
-  293 | 
-  294 |     await fulfillJson(route, success({}));
-  295 |   });
-  296 | }
-  297 | 
-  298 | async function login(page: Page, account: Account) {
-  299 |   await page.goto("/login");
-  300 |   await page.getByLabel("Email").fill(account.email);
-  301 |   await page.getByLabel("Mật khẩu").fill(account.password);
-  302 |   await page.getByRole("button", { name: "Đăng nhập" }).click();
-  303 | }
-  304 | 
-  305 | test.beforeEach(async ({ page }) => {
-  306 |   await installAuthMocks(page);
-  307 | });
-  308 | 
-  309 | test("guest cannot access user or admin routes", async ({ page }) => {
-  310 |   await page.goto("/");
-  311 |   await expect(page).toHaveURL(/\/login$/);
-  312 | 
-  313 |   await page.goto("/admin");
-  314 |   await expect(page).toHaveURL(/\/login$/);
-  315 | });
-  316 | 
-  317 | test("invalid login shows a safe error without role selection", async ({ page }) => {
-  318 |   await page.goto("/login");
-  319 |   await page.getByLabel("Email").fill("invalid@example.com");
-  320 |   await page.getByLabel("Mật khẩu").fill("wrong-password");
-  321 |   await page.getByRole("button", { name: "Đăng nhập" }).click();
-  322 | 
-  323 |   await expect(
-  324 |     page.locator('p[role="alert"]'),
-  325 |   ).toHaveText("Email hoặc mật khẩu không đúng.");
-  326 |   await expect(page.locator("select")).toHaveCount(0);
-  327 | });
-  328 | 
-  329 | test("user login routes to chat, survives reload, blocks admin, and logs out", async ({ page }) => {
-  330 |   await login(page, USER);
-  331 |   await expect(page).toHaveURL(/\/$/);
-  332 | 
-  333 |   await page.reload();
-  334 |   await expect(page).toHaveURL(/\/$/);
-  335 | 
-  336 |   await page.goto("/admin");
-  337 |   await expect(page).toHaveURL(/\/$/);
-  338 | 
-  339 |   await page.getByRole("button", { name: "Đăng xuất" }).click();
-  340 |   await expect(page).toHaveURL(/\/login$/);
-  341 | });
-  342 | 
-  343 | test("admin login routes to dashboard and redirects away from user route", async ({ page }) => {
-  344 |   await login(page, ADMIN);
-> 345 |   await expect(page).toHaveURL(/\/admin$/);
-      |                      ^ Error: expect(page).toHaveURL(expected) failed
-  346 | 
-  347 |   await page.goto("/");
-  348 |   await expect(page).toHaveURL(/\/admin$/);
-  349 | });
+  642 | 
+  643 |     await expect(
+  644 |       page,
+  645 |     ).toHaveURL(/\/login$/);
+  646 |   },
+  647 | );
+  648 | 
+  649 | test(
+  650 |   "invalid login shows a safe error without role selection",
+  651 |   async ({ page }) => {
+  652 |     await page.goto(
+  653 |       "/login",
+  654 |     );
+  655 | 
+  656 |     await page
+  657 |       .getByLabel("Email")
+  658 |       .fill(
+  659 |         "invalid@example.com",
+  660 |       );
+  661 | 
+  662 |     await page
+  663 |       .getByLabel("Mật khẩu")
+  664 |       .fill(
+  665 |         "wrong-password",
+  666 |       );
+  667 | 
+  668 |     await page
+  669 |       .getByRole(
+  670 |         "button",
+  671 |         {
+  672 |           name: "Đăng nhập",
+  673 |         },
+  674 |       )
+  675 |       .click();
+  676 | 
+  677 |     await expect(
+  678 |       page.locator(
+  679 |         'p[role="alert"]',
+  680 |       ),
+  681 |     ).toHaveText(
+  682 |       "Email hoặc mật khẩu không đúng.",
+  683 |     );
+  684 | 
+  685 |     await expect(
+  686 |       page.locator("select"),
+  687 |     ).toHaveCount(0);
+  688 |   },
+  689 | );
+  690 | 
+  691 | test(
+  692 |   "user login routes to chat, survives reload, blocks admin, and logs out",
+  693 |   async ({ page }) => {
+  694 |     await login(
+  695 |       page,
+  696 |       USER,
+  697 |     );
+  698 | 
+  699 |     await expect(
+  700 |       page,
+  701 |     ).toHaveURL(/\/$/);
+  702 | 
+  703 |     await page.reload();
+  704 | 
+  705 |     await expect(
+  706 |       page,
+  707 |     ).toHaveURL(/\/$/);
+  708 | 
+  709 |     await page.goto(
+  710 |       "/admin",
+  711 |     );
+  712 | 
+  713 |     await expect(
+  714 |       page,
+  715 |     ).toHaveURL(/\/$/);
+  716 | 
+  717 |     await page
+  718 |       .getByRole(
+  719 |         "button",
+  720 |         {
+  721 |           name: "Đăng xuất",
+  722 |         },
+  723 |       )
+  724 |       .click();
+  725 | 
+  726 |     await expect(
+  727 |       page,
+  728 |     ).toHaveURL(/\/login$/);
+  729 |   },
+  730 | );
+  731 | 
+  732 | test(
+  733 |   "admin login routes to dashboard and redirects away from user route",
+  734 |   async ({ page }) => {
+  735 |     await login(
+  736 |       page,
+  737 |       ADMIN,
+  738 |     );
+  739 | 
+  740 |     await expect(
+  741 |       page,
+> 742 |     ).toHaveURL(/\/admin$/);
+      |       ^ Error: expect(page).toHaveURL(expected) failed
+  743 | 
+  744 |     await page.goto("/");
+  745 | 
+  746 |     await expect(
+  747 |       page,
+  748 |     ).toHaveURL(/\/admin$/);
+  749 |   },
+  750 | );
 ```

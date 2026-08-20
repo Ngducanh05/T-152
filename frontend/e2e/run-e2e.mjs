@@ -1,12 +1,18 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
+const backendUrl =
+  process.env.E2E_BACKEND_URL ?? "http://127.0.0.1:8100";
+
 const environment = {
   ...process.env,
   NEXT_TELEMETRY_DISABLED: "1",
   NEXT_PUBLIC_DEMO_MODE: "true",
-  PARKSMART_BACKEND_ORIGIN:
-    process.env.E2E_BACKEND_URL ?? "http://127.0.0.1:8100",
+  NEXT_PUBLIC_API_BASE_URL: "/api/v1",
+  E2E_BACKEND_URL: backendUrl,
+  E2E_API_URL:
+    process.env.E2E_API_URL ?? `${backendUrl}/api/v1`,
+  PARKSMART_BACKEND_ORIGIN: backendUrl,
 };
 
 const nextCli = path.resolve(
@@ -84,6 +90,10 @@ if (prepare.status !== 0) {
 /*
  * Step 2:
  * Produce the Next.js production build used by Playwright.
+ *
+ * NEXT_PUBLIC_API_BASE_URL is intentionally same-origin (/api/v1), so the
+ * browser goes through next.config.ts and reaches the E2E backend configured
+ * by PARKSMART_BACKEND_ORIGIN instead of the development fallback on :8000.
  */
 const build = spawnSync(
   process.execPath,
@@ -114,13 +124,9 @@ if (build.status !== 0) {
  * Run Playwright.
  *
  * Do not manually spawn backend/frontend here.
- *
- * playwright.config.ts already owns:
- *   backend  -> http://127.0.0.1:8100
- *   frontend -> http://127.0.0.1:3100
- *
- * Having both this runner and Playwright start the same servers causes
- * duplicate server lifecycle ownership and can produce port/startup races.
+ * playwright.config.ts owns:
+ *   backend  -> E2E_BACKEND_URL (default 127.0.0.1:8100)
+ *   frontend -> E2E_FRONTEND_URL (default 127.0.0.1:3100)
  */
 const tests = spawnSync(
   process.execPath,
