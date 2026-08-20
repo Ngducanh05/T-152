@@ -11,9 +11,12 @@
 !.yarn/versions
 
 # testing
-/coverage
+/coverage/
 /playwright-report/
+/playwright-report-auth/
 /test-results/
+/test-results-auth/
+/blob-report/
 /.npm-cache/
 /.e2e-*.pid
 

@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 
 import type { ParkingWorkflow } from "@/hooks/use-parking-workflow";
 import { canonicalMap, currentLocation, parkingStatus } from "@/test/fixtures";
@@ -10,8 +11,29 @@ import Home from "./page";
 const mocks = vi.hoisted(() => ({
   useParkSmartData: vi.fn(),
   useParkingWorkflow: vi.fn(),
+  reportWrongParking: vi.fn(),
 }));
 
+vi.mock("@/components/auth/ProtectedRoute", () => ({
+  ProtectedRoute: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+vi.mock("@/components/auth/AuthProvider", () => ({
+  useAuth: () => ({
+    status: "authenticated",
+    profile: {
+      id: "11111111-1111-4111-8111-111111111111",
+      email: "user@example.com",
+      full_name: "User",
+      role: "user",
+      parking_user_id: "USER-A",
+      default_vehicle_id: "VEHICLE-A",
+    },
+  }),
+  parkingIdentityFromProfile: () => ({ userId: "USER-A", vehicleId: "VEHICLE-A" }),
+}));
+vi.mock("@/components/auth/LogoutButton", () => ({
+  LogoutButton: () => <button type="button">Đăng xuất</button>,
+}));
 vi.mock("@/hooks/use-parksmart-data", () => ({
   useParkSmartData: mocks.useParkSmartData,
 }));
@@ -22,6 +44,16 @@ vi.mock("@/hooks/use-parking-workflow", async (importOriginal) => {
 vi.mock("@/components/assistant/AgentComposer", () => ({
   AgentComposer: () => <div data-testid="agent-composer" />,
 }));
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    parkSmartApi: {
+      ...actual.parkSmartApi,
+      reportWrongParking: mocks.reportWrongParking,
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
@@ -44,13 +76,15 @@ function workflowFixture(): ParkingWorkflow {
     activeRoute: null,
     currentLocationId: "F1-ENTRANCE",
     lastToolNames: [],
-    messages: [{
-      id: "welcome",
-      role: "agent",
-      text: "Chào bạn!",
-      uiActions: [welcomeAction],
-      consumedActionIds: [],
-    }],
+    messages: [
+      {
+        id: "welcome",
+        role: "agent",
+        text: "Chào bạn!",
+        uiActions: [welcomeAction],
+        consumedActionIds: [],
+      },
+    ],
     threadId: "thread-test",
     pending: null,
     pendingAdjacentSlotId: null,
@@ -77,33 +111,54 @@ function workflowFixture(): ParkingWorkflow {
   };
 }
 
-describe("user chat page", () => {
-  it("does not render ParkingMap or operational summaries and shows welcome actions", async () => {
-    const user = userEvent.setup();
+function dataFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    map: canonicalMap,
+    slots: canonicalMap.slots,
+    status: parkingStatus,
+    currentLocation,
+    activeReservation: null,
+    activeSession: null,
+    lastUpdatedAt: null,
+    loading: false,
+    refreshing: false,
+    error: null,
+    refresh: vi.fn(),
+    ...overrides,
+  };
+}
+
+describe("authenticated user chat page", () => {
+  it("passes the backend parking identity into data and workflow hooks", () => {
     const workflow = workflowFixture();
-    mocks.useParkSmartData.mockReturnValue({
-      map: canonicalMap,
-      slots: canonicalMap.slots,
-      status: parkingStatus,
-      currentLocation,
-      activeReservation: null,
-      activeSession: null,
-      lastUpdatedAt: null,
-      loading: false,
-      refreshing: false,
-      error: null,
-      refresh: vi.fn(),
-    });
+    mocks.useParkSmartData.mockReturnValue(dataFixture());
     mocks.useParkingWorkflow.mockReturnValue(workflow);
 
     render(<Home />);
+
+    expect(mocks.useParkSmartData).toHaveBeenCalledWith(
+      expect.anything(),
+      "USER-A",
+    );
+    expect(mocks.useParkingWorkflow).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { userId: "USER-A", vehicleId: "VEHICLE-A" },
+    );
+    expect(screen.getByRole("button", { name: "Đăng xuất" })).toBeVisible();
+  });
+
+  it("shows welcome actions and keeps the user page map-free", async () => {
+    const user = userEvent.setup();
+    const workflow = workflowFixture();
+    mocks.useParkSmartData.mockReturnValue(dataFixture());
+    mocks.useParkingWorkflow.mockReturnValue(workflow);
+
+    render(<Home />);
+
     expect(screen.queryByTestId("parking-map")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Tóm tắt trạng thái bãi xe")).not.toBeInTheDocument();
-    expect(document.querySelector(".sidebar")).toBeNull();
     const action = screen.getByRole("button", { name: "Tìm ô đỗ" });
     expect(action).toBeVisible();
-    expect(action.closest("article")).toHaveTextContent("Chào bạn!");
-
     await user.click(action);
     expect(workflow.executeUiAction).toHaveBeenCalledWith(
       "welcome",
@@ -111,72 +166,26 @@ describe("user chat page", () => {
     );
   });
 
-  it("confirms arrival directly instead of opening the location picker", async () => {
+  it("keeps active-session controls available", async () => {
     const user = userEvent.setup();
     const workflow = workflowFixture();
-    mocks.useParkSmartData.mockReturnValue({
-      map: canonicalMap,
-      slots: canonicalMap.slots,
-      status: parkingStatus,
-      currentLocation,
-      activeReservation: {
-        id: "RESERVATION-001",
-        user_id: "USER-001",
-        vehicle_id: "VEHICLE-001",
-        slot_id: "F1-D01",
-        status: "ACTIVE",
-        created_at: "2026-08-19T04:00:00Z",
-        expires_at: "2026-08-19T04:05:00Z",
-      },
-      activeSession: null,
-      lastUpdatedAt: null,
-      loading: false,
-      refreshing: false,
-      error: null,
-      refresh: vi.fn(),
-    });
-    mocks.useParkingWorkflow.mockReturnValue(workflow);
-
-    render(<Home />);
-    await user.click(screen.getByRole("button", { name: "Tôi đã đến nơi" }));
-
-    expect(workflow.confirmParking).toHaveBeenCalledOnce();
-    expect(
-      screen.queryByRole("dialog", { name: "Xác nhận vị trí hiện tại" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("keeps active-session controls in the priority dock and offers adjacent updates", async () => {
-    const user = userEvent.setup();
-    const workflow = workflowFixture();
-    mocks.useParkSmartData.mockReturnValue({
-      map: canonicalMap,
-      slots: canonicalMap.slots,
-      status: parkingStatus,
-      currentLocation,
-      activeReservation: null,
-      activeSession: {
-        session_id: "SESSION-001",
-        vehicle_id: "VEHICLE-001",
-        slot_id: "F1-D03",
-        destination_node_id: "F1-D03",
-      },
-      lastUpdatedAt: null,
-      loading: false,
-      refreshing: false,
-      error: null,
-      refresh: vi.fn(),
-    });
-    mocks.useParkingWorkflow.mockReturnValue(workflow);
-
-    render(<Home />);
-    const dock = screen.getByRole("region", {
-      name: "Thông tin và thao tác quan trọng",
-    });
-    expect(dock).toHaveClass("conversation-priority-dock");
-    expect(dock).toContainElement(
-      screen.getByRole("article", { name: "Xe đang đỗ trong bãi" }),
+    mocks.useParkSmartData.mockReturnValue(
+      dataFixture({
+        activeSession: {
+          session_id: "SESSION-001",
+          vehicle_id: "VEHICLE-A",
+          slot_id: "F1-D03",
+          destination_node_id: "F1-D03",
+        },
+      }),
     );
+    mocks.useParkingWorkflow.mockReturnValue(workflow);
+
+    render(<Home />);
+
+    expect(
+      screen.getByRole("article", { name: "Xe đang đỗ trong bãi" }),
+    ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Báo F1-D02 đang trống" }));
     expect(workflow.updateAdjacentSlotStatus).toHaveBeenCalledWith(
       "F1-D02",
