@@ -6,6 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies import (
+    ParkingUserDependency,
+    resolve_parking_user_id,
+    resolve_vehicle_id,
+)
 from src.core.database import get_db_session
 from src.core.parking_state import ParkingStateError, ParkingStateService
 from src.core.reservation import ReservationService
@@ -21,6 +26,8 @@ from src.models.schemas import ParkingReservation as ParkingReservationResponse
 router = APIRouter(prefix="/reservations", tags=["Reservations"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 ERROR_RESPONSES = {
+    401: {"model": ErrorResponse},
+    403: {"model": ErrorResponse},
     404: {"model": ErrorResponse},
     409: {"model": ErrorResponse},
     422: {"model": ErrorResponse},
@@ -71,14 +78,23 @@ def _response(reservation: object) -> ParkingReservationResponse:
 async def create_reservation(
     request: CreateReservationRequest,
     session: SessionDependency,
+    current_user: ParkingUserDependency,
 ) -> SuccessResponse[ParkingReservationResponse]:
+    user_id = resolve_parking_user_id(request.user_id, current_user)
     try:
         async with session.begin():
+            vehicle_id = await resolve_vehicle_id(
+                request.vehicle_id,
+                current_user,
+                session,
+                required=True,
+            )
+            assert vehicle_id is not None  # required=True guarantees this invariant.
             reservation = await ReservationService(
                 session, ParkingStateService(session)
             ).create_reservation(
-                request.user_id,
-                request.vehicle_id,
+                user_id,
+                vehicle_id,
                 request.slot_id,
                 expected_version=request.expected_version,
             )
@@ -94,8 +110,10 @@ async def create_reservation(
 )
 async def active_reservation(
     session: SessionDependency,
+    current_user: ParkingUserDependency,
     user_id: Annotated[EntityId, Query()],
 ) -> SuccessResponse[ParkingReservationResponse]:
+    user_id = resolve_parking_user_id(user_id, current_user)
     try:
         async with session.begin():
             reservation = await ReservationService(
@@ -120,8 +138,10 @@ async def active_reservation(
 async def cancel_reservation(
     reservation_id: str,
     session: SessionDependency,
+    current_user: ParkingUserDependency,
     user_id: Annotated[EntityId, Query()],
 ) -> SuccessResponse[ParkingReservationResponse]:
+    user_id = resolve_parking_user_id(user_id, current_user)
     try:
         async with session.begin():
             service = ReservationService(session, ParkingStateService(session))

@@ -1,13 +1,15 @@
 """User-facing API for reporting vehicles parked in the wrong position."""
 
 import logging
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.database import get_db_session
+from src.api.dependencies import (
+    ParkingUserDependency,
+    SessionDependency,
+    resolve_parking_user_id,
+)
 from src.core.parking_report import ParkingReportError, ParkingReportService
 from src.models.common import ErrorResponse, SuccessResponse
 from src.models.schemas import (
@@ -19,7 +21,6 @@ from src.models.schemas import (
 )
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
-SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 logger = logging.getLogger(__name__)
 
 
@@ -60,17 +61,24 @@ class WrongParkingReportRequest(BaseModel):
     "/wrong-parking",
     response_model=SuccessResponse[WrongParkingReport],
     status_code=status.HTTP_201_CREATED,
-    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
 )
 async def create_wrong_parking_report(
     request: WrongParkingReportRequest,
     session: SessionDependency,
     http_request: Request,
+    current_user: ParkingUserDependency,
 ) -> SuccessResponse[WrongParkingReport]:
+    user_id = resolve_parking_user_id(request.user_id, current_user)
     try:
         async with session.begin():
             report = await ParkingReportService(session).create_wrong_parking_report(
-                reporter_user_id=request.user_id,
+                reporter_user_id=user_id,
                 slot_id=request.slot_id,
                 reason_code=request.reason_code,
                 description=request.description,
@@ -82,7 +90,7 @@ async def create_wrong_parking_report(
             "actor_id=%s outcome=failure request_id=%s error_code=%s",
             error.report_id or "unknown",
             error.slot_id or request.slot_id,
-            request.user_id,
+            user_id,
             getattr(http_request.state, "request_id", "unknown"),
             error.code.value,
         )
@@ -100,7 +108,7 @@ async def create_wrong_parking_report(
         "actor_id=%s outcome=success request_id=%s",
         report.id,
         report.slot_id,
-        request.user_id,
+        user_id,
         getattr(http_request.state, "request_id", "unknown"),
     )
     return SuccessResponse(

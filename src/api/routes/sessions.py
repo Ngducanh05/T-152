@@ -7,6 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies import (
+    ParkingUserDependency,
+    resolve_parking_user_id,
+    resolve_vehicle_id,
+)
 from src.core.database import get_db_session
 from src.core.parking_session import ParkingSessionError, ParkingSessionService
 from src.core.parking_state import ParkingStateError, ParkingStateService
@@ -18,6 +23,8 @@ from src.models.schemas import ParkingSession as ParkingSessionResponse
 router = APIRouter(prefix="/sessions", tags=["Parking Sessions"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 ERROR_RESPONSES = {
+    401: {"model": ErrorResponse},
+    403: {"model": ErrorResponse},
     404: {"model": ErrorResponse},
     409: {"model": ErrorResponse},
     422: {"model": ErrorResponse},
@@ -91,10 +98,19 @@ def _response(parking_session: object) -> ParkingSessionResponse:
 async def confirm_parking(
     request: ConfirmParkingRequest,
     session: SessionDependency,
+    current_user: ParkingUserDependency,
 ) -> SuccessResponse[ParkingSessionResponse]:
+    user_id = resolve_parking_user_id(request.user_id, current_user)
     expired = False
     try:
         async with session.begin():
+            vehicle_id = await resolve_vehicle_id(
+                request.vehicle_id,
+                current_user,
+                session,
+                required=True,
+            )
+            assert vehicle_id is not None
             current_time = datetime.now(UTC)
             state_service = ParkingStateService(session)
             reservation_service = ReservationService(session, state_service)
@@ -111,8 +127,8 @@ async def confirm_parking(
                     state_service,
                     clock=lambda: current_time,
                 ).confirm_parking(
-                    request.user_id,
-                    request.vehicle_id,
+                    user_id,
+                    vehicle_id,
                     request.reservation_id,
                     expected_version=request.expected_version,
                 )
@@ -132,8 +148,10 @@ async def confirm_parking(
 )
 async def active_vehicle(
     session: SessionDependency,
+    current_user: ParkingUserDependency,
     user_id: Annotated[EntityId, Query()],
 ) -> SuccessResponse[ParkedVehicleResponse]:
+    user_id = resolve_parking_user_id(user_id, current_user)
     try:
         vehicle = await ParkingSessionService(session).find_parked_vehicle(user_id)
     except ParkingSessionError as error:
@@ -152,14 +170,16 @@ async def complete_session(
     session_id: str,
     request: CompleteSessionRequest,
     session: SessionDependency,
+    current_user: ParkingUserDependency,
 ) -> SuccessResponse[ParkingSessionResponse]:
+    user_id = resolve_parking_user_id(request.user_id, current_user)
     try:
         async with session.begin():
             parking_session = await ParkingSessionService(
                 session, ParkingStateService(session)
             ).complete_session(
                 session_id,
-                user_id=request.user_id,
+                user_id=user_id,
                 expected_version=request.expected_version,
             )
     except ParkingSessionError as error:

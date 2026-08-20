@@ -7,6 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies import (
+    ParkingUserDependency,
+    require_authenticated_or_demo,
+    resolve_parking_user_id,
+)
 from src.core.database import get_db_session
 from src.core.parking_map import build_canonical_f1_map
 from src.core.parking_state import ParkingStateError, ParkingStateService
@@ -21,7 +26,11 @@ from src.models.schemas import (
     ZoneId,
 )
 
-router = APIRouter(prefix="/parking", tags=["Parking"])
+router = APIRouter(
+    prefix="/parking",
+    tags=["Parking"],
+    dependencies=[Depends(require_authenticated_or_demo)],
+)
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 logger = logging.getLogger(__name__)
 
@@ -104,11 +113,13 @@ async def observe_adjacent_parking_slot(
     slot_id: str,
     request: AdjacentSlotObservationRequest,
     session: SessionDependency,
+    current_user: ParkingUserDependency,
 ) -> SuccessResponse[ParkingSlot]:
+    user_id = resolve_parking_user_id(request.user_id, current_user)
     try:
         async with session.begin():
             slot = await SlotObservationService(session).observe_adjacent_slot(
-                user_id=request.user_id,
+                user_id=user_id,
                 slot_id=slot_id,
                 observed_status=request.observed_status,
                 expected_version=request.expected_version,
@@ -118,7 +129,7 @@ async def observe_adjacent_parking_slot(
     logger.info(
         "adjacent_slot_observation slot_id=%s actor_id=%s observed_status=%s outcome=success",
         slot_id,
-        request.user_id,
+        user_id,
         request.observed_status.value,
     )
     return SuccessResponse(data=_slot_response(slot))
@@ -130,8 +141,14 @@ async def parking_map(session: SessionDependency) -> SuccessResponse[ParkingMapR
     slots = await ParkingStateService(session).list_slots()
     return SuccessResponse(
         data=ParkingMapResponse(
-            nodes=[MapNode.model_validate(node, from_attributes=True) for node in canonical_map.nodes],
-            edges=[MapEdge.model_validate(edge, from_attributes=True) for edge in canonical_map.edges],
+            nodes=[
+                MapNode.model_validate(node, from_attributes=True)
+                for node in canonical_map.nodes
+            ],
+            edges=[
+                MapEdge.model_validate(edge, from_attributes=True)
+                for edge in canonical_map.edges
+            ],
             slots=[_slot_response(slot) for slot in slots],
         )
     )
