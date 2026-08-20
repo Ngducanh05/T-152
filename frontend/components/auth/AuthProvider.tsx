@@ -75,6 +75,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInInFlightRef = useRef(false);
 
   const becomeGuest = useCallback((error: string | null = null) => {
+    console.log("[AUTH] becomeGuest", {
+      error,
+    });
+
     accessTokenRef.current = null;
     setProfile(null);
     setInitializationError(error);
@@ -82,21 +86,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadBackendProfile = useCallback(async () => {
-    const currentProfile = await parkSmartApi.getCurrentUser();
+    console.log("[AUTH] loading backend profile");
 
-    setProfile(currentProfile);
-    setInitializationError(null);
-    setStatus("authenticated");
+    try {
+      const currentProfile = await parkSmartApi.getCurrentUser();
 
-    return currentProfile;
+      console.log("[AUTH] backend profile loaded", {
+        id: currentProfile.id,
+        role: currentProfile.role,
+        parkingUserId: currentProfile.parking_user_id,
+        defaultVehicleId: currentProfile.default_vehicle_id,
+      });
+
+      setProfile(currentProfile);
+      setInitializationError(null);
+      setStatus("authenticated");
+
+      return currentProfile;
+    } catch (error) {
+      console.error("[AUTH] backend profile load FAILED:", error);
+      throw error;
+    }
   }, []);
 
   useEffect(() => {
+    console.log("[AUTH] AuthProvider effect started", {
+      demoMode,
+      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+      hasPublishableKey: Boolean(
+        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+      ),
+    });
+
     if (demoMode) {
+      console.log("[AUTH] demo mode enabled");
+
       accessTokenRef.current = null;
       parkSmartApi.setAuthProvider(null);
 
       return () => {
+        console.log("[AUTH] demo AuthProvider cleanup");
+
         accessTokenRef.current = null;
         parkSmartApi.setAuthProvider(null);
       };
@@ -106,38 +136,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let supabase: SupabaseClient;
 
     try {
+      console.log("[AUTH] creating Supabase browser client");
+
       supabase = createBrowserSupabaseClient();
-    } catch {
+
+      console.log("[AUTH] Supabase browser client created");
+    } catch (error) {
+      console.error("[AUTH] Supabase client init FAILED:", error);
+
       queueMicrotask(() => {
         if (active) {
           becomeGuest("Supabase chưa được cấu hình cho frontend.");
         }
       });
 
-      return;
+      return () => {
+        console.log("[AUTH] cleanup after Supabase init failure");
+        active = false;
+      };
     }
 
     supabaseRef.current = supabase;
 
+    console.log("[AUTH] supabaseRef assigned", {
+      ready: Boolean(supabaseRef.current),
+    });
+
     parkSmartApi.setAuthProvider({
       async getAccessToken() {
+        console.log("[AUTH] API getAccessToken called", {
+          cached: Boolean(accessTokenRef.current),
+        });
+
         if (accessTokenRef.current) {
           return accessTokenRef.current;
         }
 
         const { data, error } = await supabase.auth.getSession();
 
+        if (error) {
+          console.error("[AUTH] getSession FAILED:", error);
+        }
+
         if (error || !data.session) {
           accessTokenRef.current = null;
           return null;
         }
 
         accessTokenRef.current = data.session.access_token;
+
+        console.log("[AUTH] getSession returned access token");
+
         return data.session.access_token;
       },
 
       async refreshAccessToken() {
+        console.log("[AUTH] refreshAccessToken called");
+
         const { data, error } = await supabase.auth.refreshSession();
+
+        if (error) {
+          console.error("[AUTH] refreshSession FAILED:", error);
+        }
 
         if (error || !data.session) {
           accessTokenRef.current = null;
@@ -145,10 +205,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         accessTokenRef.current = data.session.access_token;
+
+        console.log("[AUTH] access token refreshed");
+
         return data.session.access_token;
       },
 
       async onAuthenticationFailure() {
+        console.warn("[AUTH] API authentication failure");
+
         accessTokenRef.current = null;
         await supabase.auth.signOut();
 
@@ -158,28 +223,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
     });
 
+    console.log("[AUTH] ParkSmart API auth provider configured");
+
     /*
-     * Do not run a separate bootstrap(getSession()) here.
-     *
-     * Supabase emits INITIAL_SESSION after its own initialization completes.
-     * Using both a manual bootstrap and INITIAL_SESSION creates two competing
-     * initialization flows. A delayed null bootstrap/initial event can
-     * overwrite a successful sign-in and return the UI to "guest".
-     *
-     * INITIAL_SESSION is therefore the single source of truth for startup.
+     * INITIAL_SESSION is the single source of truth for startup.
      */
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("[AUTH] Supabase auth state changed", {
+        event,
+        hasSession: Boolean(session),
+        active,
+        signInInFlight: signInInFlightRef.current,
+      });
+
       if (!active) {
+        console.log("[AUTH] auth event ignored because provider is inactive");
         return;
       }
 
       if (event === "INITIAL_SESSION") {
         if (!session) {
+          console.log("[AUTH] INITIAL_SESSION has no session");
+
           becomeGuest();
           return;
         }
+
+        console.log("[AUTH] INITIAL_SESSION has active session");
 
         accessTokenRef.current = session.access_token;
         setStatus("loading");
@@ -190,6 +262,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
 
           void loadBackendProfile().catch(async (profileError) => {
+            console.error(
+              "[AUTH] INITIAL_SESSION profile validation FAILED:",
+              profileError,
+            );
+
             accessTokenRef.current = null;
             await supabase.auth.signOut();
 
@@ -203,21 +280,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (event === "SIGNED_OUT" || !session) {
+        console.log("[AUTH] signed out or session missing");
+
         becomeGuest();
         return;
       }
 
-      /*
-       * Keep the latest Supabase JWT in memory. This is the token the
-       * ParkSmart API client should attach to Authorization: Bearer.
-       */
       accessTokenRef.current = session.access_token;
 
+      console.log("[AUTH] latest JWT stored", {
+        event,
+      });
+
       /*
-       * signIn() itself owns the first /auth/me call because LoginForm needs
-       * the authoritative ParkSmart profile returned from signIn().
+       * signIn() itself owns the first /auth/me call.
        */
       if (event === "SIGNED_IN" && signInInFlightRef.current) {
+        console.log(
+          "[AUTH] SIGNED_IN profile load skipped because signIn owns it",
+        );
         return;
       }
 
@@ -232,6 +313,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
 
           void loadBackendProfile().catch(async (profileError) => {
+            console.error(
+              `[AUTH] ${event} profile validation FAILED:`,
+              profileError,
+            );
+
             accessTokenRef.current = null;
             await supabase.auth.signOut();
 
@@ -243,22 +329,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    console.log("[AUTH] auth state subscription registered");
+
     return () => {
+      console.log("[AUTH] AuthProvider cleanup", {
+        hadSupabaseClient: Boolean(supabaseRef.current),
+      });
+
       active = false;
       subscription.unsubscribe();
+
       supabaseRef.current = null;
       accessTokenRef.current = null;
+
       parkSmartApi.setAuthProvider(null);
     };
   }, [becomeGuest, demoMode, loadBackendProfile]);
 
   const signIn = useCallback(
     async (email: string, password: string): Promise<SignInResult> => {
+      console.log("[AUTH] signIn called", {
+        email: email.trim(),
+        demoMode,
+        clientReady: Boolean(supabaseRef.current),
+      });
+
       if (demoMode) {
         accessTokenRef.current = null;
         setProfile(DEMO_PROFILE);
         setInitializationError(null);
         setStatus("authenticated");
+
+        console.log("[AUTH] demo signIn completed");
 
         return {
           profile: DEMO_PROFILE,
@@ -268,7 +370,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const supabase = supabaseRef.current;
 
+      console.log("[AUTH] signIn Supabase client state", {
+        ready: Boolean(supabase),
+      });
+
       if (!supabase) {
+        console.error(
+          "[AUTH] signIn aborted because Supabase client is null",
+        );
+
         return {
           profile: null,
           error: "Dịch vụ đăng nhập chưa sẵn sàng. Vui lòng thử lại.",
@@ -277,14 +387,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       signInInFlightRef.current = true;
 
+      console.log("[AUTH] signInWithPassword starting");
+
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password,
         });
 
+        if (error) {
+          console.error("[AUTH] signInWithPassword FAILED:", error);
+        }
+
         if (error || !data.session) {
           accessTokenRef.current = null;
+
+          console.warn("[AUTH] login rejected", {
+            hasSession: Boolean(data.session),
+          });
 
           return {
             profile: null,
@@ -292,24 +412,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           };
         }
 
-        /*
-         * signInWithPassword already returns the newly issued session.
-         * Use that JWT immediately for the first ParkSmart /auth/me request.
-         */
+        console.log("[AUTH] Supabase login PASS", {
+          userId: data.user?.id,
+          email: data.user?.email,
+          hasAccessToken: Boolean(data.session.access_token),
+        });
+
         accessTokenRef.current = data.session.access_token;
+
+        console.log("[AUTH] JWT stored; loading ParkSmart profile");
 
         try {
           const currentProfile = await loadBackendProfile();
+
+          console.log("[AUTH] full login flow PASS", {
+            role: currentProfile.role,
+          });
 
           return {
             profile: currentProfile,
             error: null,
           };
         } catch (profileError) {
+          console.error(
+            "[AUTH] login succeeded but ParkSmart profile FAILED:",
+            profileError,
+          );
+
           accessTokenRef.current = null;
+
           await supabase.auth.signOut();
 
           const message = safeProfileError(profileError);
+
           becomeGuest(message);
 
           return {
@@ -317,20 +452,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             error: message,
           };
         }
+      } catch (error) {
+        console.error("[AUTH] unexpected signIn exception:", error);
+
+        return {
+          profile: null,
+          error: "Không thể đăng nhập. Vui lòng thử lại.",
+        };
       } finally {
         signInInFlightRef.current = false;
+
+        console.log("[AUTH] signIn finished", {
+          clientReady: Boolean(supabaseRef.current),
+        });
       }
     },
     [becomeGuest, demoMode, loadBackendProfile],
   );
 
   const signOut = useCallback(async () => {
+    console.log("[AUTH] signOut called", {
+      clientReady: Boolean(supabaseRef.current),
+    });
+
     const supabase = supabaseRef.current;
 
     accessTokenRef.current = null;
 
     if (supabase) {
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut();
+
+      if (error) {
+        console.error("[AUTH] Supabase signOut FAILED:", error);
+      } else {
+        console.log("[AUTH] Supabase signOut PASS");
+      }
     }
 
     becomeGuest();
