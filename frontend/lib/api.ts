@@ -207,15 +207,11 @@ export class ParkSmartApiClient {
   ) {
     const headers = new Headers(options.headers);
 
-<<<<<<< HEAD
-    if (options.body !== undefined && !headers.has("Content-Type")) {
-=======
     if (
       options.body !== undefined &&
       !(typeof FormData !== "undefined" && options.body instanceof FormData) &&
       !headers.has("Content-Type")
     ) {
->>>>>>> feat/phase11-role-based-auth
       headers.set("Content-Type", "application/json");
     }
 
@@ -306,8 +302,6 @@ export class ParkSmartApiClient {
     );
   }
 
-<<<<<<< HEAD
-=======
   onboardCurrentUser(signal?: AbortSignal) {
     return this.request<AuthenticatedProfile>(
       "/auth/onboarding",
@@ -326,7 +320,6 @@ export class ParkSmartApiClient {
     );
   }
 
->>>>>>> feat/phase11-role-based-auth
   getMap(signal?: AbortSignal) {
     return this.request<ParkingMap>(
       "/parking/map",
@@ -639,8 +632,6 @@ export class ParkSmartApiClient {
     payload: CreateWrongParkingReportRequest,
     signal?: AbortSignal,
   ) {
-<<<<<<< HEAD
-=======
     if (payload.evidence) {
       const form = new FormData();
       form.set("user_id", payload.user_id);
@@ -662,7 +653,6 @@ export class ParkSmartApiClient {
         },
       );
     }
->>>>>>> feat/phase11-role-based-auth
     return this.request<WrongParkingReport>(
       "/reports/wrong-parking",
       {
@@ -732,8 +722,6 @@ export class ParkSmartApiClient {
         body: JSON.stringify(payload),
         signal,
       },
-<<<<<<< HEAD
-=======
     );
   }
 
@@ -771,7 +759,6 @@ export class ParkSmartApiClient {
     return this.request<ReportEvidenceUrlResponse>(
       `/admin/reports/${encodeURIComponent(reportId)}/evidence-url`,
       { signal },
->>>>>>> feat/phase11-role-based-auth
     );
   }
 
@@ -801,8 +788,4 @@ export const parkSmartApi =
     baseUrl:
       process.env.NEXT_PUBLIC_API_BASE_URL ??
       DEFAULT_API_BASE_URL,
-<<<<<<< HEAD
   });
-=======
-  });
->>>>>>> feat/phase11-role-based-auth

@@ -1,7 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
 
 import type { ParkingWorkflow } from "@/hooks/use-parking-workflow";
 import { canonicalMap, currentLocation, parkingStatus } from "@/test/fixtures";
@@ -12,12 +11,6 @@ const mocks = vi.hoisted(() => ({
   useParkSmartData: vi.fn(),
   useParkingWorkflow: vi.fn(),
   reportWrongParking: vi.fn(),
-<<<<<<< HEAD
-}));
-
-vi.mock("@/components/auth/ProtectedRoute", () => ({
-  ProtectedRoute: ({ children }: { children: ReactNode }) => <>{children}</>,
-=======
   routerReplace: vi.fn(),
   routerPush: vi.fn(),
 }));
@@ -27,7 +20,6 @@ vi.mock("next/navigation", () => ({
     replace: mocks.routerReplace,
     push: mocks.routerPush,
   }),
->>>>>>> feat/phase11-role-based-auth
 }));
 vi.mock("@/components/auth/AuthProvider", () => ({
   useAuth: () => ({
@@ -40,10 +32,7 @@ vi.mock("@/components/auth/AuthProvider", () => ({
       parking_user_id: "USER-A",
       default_vehicle_id: "VEHICLE-A",
     },
-<<<<<<< HEAD
-=======
     refreshProfile: vi.fn(async () => null),
->>>>>>> feat/phase11-role-based-auth
   }),
   parkingIdentityFromProfile: () => ({ userId: "USER-A", vehicleId: "VEHICLE-A" }),
 }));
@@ -200,11 +189,7 @@ describe("authenticated user chat page", () => {
     render(<Home />);
 
     expect(
-<<<<<<< HEAD
-      screen.getByRole("article", { name: "Xe đang đỗ trong bãi" }),
-=======
       screen.getByRole("article", { name: "Xe dang do trong bai" }),
->>>>>>> feat/phase11-role-based-auth
     ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Báo F1-D02 đang trống" }));
     expect(workflow.updateAdjacentSlotStatus).toHaveBeenCalledWith(

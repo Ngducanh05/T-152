@@ -1,11 +1,6 @@
 """User-facing API for reporting vehicles parked in the wrong position."""
 
 import logging
-<<<<<<< HEAD
-
-from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-=======
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -17,15 +12,11 @@ from pydantic import (
     field_validator,
     model_validator,
 )
->>>>>>> feat/phase11-role-based-auth
 
 from src.api.dependencies import (
     ParkingUserDependency,
     SessionDependency,
-<<<<<<< HEAD
-=======
     SettingsDependency,
->>>>>>> feat/phase11-role-based-auth
     resolve_parking_user_id,
 )
 from src.core.parking_report import ParkingReportError, ParkingReportService
@@ -89,14 +80,6 @@ class WrongParkingReportRequest(BaseModel):
 )
 async def create_wrong_parking_report(
     http_request: Request,
-<<<<<<< HEAD
-    current_user: ParkingUserDependency,
-) -> SuccessResponse[WrongParkingReport]:
-    user_id = resolve_parking_user_id(request.user_id, current_user)
-    try:
-        async with session.begin():
-            report = await ParkingReportService(session).create_wrong_parking_report(
-=======
     session: SessionDependency,
     current_user: ParkingUserDependency,
     settings: SettingsDependency,
@@ -161,7 +144,6 @@ async def create_wrong_parking_report(
         async with session.begin():
             report = await ParkingReportService(session).create_wrong_parking_report(
                 report_id=report_id,
->>>>>>> feat/phase11-role-based-auth
                 reporter_user_id=user_id,
                 slot_id=request.slot_id,
                 reason_code=request.reason_code,

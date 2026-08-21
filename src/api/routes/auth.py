@@ -12,11 +12,6 @@ from src.core.database import get_db_session
 from src.core.db_models import AppRoleEnum, ParkingUser, Profile, Vehicle
 from src.models.auth import CurrentUser
 from src.models.common import SuccessResponse
-<<<<<<< HEAD
-from src.services.auth_service import get_current_user
-
-router = APIRouter(prefix="/auth", tags=["Auth"])
-=======
 from src.services.auth_service import (
     _auth_error,
     get_current_user,
@@ -62,7 +57,6 @@ async def _new_vehicle_id(session: AsyncSession) -> str:
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail={"code": "ID_GENERATION_FAILED", "message": "Could not allocate vehicle id."},
     )
->>>>>>> feat/phase11-role-based-auth
 
 
 @router.get("/me", response_model=SuccessResponse[CurrentUser])
@@ -72,8 +66,6 @@ async def me(
     return SuccessResponse(data=current_user, message="Current user loaded.")
 
 
-<<<<<<< HEAD
-=======
 @router.post("/onboarding", response_model=SuccessResponse[CurrentUser])
 async def onboard_authenticated_user(
     credentials: CredentialsDependency,
@@ -177,5 +169,4 @@ async def add_first_vehicle(
     )
 
 
->>>>>>> feat/phase11-role-based-auth
 __all__ = ["router"]

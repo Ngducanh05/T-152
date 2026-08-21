@@ -83,8 +83,6 @@
   font-weight: 700;
 }
 
-<<<<<<< HEAD
-=======
 .authTabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -112,7 +110,6 @@
   box-shadow: 0 1px 6px rgba(20, 31, 51, 0.1);
 }
 
->>>>>>> feat/phase11-role-based-auth
 .field input {
   width: 100%;
   min-height: 48px;

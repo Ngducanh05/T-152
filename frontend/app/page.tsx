@@ -10,10 +10,6 @@ import {
   useAuth,
 } from "@/components/auth/AuthProvider";
 import { LogoutButton } from "@/components/auth/LogoutButton";
-<<<<<<< HEAD
-import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
-=======
->>>>>>> feat/phase11-role-based-auth
 import authStyles from "@/components/auth/auth.module.css";
 import { LocationPicker } from "@/components/location/LocationPicker";
 import { AdjacentSlotObservation } from "@/components/parking/AdjacentSlotObservation";
@@ -54,26 +50,6 @@ function takePendingIntent(): PendingIntent | null {
 }
 
 export default function Home() {
-<<<<<<< HEAD
-  return (
-    <ProtectedRoute requiredRole="user">
-      <AuthenticatedHome />
-    </ProtectedRoute>
-  );
-}
-
-function AuthenticatedHome() {
-  const { profile } = useAuth();
-  const identity = profile ? parkingIdentityFromProfile(profile) : null;
-
-  if (!identity) {
-    return null;
-  }
-
-  return <ParkSmartUserApp identity={identity} />;
-}
-
-=======
   const router = useRouter();
   const { status, profile } = useAuth();
 
@@ -166,16 +142,12 @@ function GuestPreview() {
   );
 }
 
->>>>>>> feat/phase11-role-based-auth
 function ParkSmartUserApp({
   identity,
 }: {
   identity: { userId: string; vehicleId: string | null };
 }) {
-<<<<<<< HEAD
-=======
   const { refreshProfile } = useAuth();
->>>>>>> feat/phase11-role-based-auth
   const data = useParkSmartData(parkSmartApi, identity.userId);
   const workflow = useParkingWorkflow(data, parkSmartApi, identity);
   const [manualLocationPicker, setManualLocationPicker] = useState(false);
@@ -277,18 +249,10 @@ function ParkSmartUserApp({
             type="button"
             className="chat-location-button"
             onClick={() => setManualLocationPicker(true)}
-<<<<<<< HEAD
-            aria-label={`Vị trí hiện tại: ${formatParkingLocation(workflow.currentLocationId)}. Thay đổi vị trí`}
-          >
-            <span aria-hidden="true">⌖</span>
-            <span>
-              <small>Vị trí hiện tại</small>
-=======
           >
             <span aria-hidden="true">⌖</span>
             <span>
               <small>Vi tri hien tai</small>
->>>>>>> feat/phase11-role-based-auth
               <b>{formatParkingLocation(workflow.currentLocationId)}</b>
             </span>
           </button>
@@ -322,80 +286,6 @@ function ParkSmartUserApp({
             </p>
           )}
 
-<<<<<<< HEAD
-              {data.activeReservation && (
-                <article className="conversation-state-card reservation-state-card" aria-label="Chỗ đỗ đã giữ">
-                  <span className="state-card-icon" aria-hidden="true">R</span>
-                  <div>
-                    <small>CHỖ ĐỖ ĐÃ GIỮ</small>
-                    <h2>{formatParkingLocation(data.activeReservation.slot_id)}</h2>
-                    <p>
-                      {reservationLocationMatches
-                        ? "Vị trí của bạn trùng với ô đã giữ."
-                        : "Khi đến cạnh đúng ô, hãy cập nhật vị trí để xác nhận đã đỗ."}
-                    </p>
-                  </div>
-                  {reservationLocationMatches ? (
-                    <button
-                      type="button"
-                      onClick={() => void workflow.confirmParking()}
-                      disabled={workflow.pending === "confirm-parking"}
-                    >
-                      {workflow.pending === "confirm-parking"
-                        ? "Đang xác nhận…"
-                        : "Xác nhận đã đỗ"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => void workflow.confirmParking()}
-                      disabled={workflow.pending === "confirm-parking"}
-                    >
-                      {workflow.pending === "confirm-parking"
-                        ? "Đang xác nhận đến nơi…"
-                        : "Tôi đã đến nơi"}
-                    </button>
-                  )}
-                </article>
-              )}
-
-              {data.activeSession && (
-                <>
-                  <article className="conversation-state-card session-state-card" aria-label="Xe đang đỗ trong bãi">
-                    <span className="state-card-icon" aria-hidden="true">P</span>
-                    <div>
-                      <small>XE CỦA BẠN</small>
-                      <h2>{formatParkingLocation(data.activeSession.slot_id)}</h2>
-                      <p>Phiên đỗ xe đang hoạt động.</p>
-                    </div>
-                    <div className="state-card-actions">
-                      <button
-                        type="button"
-                        onClick={() => void workflow.findVehicleAndRoute()}
-                        disabled={workflow.pending === "find-car"}
-                      >
-                        Chỉ đường tới xe
-                      </button>
-                      <button
-                        type="button"
-                        className="danger-text-button"
-                        onClick={() => void workflow.completeSession()}
-                        disabled={workflow.pending === "complete-session"}
-                      >
-                        Kết thúc phiên
-                      </button>
-                    </div>
-                  </article>
-                  <AdjacentSlotObservation
-                    parkedSlotId={data.activeSession.slot_id}
-                    slots={data.slots}
-                    pendingSlotId={workflow.pendingAdjacentSlotId}
-                    onObserve={workflow.updateAdjacentSlotStatus}
-                  />
-                </>
-              )}
-            </section>
-=======
           {data.activeSession && (
             <>
               <article className="conversation-state-card session-state-card" aria-label="Xe dang do trong bai">
@@ -434,7 +324,6 @@ function ParkSmartUserApp({
                 onObserve={workflow.updateAdjacentSlotStatus}
               />
             </>
->>>>>>> feat/phase11-role-based-auth
           )}
 
           {workflow.messages.map((message) => (

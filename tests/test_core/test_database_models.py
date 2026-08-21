@@ -60,14 +60,9 @@ def test_parking_migration_follows_profiles_revision():
     wrong_parking_report_revision = scripts.get_revision("20260815_0005")
     report_lifecycle_revision = scripts.get_revision("20260819_0006")
     role_auth_revision = scripts.get_revision("20260819_0007")
-<<<<<<< HEAD
-
-    assert scripts.get_current_head() == "20260819_0007"
-=======
     report_review_revision = scripts.get_revision("20260821_0008")
 
     assert scripts.get_current_head() == "20260821_0008"
->>>>>>> feat/phase11-role-based-auth
 
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
@@ -87,12 +82,9 @@ def test_parking_migration_follows_profiles_revision():
     assert role_auth_revision is not None
     assert role_auth_revision.down_revision == "20260819_0006"
 
-<<<<<<< HEAD
-=======
     assert report_review_revision is not None
     assert report_review_revision.down_revision == "20260819_0007"
 
->>>>>>> feat/phase11-role-based-auth
 
 def test_cold_start_sql_rebuilds_profile_enum_for_role_normalization():
     output = StringIO()
