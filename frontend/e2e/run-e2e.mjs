@@ -4,6 +4,7 @@ import path from "node:path";
 const environment = {
   ...process.env,
   NEXT_TELEMETRY_DISABLED: "1",
+  NEXT_PUBLIC_ENABLE_TEST_HARNESS: "true",
   PARKSMART_BACKEND_ORIGIN:
     process.env.E2E_BACKEND_URL ?? "http://127.0.0.1:8100",
 };

@@ -16,6 +16,7 @@ import type {
   ZoneId,
 } from "@/lib/types";
 
+import { IsometricMap } from "./IsometricMap";
 import { ParkingSlot } from "./ParkingSlot";
 import { ParkingSummary } from "./ParkingSummary";
 import { RouteOverlay } from "./RouteOverlay";
@@ -23,10 +24,12 @@ import { StatusLegend } from "./StatusLegend";
 
 const FLOOR_IDS: FloorId[] = ["F1", "F2", "F3"];
 
-const MAP_NODE_LABELS = {
+const MAP_NODE_LABELS: Record<string, string> = {
   ENTRANCE: "LỐI VÀO",
   EXIT: "LỐI RA",
-} as const;
+};
+
+export type MapViewMode = "flat" | "iso";
 
 export interface ParkingMapProps {
   map: ParkingMapData;
@@ -44,6 +47,7 @@ export interface ParkingMapProps {
   heading?: string;
   description?: string;
   showSummary?: boolean;
+  defaultViewMode?: MapViewMode;
 }
 
 function floorOfId(id: string): FloorId | null {
@@ -67,7 +71,10 @@ export function ParkingMap({
   heading = "Sơ đồ bãi xe",
   description = "Trạng thái các ô được cập nhật tự động",
   showSummary = true,
+  defaultViewMode = "flat",
 }: ParkingMapProps) {
+  const [viewMode, setViewMode] = useState<MapViewMode>(defaultViewMode);
+
   // Determine initial floor from context (current location or selected slot)
   const initialFloor = useMemo<FloorId>(() => {
     if (currentLocationNodeId) {
@@ -84,19 +91,62 @@ export function ParkingMap({
   const [activeFloor, setActiveFloor] = useState<FloorId>(initialFloor);
 
   // Filter data to the active floor
-  const floorNodes = useMemo(
-    () => map.nodes.filter((node) => node.floor_id === activeFloor),
-    [map.nodes, activeFloor],
-  );
-  const floorEdges = useMemo(
-    () =>
-      map.edges.filter((edge) => {
-        const fromFloor = floorOfId(edge.from_node);
-        const toFloor = floorOfId(edge.to_node);
-        return fromFloor === activeFloor && toFloor === activeFloor;
-      }),
-    [map.edges, activeFloor],
-  );
+  const floorNodes = useMemo(() => {
+    const base = map.nodes.filter((node) => node.floor_id === activeFloor);
+    if (activeFloor === "F2") {
+      // F2 có 2 dốc: lên F1 [85, 75] và xuống F3 [15, 25]
+      return [
+        ...base,
+        { id: "F2-RAMP-DOWN", floor_id: "F2" as FloorId, type: "RAMP" as const, x: 15, y: 25 },
+      ];
+    }
+    if (activeFloor === "F3") {
+      // F3 chỉ có dốc lên F2 ở [15, 25], không có dốc ở [85, 75]
+      return base.map((node) =>
+        node.type === "RAMP" ? { ...node, x: 15, y: 25 } : node,
+      );
+    }
+    return base;
+  }, [map.nodes, activeFloor]);
+
+  const floorEdges = useMemo(() => {
+    const base = map.edges.filter((edge) => {
+      const fromFloor = floorOfId(edge.from_node);
+      const toFloor = floorOfId(edge.to_node);
+      return fromFloor === activeFloor && toFloor === activeFloor;
+    });
+
+    if (activeFloor === "F2") {
+      // Thêm edge từ CP1 sang RAMP-DOWN cho F2
+      return [
+        ...base,
+        {
+          from_node: "F2-CP1",
+          to_node: "F2-RAMP-DOWN",
+          distance_m: 25,
+          bidirectional: true,
+          enabled: true,
+          allowed_mode: "VEHICLE" as const,
+        },
+      ];
+    }
+
+    if (activeFloor === "F3") {
+      // Thay edge nối tới [85, 75] bằng edge nối từ CP1 tới F3-RAMP ở [15, 25]
+      return base.map((edge) => {
+        const isRampEdge =
+          edge.from_node.includes("RAMP") || edge.to_node.includes("RAMP");
+        if (!isRampEdge) return edge;
+        return {
+          ...edge,
+          from_node: "F3-CP1",
+          to_node: "F3-RAMP",
+        };
+      });
+    }
+
+    return base;
+  }, [map.edges, activeFloor]);
   const floorSlots = useMemo(
     () => slots.filter((slot) => slot.floor_id === activeFloor),
     [slots, activeFloor],
@@ -169,16 +219,71 @@ export function ParkingMap({
   // Check if any floor has ramp/elevator (for showing inter-floor indicators)
   const hasRamp = floorNodes.some((n) => n.type === "RAMP");
   const hasElevator = floorNodes.some((n) => n.type === "ELEVATOR");
-  const rampLabel = activeFloor === "F2"
-    ? "↕ LỐI LÊN/XUỐNG TẦNG"
-    : activeFloor === "F3"
-      ? "↑ LỐI LÊN TẦNG"
-      : "↓ LỐI XUỐNG TẦNG";
-  const rampAriaLabel = activeFloor === "F2"
-    ? "Lối lên và xuống tầng"
-    : activeFloor === "F3"
-      ? "Lối lên tầng"
-      : "Lối xuống tầng";
+
+  const floorRoute = useMemo<RouteResult | null>(() => {
+    if (!route || !route.path.length) return null;
+
+    // 1. Tìm các dải index liên tục trong route.path có node thuộc tầng đang xem
+    const ranges: { start: number; end: number; len: number }[] = [];
+    let currentStart = -1;
+
+    for (let i = 0; i < route.path.length; i += 1) {
+      if (nodeById.has(route.path[i])) {
+        if (currentStart === -1) currentStart = i;
+      } else if (currentStart !== -1) {
+        ranges.push({
+          start: currentStart,
+          end: i - 1,
+          len: i - currentStart,
+        });
+        currentStart = -1;
+      }
+    }
+    if (currentStart !== -1) {
+      ranges.push({
+        start: currentStart,
+        end: route.path.length - 1,
+        len: route.path.length - currentStart,
+      });
+    }
+
+    if (ranges.length === 0) return null;
+
+    // 2. Chọn dải liên tục dài nhất
+    ranges.sort((a, b) => b.len - a.len);
+    const bestRange = ranges[0];
+
+    // 3. Dưới 2 node thì trả null
+    if (bestRange.len < 2) return null;
+
+    // 4. Cắt path và polyline tương ứng
+    const slicedPath = route.path.slice(bestRange.start, bestRange.end + 1);
+    const slicedPolyline = route.polyline.slice(
+      bestRange.start,
+      bestRange.end + 1,
+    );
+
+    // Tính tổng distance_m từ floorEdges cho các cặp node liên tiếp trong slicedPath
+    let distance_m = 0;
+    for (let i = 0; i < slicedPath.length - 1; i += 1) {
+      const u = slicedPath[i];
+      const v = slicedPath[i + 1];
+      const edge = floorEdges.find(
+        (e) =>
+          (e.from_node === u && e.to_node === v) ||
+          (e.from_node === v && e.to_node === u),
+      );
+      if (edge) {
+        distance_m += edge.distance_m;
+      }
+    }
+
+    return {
+      path: slicedPath,
+      polyline: slicedPolyline,
+      distance_m,
+    };
+  }, [route, nodeById, floorEdges]);
 
   return (
     <section className="card map-card" aria-labelledby="parking-map-heading">
@@ -212,150 +317,222 @@ export function ParkingMap({
         })}
       </nav>
 
-      {showSummary && <ParkingSummary status={status} slots={floorSlots} />}
-      <div className="parking-map api-parking-map" data-testid="parking-map">
-        <div className="map-viewport">
-          <svg
-            className="map-network"
-            viewBox="0 0 100 100"
-            role="img"
-            aria-label={`Sơ đồ ${formatFloorName(activeFloor)}`}
-            preserveAspectRatio="none"
-          >
-          <g className="map-zone-surfaces" aria-hidden="true">
-            <rect x="22" y="9" width="26" height="39" rx="2" />
-            <rect x="52" y="9" width="26" height="39" rx="2" />
-            <rect x="22" y="52" width="26" height="36" rx="2" />
-            <rect x="52" y="52" width="26" height="36" rx="2" />
-          </g>
-          <g className="map-road-surfaces" aria-hidden="true">
-            {activeFloor === "F1" && (
-              <path className="main-road" d="M 0 50 L 100 50" />
-            )}
-            {activeFloor !== "F1" && (
-              <path className="main-road" d="M 15 50 L 85 50" />
-            )}
-            <path className="zone-ring" d="M 20 50 L 20 7 L 80 7 L 80 50" />
-            <path className="shared-road" d="M 50 7 L 50 50" />
-            <path className="zone-ring" d="M 20 50 L 20 90 L 80 90 L 80 50" />
-            <path className="shared-road elevator-road" d="M 50 50 L 50 90" />
-          </g>
-          <g className="map-shared-road-markings" aria-hidden="true">
-            {activeFloor === "F1" && (
-              <path d="M 0 50 L 100 50" />
-            )}
-            {activeFloor !== "F1" && (
-              <path d="M 15 50 L 85 50" />
-            )}
-            <path d="M 20 50 L 20 7 L 80 7 L 80 50" />
-            <path d="M 50 7 L 50 50" />
-            <path d="M 20 50 L 20 90 L 80 90 L 80 50" />
-            <path d="M 50 50 L 50 90" />
-          </g>
-          <g className="map-edges" aria-label="Các lối đi đang hoạt động">
-            {enabledEdges.map((edge) => (
-              <path
-                key={`${edge.from_node}:${edge.to_node}`}
-                d={edge.displayD}
-                className={`${edge.isSlotConnector ? "slot-connector" : "road-centreline"} ${edge.isPedestrian ? "pedestrian-path" : ""} ${edge.isRamp ? "ramp-path" : ""}`}
-                data-edge={`${edge.from_node}:${edge.to_node}`}
-              />
-            ))}
-          </g>
-          <g className="map-core-nodes" aria-label="Các điểm trên sơ đồ bãi xe">
-            {floorNodes.filter((node) => node.type !== "SLOT").map((node) => {
-              const [x, y] = getDisplayPoint(node);
-              const radius = node.type === "AISLE" ? 0.55
-                : node.type === "CHECKPOINT" ? 0.85
-                : node.type === "RAMP" ? 1.35
-                : 1.35;
-              const isGate = node.type === "ENTRANCE" || node.type === "EXIT";
-              const labelX = node.type === "ENTRANCE"
-                ? 4.5
-                : node.type === "EXIT"
-                  ? 95.5
-                  : x;
-              const label = isGate
-                ? MAP_NODE_LABELS[node.type]
-                : node.id.replace(/^F[1-3]-/, "");
-              const showLabel = node.type !== "AISLE"
-                && node.type !== "RAMP"
-                && node.type !== "ELEVATOR";
-              return (
-                <g key={node.id} data-node-id={node.id}>
-                  <circle cx={x} cy={y} r={radius} className={node.type === "RAMP" ? "ramp-node" : ""} />
-                  {showLabel && (
-                    <text
-                      x={labelX}
-                      y={y - 2.3}
-                      textAnchor="middle"
-                      className={isGate ? "map-gate-label" : undefined}
-                    >
-                      {label}
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-          </g>
-          <g className="map-zone-labels" aria-hidden="true">
-            {zoneLabels.map((zone) => (
-              <text key={zone.zoneId} x={zone.x} y={zone.y} textAnchor="middle">
-                KHU {zone.zoneId}
-              </text>
-            ))}
-          </g>
-          {/* Inter-floor connection indicators */}
-          {hasRamp && (
-            <g className="map-interfloor-indicator map-ramp-indicator" aria-label={rampAriaLabel}>
-              <rect x="76" y="67" width="22" height="5.5" rx="2.75" />
-              <text x="87" y="70.65" textAnchor="middle" className="interfloor-label">{rampLabel}</text>
-            </g>
-          )}
-          {hasElevator && (
-            <g className="map-interfloor-indicator map-elevator-indicator" aria-label="Thang máy liên tầng">
-              <rect x="42.5" y="91" width="15" height="5.5" rx="2.75" />
-              <text x="50" y="94.65" textAnchor="middle" className="interfloor-label">↕ THANG MÁY</text>
-            </g>
-          )}
-          <RouteOverlay route={route} nodeById={nodeById} />
-          {currentNode && currentNode.type !== "SLOT" && (
-            <g
-              className="current-location-node"
-              transform={`translate(${getDisplayPoint(currentNode).join(" ")})`}
-              data-testid="current-location"
-              aria-label={`Vị trí hiện tại ${currentNode.id}`}
+      {/* View mode selector */}
+      <nav className="map-view-toggle" aria-label="Kiểu hiển thị sơ đồ">
+        <button
+          type="button"
+          onClick={() => setViewMode("flat")}
+          aria-pressed={viewMode === "flat"}
+        >
+          Sơ đồ phẳng
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode("iso")}
+          aria-pressed={viewMode === "iso"}
+        >
+          Phối cảnh hầm
+        </button>
+      </nav>
+
+      {showSummary && status && <ParkingSummary status={status} slots={floorSlots} />}
+
+      {viewMode === "flat" ? (
+        <div className="parking-map api-parking-map" data-testid="parking-map">
+          <div className="map-viewport">
+            <svg
+              className="map-network"
+              viewBox="0 0 100 100"
+              role="img"
+              aria-label={`Sơ đồ ${formatFloorName(activeFloor)}`}
+              preserveAspectRatio="none"
             >
-              <circle r="3.2" />
-              <text textAnchor="middle" y="1.1">⌖</text>
+            <g className="map-zone-surfaces" aria-hidden="true">
+              <rect x="22" y="9" width="26" height="39" rx="2" />
+              <rect x="52" y="9" width="26" height="39" rx="2" />
+              <rect x="22" y="52" width="26" height="36" rx="2" />
+              <rect x="52" y="52" width="26" height="36" rx="2" />
             </g>
-          )}
-          </svg>
-          <div className="map-slot-layer" aria-label="Các ô đỗ xe">
-            {floorSlots.map((slot) => {
-              // A slot's own MapNode is its display coordinate. node_id is only
-              // the connected aisle and must never be used for positioning.
-              const displayNode = nodeById.get(slot.id);
-              if (!displayNode) return null;
-              return (
-                <ParkingSlot
-                  key={slot.id}
-                  slot={slot}
-                  displayNode={displayNode}
-                  recommended={recommended.has(slot.id)}
-                  selected={selectedSlotId === slot.id}
-                  activeReservation={activeReservationSlotId === slot.id}
-                  parkedVehicle={parkedVehicleSlotId === slot.id}
-                  currentLocation={currentLocationNodeId === slot.id}
-                  openReportCount={openReportCountBySlot[slot.id] ?? 0}
-                  onSelect={onSelectSlot}
-                  onOpenReportedSlot={onOpenReportedSlot}
+            <g className="map-road-surfaces" aria-hidden="true">
+              {activeFloor === "F1" && (
+                <path className="main-road" d="M 0 50 L 100 50" />
+              )}
+              {activeFloor !== "F1" && (
+                <path className="main-road" d="M 15 50 L 85 50" />
+              )}
+              <path className="zone-ring" d="M 20 50 L 20 7 L 80 7 L 80 50" />
+              <path className="shared-road" d="M 50 7 L 50 50" />
+              <path className="zone-ring" d="M 20 50 L 20 90 L 80 90 L 80 50" />
+              <path className="shared-road elevator-road" d="M 50 50 L 50 90" />
+            </g>
+            <g className="map-shared-road-markings" aria-hidden="true">
+              {activeFloor === "F1" && (
+                <path d="M 0 50 L 100 50" />
+              )}
+              {activeFloor !== "F1" && (
+                <path d="M 15 50 L 85 50" />
+              )}
+              <path d="M 20 50 L 20 7 L 80 7 L 80 50" />
+              <path d="M 50 7 L 50 50" />
+              <path d="M 20 50 L 20 90 L 80 90 L 80 50" />
+              <path d="M 50 50 L 50 90" />
+            </g>
+            <g className="map-edges" aria-label="Các lối đi đang hoạt động">
+              {enabledEdges.map((edge) => (
+                <path
+                  key={`${edge.from_node}:${edge.to_node}`}
+                  d={edge.displayD}
+                  className={`${edge.isSlotConnector ? "slot-connector" : "road-centreline"} ${edge.isPedestrian ? "pedestrian-path" : ""} ${edge.isRamp ? "ramp-path" : ""}`}
+                  data-edge={`${edge.from_node}:${edge.to_node}`}
                 />
-              );
-            })}
+              ))}
+            </g>
+            <g className="map-core-nodes" aria-label="Các điểm trên sơ đồ bãi xe">
+              {floorNodes.filter((node) => node.type !== "SLOT" && node.type !== "CHECKPOINT").map((node) => {
+                const [x, y] = getDisplayPoint(node);
+                const radius = node.type === "AISLE" ? 0.55
+                  : node.type === "CHECKPOINT" ? 0.85
+                  : node.type === "RAMP" ? 1.35
+                  : 1.35;
+                const isGate = node.type === "ENTRANCE" || node.type === "EXIT";
+                const labelX = node.type === "ENTRANCE"
+                  ? 4.5
+                  : node.type === "EXIT"
+                    ? 95.5
+                    : x;
+                const label = isGate
+                  ? MAP_NODE_LABELS[node.type]
+                  : node.id.replace(/^F[1-3]-/, "");
+                const showLabel = node.type !== "AISLE"
+                  && node.type !== "RAMP"
+                  && node.type !== "ELEVATOR";
+                return (
+                  <g key={node.id} data-node-id={node.id}>
+                    <circle cx={x} cy={y} r={radius} className={node.type === "RAMP" ? "ramp-node" : ""} />
+                    {showLabel && (
+                      <text
+                        x={labelX}
+                        y={y - 2.3}
+                        textAnchor="middle"
+                        className={isGate ? "map-gate-label" : undefined}
+                      >
+                        {label}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
+            <g className="map-zone-labels" aria-hidden="true">
+              {zoneLabels.map((zone) => (
+                <text key={zone.zoneId} x={zone.x} y={zone.y} textAnchor="middle">
+                  KHU {zone.zoneId}
+                </text>
+              ))}
+            </g>
+            {/* Inter-floor connection indicators */}
+            {hasRamp && (
+              <>
+                {activeFloor === "F1" && (
+                  <g className="map-interfloor-indicator map-ramp-indicator" aria-label="Lối xuống F2">
+                    <rect x="78" y="67" width="18" height="5.5" rx="2.75" />
+                    <text x="87" y="70.65" textAnchor="middle" className="interfloor-label">
+                      ↓ Xuống F2
+                    </text>
+                  </g>
+                )}
+                {activeFloor === "F2" && (
+                  <g className="map-interfloor-indicator map-ramp-indicator" aria-label="Lối lên và xuống tầng">
+                    {/* Dốc lên F1 tại [85, 75] */}
+                    <g className="map-ramp-sub-indicator" aria-label="Lối lên F1">
+                      <rect x="79" y="67" width="16" height="5.5" rx="2.75" />
+                      <text x="87" y="70.65" textAnchor="middle" className="interfloor-label">
+                        ↑ Lên F1
+                      </text>
+                    </g>
+                    {/* Dốc xuống F3 tại [14, 32] */}
+                    <g className="map-ramp-sub-indicator" aria-label="Lối xuống F3">
+                      <rect x="5" y="29.25" width="18" height="5.5" rx="2.75" />
+                      <text x="14" y="32.9" textAnchor="middle" className="interfloor-label">
+                        ↓ Xuống F3
+                      </text>
+                    </g>
+                  </g>
+                )}
+                {activeFloor === "F3" && (
+                  <g className="map-interfloor-indicator map-ramp-indicator" aria-label="Lối lên F2">
+                    {/* Dốc lên F2 tại [14, 32] */}
+                    <rect x="6" y="29.25" width="16" height="5.5" rx="2.75" />
+                    <text x="14" y="32.9" textAnchor="middle" className="interfloor-label">
+                      ↑ Lên F2
+                    </text>
+                  </g>
+                )}
+              </>
+            )}
+            {hasElevator && (
+              <g className="map-interfloor-indicator map-elevator-indicator" aria-label="Thang máy liên tầng">
+                <rect x="42.5" y="91" width="15" height="5.5" rx="2.75" />
+                <text x="50" y="94.65" textAnchor="middle" className="interfloor-label">↕ THANG MÁY</text>
+              </g>
+            )}
+            {floorRoute && <RouteOverlay route={floorRoute} nodeById={nodeById} />}
+            {currentNode && currentNode.type !== "SLOT" && (
+              <g
+                className="current-location-node"
+                transform={`translate(${getDisplayPoint(currentNode).join(" ")})`}
+                data-testid="current-location"
+                aria-label={`Vị trí hiện tại ${currentNode.id}`}
+              >
+                <circle r="3.2" />
+                <text textAnchor="middle" y="1.1">⌖</text>
+              </g>
+            )}
+            </svg>
+            <div className="map-slot-layer" aria-label="Các ô đỗ xe">
+              {floorSlots.map((slot) => {
+                // A slot's own MapNode is its display coordinate. node_id is only
+                // the connected aisle and must never be used for positioning.
+                const displayNode = nodeById.get(slot.id);
+                if (!displayNode) return null;
+                return (
+                  <ParkingSlot
+                    key={slot.id}
+                    slot={slot}
+                    displayNode={displayNode}
+                    recommended={recommended.has(slot.id)}
+                    selected={selectedSlotId === slot.id}
+                    activeReservation={activeReservationSlotId === slot.id}
+                    parkedVehicle={parkedVehicleSlotId === slot.id}
+                    currentLocation={currentLocationNodeId === slot.id}
+                    openReportCount={openReportCountBySlot[slot.id] ?? 0}
+                    onSelect={onSelectSlot}
+                    onOpenReportedSlot={onOpenReportedSlot}
+                  />
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="parking-map api-parking-map">
+          <IsometricMap
+            floorId={activeFloor}
+            nodes={floorNodes}
+            edges={floorEdges}
+            slots={floorSlots}
+            route={floorRoute}
+            recommendedSlotIds={recommendedSlotIds}
+            selectedSlotId={selectedSlotId}
+            activeReservationSlotId={activeReservationSlotId}
+            parkedVehicleSlotId={parkedVehicleSlotId}
+            currentLocationNodeId={currentLocationNodeId}
+            openReportCountBySlot={openReportCountBySlot}
+            onSelectSlot={onSelectSlot}
+            onOpenReportedSlot={onOpenReportedSlot}
+          />
+        </div>
+      )}
       <StatusLegend />
     </section>
   );

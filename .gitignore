@@ -58,3 +58,8 @@ out/
 # AI logs — tracked structure, ignored content
 .ai-log/*.jsonl
 .ai-log/archive/
+
+# Local AI planning docs — not part of the deliverable
+huongdanlambai.md
+pr-description.md
+review-diff.txt
