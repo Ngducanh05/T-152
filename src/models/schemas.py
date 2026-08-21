@@ -68,6 +68,12 @@ class WrongParkingReportStatus(StrEnum):
     RESOLVED = "RESOLVED"
 
 
+class WrongParkingReviewStatus(StrEnum):
+    PENDING = "PENDING"
+    CONFIRMED = "CONFIRMED"
+    REJECTED = "REJECTED"
+
+
 class WrongParkingReason(StrEnum):
     WRONG_SLOT = "WRONG_SLOT"
     CROSSED_LINE = "CROSSED_LINE"
@@ -115,6 +121,8 @@ class ErrorCode(StrEnum):
     REPORT_NOT_FOUND = "REPORT_NOT_FOUND"
     REPORT_VERSION_CONFLICT = "REPORT_VERSION_CONFLICT"
     INVALID_REPORT_TRANSITION = "INVALID_REPORT_TRANSITION"
+    REPORT_EVIDENCE_REQUIRED = "REPORT_EVIDENCE_REQUIRED"
+    REPORT_EVIDENCE_INVALID = "REPORT_EVIDENCE_INVALID"
     AGENT_TOOL_UNAVAILABLE = "AGENT_TOOL_UNAVAILABLE"
     SPEECH_AUDIO_INVALID = "SPEECH_AUDIO_INVALID"
     SPEECH_AUDIO_TOO_LARGE = "SPEECH_AUDIO_TOO_LARGE"
@@ -247,10 +255,17 @@ class WrongParkingReport(ContractModel):
     slot_id: FloorScopedId
     reason_code: WrongParkingReason
     status: WrongParkingReportStatus
+    review_status: WrongParkingReviewStatus = WrongParkingReviewStatus.PENDING
     observed_plate_number: str | None = None
     description: str | None = None
+    evidence_storage_path: str | None = None
+    evidence_content_type: str | None = None
+    evidence_size_bytes: int | None = Field(default=None, ge=0)
     created_at: AwareDatetime
     updated_at: AwareDatetime
+    reviewed_at: AwareDatetime | None = None
+    reviewed_by: EntityId | None = None
+    review_note: str | None = None
     resolved_at: AwareDatetime | None = None
     resolved_by: EntityId | None = None
     resolution_note: str | None = None

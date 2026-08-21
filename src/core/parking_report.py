@@ -12,6 +12,7 @@ from src.models.schemas import (
     ErrorCode,
     WrongParkingReason,
     WrongParkingReportStatus,
+    WrongParkingReviewStatus,
 )
 
 
@@ -85,6 +86,10 @@ class ParkingReportService:
         reason_code: WrongParkingReason,
         description: str | None,
         observed_plate_number: str | None,
+        evidence_storage_path: str | None = None,
+        evidence_content_type: str | None = None,
+        evidence_size_bytes: int | None = None,
+        report_id: str | None = None,
     ) -> WrongParkingReport:
         normalized_description = self._normalize_description(reason_code, description)
         normalized_plate = self._normalize_plate(observed_plate_number)
@@ -102,13 +107,17 @@ class ParkingReportService:
             )
 
         report = WrongParkingReport(
-            id=f"REPORT-{uuid4()}",
+            id=report_id or f"REPORT-{uuid4()}",
             reporter_user_id=reporter_user_id,
             slot_id=slot_id,
             reason_code=reason_code,
             status=WrongParkingReportStatus.OPEN,
+            review_status=WrongParkingReviewStatus.PENDING,
             observed_plate_number=normalized_plate,
             description=normalized_description,
+            evidence_storage_path=evidence_storage_path,
+            evidence_content_type=evidence_content_type,
+            evidence_size_bytes=evidence_size_bytes,
             version=0,
         )
         self.session.add(report)
@@ -186,6 +195,67 @@ class ParkingReportService:
         await self.session.flush()
         return report
 
+    async def confirm_wrong_parking_report(
+        self,
+        report_id: str,
+        *,
+        reviewed_by: str,
+        review_note: str | None,
+        expected_version: int,
+    ) -> WrongParkingReport:
+        report = await self.get_wrong_parking_report(report_id, for_update=True)
+        self._check_version(report, expected_version)
+        if report.status is not WrongParkingReportStatus.OPEN:
+            raise ParkingReportError(
+                ErrorCode.INVALID_REPORT_TRANSITION,
+                f"Report {report.id} is not open.",
+                report_id=report.id,
+                slot_id=report.slot_id,
+            )
+
+        current_time = self.clock()
+        report.review_status = WrongParkingReviewStatus.CONFIRMED
+        report.reviewed_at = current_time
+        report.reviewed_by = reviewed_by
+        report.review_note = review_note.strip() if review_note else None
+        report.updated_at = current_time
+        report.version += 1
+        await self.session.flush()
+        return report
+
+    async def reject_wrong_parking_report(
+        self,
+        report_id: str,
+        *,
+        reviewed_by: str,
+        review_note: str | None,
+        expected_version: int,
+    ) -> WrongParkingReport:
+        report = await self.get_wrong_parking_report(report_id, for_update=True)
+        self._check_version(report, expected_version)
+        if report.status is not WrongParkingReportStatus.OPEN:
+            raise ParkingReportError(
+                ErrorCode.INVALID_REPORT_TRANSITION,
+                f"Report {report.id} is not open.",
+                report_id=report.id,
+                slot_id=report.slot_id,
+            )
+
+        current_time = self.clock()
+        normalized_note = review_note.strip() if review_note else None
+        report.review_status = WrongParkingReviewStatus.REJECTED
+        report.reviewed_at = current_time
+        report.reviewed_by = reviewed_by
+        report.review_note = normalized_note
+        report.status = WrongParkingReportStatus.RESOLVED
+        report.resolved_at = current_time
+        report.resolved_by = reviewed_by
+        report.resolution_note = normalized_note or "Rejected during admin review."
+        report.updated_at = current_time
+        report.version += 1
+        await self.session.flush()
+        return report
+
     async def reopen_wrong_parking_report(
         self,
         report_id: str,
@@ -203,6 +273,11 @@ class ParkingReportService:
             )
 
         report.status = WrongParkingReportStatus.OPEN
+        if report.review_status is WrongParkingReviewStatus.REJECTED:
+            report.review_status = WrongParkingReviewStatus.PENDING
+            report.reviewed_at = None
+            report.reviewed_by = None
+            report.review_note = None
         report.resolved_at = None
         report.resolved_by = None
         report.resolution_note = None

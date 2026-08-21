@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import require_admin_or_demo
+from src.core.config import Settings, get_settings
 from src.core.database import get_db_session
 from src.core.db_models import ParkingEvent as ParkingEventRecord
 from src.core.db_models import ParkingSlot as ParkingSlotRecord
@@ -24,6 +25,7 @@ from src.models.schemas import (
     WrongParkingReportStatus,
     ZoneId,
 )
+from src.services.report_evidence import ReportEvidenceStorage
 
 router = APIRouter(
     prefix="/admin",
@@ -32,6 +34,7 @@ router = APIRouter(
 )
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 AdminUserDependency = Annotated[CurrentUser | None, Depends(require_admin_or_demo)]
+SettingsDependency = Annotated[Settings, Depends(get_settings)]
 logger = logging.getLogger(__name__)
 
 
@@ -56,10 +59,31 @@ class ReopenWrongParkingReportRequest(BaseModel):
     expected_version: int = Field(ge=0)
 
 
+class ReviewWrongParkingReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    review_note: str | None = Field(default=None, max_length=500)
+    expected_version: int = Field(ge=0)
+
+    @field_validator("review_note")
+    @classmethod
+    def normalize_review_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
 class DeletedWrongParkingReportResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     deleted_report_id: str
+
+
+class ReportEvidenceUrlResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signed_url: str
+    expires_in: int
 
 
 def _event_response(event: ParkingEventRecord) -> ParkingEvent:
@@ -256,6 +280,121 @@ async def resolve_wrong_parking_report(
 
 
 @router.post(
+    "/reports/{report_id}/confirm",
+    response_model=SuccessResponse[WrongParkingReport],
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+async def confirm_wrong_parking_report(
+    report_id: str,
+    payload: ReviewWrongParkingReportRequest,
+    session: SessionDependency,
+    request: Request,
+    admin_user: AdminUserDependency,
+) -> SuccessResponse[WrongParkingReport]:
+    actor_id = _admin_actor_id(admin_user)
+    try:
+        async with session.begin():
+            report = await ParkingReportService(session).confirm_wrong_parking_report(
+                report_id,
+                reviewed_by=actor_id,
+                review_note=payload.review_note,
+                expected_version=payload.expected_version,
+            )
+    except ParkingReportError as error:
+        _log_report_action(
+            action="confirm",
+            request=request,
+            report_id=report_id,
+            slot_id=error.slot_id,
+            actor_id=actor_id,
+            outcome="failure",
+            error_code=error.code,
+        )
+        raise _report_http_error(error) from error
+    _log_report_action(
+        action="confirm",
+        request=request,
+        report_id=report.id,
+        slot_id=report.slot_id,
+        actor_id=actor_id,
+        outcome="success",
+    )
+    return SuccessResponse(data=_report_response(report))
+
+
+@router.post(
+    "/reports/{report_id}/reject",
+    response_model=SuccessResponse[WrongParkingReport],
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+async def reject_wrong_parking_report(
+    report_id: str,
+    payload: ReviewWrongParkingReportRequest,
+    session: SessionDependency,
+    request: Request,
+    admin_user: AdminUserDependency,
+) -> SuccessResponse[WrongParkingReport]:
+    actor_id = _admin_actor_id(admin_user)
+    try:
+        async with session.begin():
+            report = await ParkingReportService(session).reject_wrong_parking_report(
+                report_id,
+                reviewed_by=actor_id,
+                review_note=payload.review_note,
+                expected_version=payload.expected_version,
+            )
+    except ParkingReportError as error:
+        _log_report_action(
+            action="reject",
+            request=request,
+            report_id=report_id,
+            slot_id=error.slot_id,
+            actor_id=actor_id,
+            outcome="failure",
+            error_code=error.code,
+        )
+        raise _report_http_error(error) from error
+    _log_report_action(
+        action="reject",
+        request=request,
+        report_id=report.id,
+        slot_id=report.slot_id,
+        actor_id=actor_id,
+        outcome="success",
+    )
+    return SuccessResponse(data=_report_response(report))
+
+
+@router.get(
+    "/reports/{report_id}/evidence-url",
+    response_model=SuccessResponse[ReportEvidenceUrlResponse],
+    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+)
+async def get_wrong_parking_report_evidence_url(
+    report_id: str,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> SuccessResponse[ReportEvidenceUrlResponse]:
+    try:
+        report = await ParkingReportService(session).get_wrong_parking_report(report_id)
+    except ParkingReportError as error:
+        raise _report_http_error(error) from error
+    if not report.evidence_storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "REPORT_EVIDENCE_NOT_FOUND", "message": "Report evidence was not found."},
+        )
+    expires_in = 300
+    signed_url = await ReportEvidenceStorage(settings).create_signed_url(
+        report.evidence_storage_path,
+        expires_in=expires_in,
+    )
+    return SuccessResponse(
+        data=ReportEvidenceUrlResponse(signed_url=signed_url, expires_in=expires_in)
+    )
+
+
+@router.post(
     "/reports/{report_id}/reopen",
     response_model=SuccessResponse[WrongParkingReport],
     responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
@@ -306,6 +445,7 @@ async def delete_wrong_parking_report(
     session: SessionDependency,
     request: Request,
     admin_user: AdminUserDependency,
+    settings: SettingsDependency,
     expected_version: Annotated[int, Query(ge=0)],
 ) -> SuccessResponse[DeletedWrongParkingReportResponse]:
     actor_id = _admin_actor_id(admin_user)
@@ -334,6 +474,14 @@ async def delete_wrong_parking_report(
         actor_id=actor_id,
         outcome="success",
     )
+    try:
+        await ReportEvidenceStorage(settings).delete(report.evidence_storage_path)
+    except Exception:  # noqa: BLE001 - storage cleanup is best effort after DB delete
+        logger.warning(
+            "wrong_parking_report_evidence_cleanup report_id=%s outcome=failure request_id=%s",
+            report.id,
+            getattr(request.state, "request_id", "unknown"),
+        )
     return SuccessResponse(
         data=DeletedWrongParkingReportResponse(deleted_report_id=report.id)
     )
