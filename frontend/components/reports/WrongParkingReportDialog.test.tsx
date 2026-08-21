@@ -8,8 +8,12 @@ import { WrongParkingReportDialog } from "./WrongParkingReportDialog";
 
 afterEach(cleanup);
 
+function imageFile() {
+  return new File(["image-bytes"], "evidence.png", { type: "image/png" });
+}
+
 describe("WrongParkingReportDialog", () => {
-  it("submits a standard reason immediately with normalized optional fields", async () => {
+  it("submits only after image evidence and explicit submit", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn(async () => undefined);
     render(
@@ -21,73 +25,73 @@ describe("WrongParkingReportDialog", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Thêm thông tin" }));
+    await user.click(screen.getByRole("button", { name: "Xe do sai o" }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    await user.upload(screen.getByLabelText("Anh bang chung"), imageFile());
     await user.type(
-      screen.getByLabelText("Biển số quan sát được (không bắt buộc)"),
+      screen.getByLabelText("Bien so quan sat duoc (khong bat buoc)"),
       "51a-123.45",
     );
-    await user.type(
-      screen.getByLabelText(/Mô tả.*không bắt buộc/),
-      "  Xe đỗ chéo sang ô bên cạnh.  ",
-    );
-    await user.click(screen.getByRole("button", { name: "Gửi: Xe đỗ chéo vạch" }));
+    await user.type(screen.getByLabelText(/Mo ta/), "  Xe do cheo.  ");
+    await user.click(screen.getByRole("button", { name: "Gui bao cao" }));
 
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(onSubmit).toHaveBeenCalledWith({
       slotId: "F1-D01",
-      reasonCode: "CROSSED_LINE",
+      reasonCode: "WRONG_SLOT",
       observedPlateNumber: "51A-123.45",
-      description: "Xe đỗ chéo sang ô bên cạnh.",
+      description: "Xe do cheo.",
+      evidence: expect.any(File),
     });
-    expect(screen.getByRole("status")).toHaveTextContent("Đã gửi báo cáo");
+    expect(screen.getByRole("status")).toHaveTextContent("Da gui bao cao");
   });
 
-  it("does not require typing for a standard reason", async () => {
+  it("requires image evidence", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn(async () => undefined);
     render(
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
+        initialSlotId="F1-D01"
         onClose={vi.fn()}
-        onSubmit={onSubmit}
+        onSubmit={vi.fn()}
       />,
     );
 
-    await user.selectOptions(screen.getByLabelText("Ô cần phản ánh"), "F1-A02");
-    await user.click(screen.getByRole("button", { name: "Gửi: Xe chắn lối đi" }));
-    expect(onSubmit).toHaveBeenCalledWith({
-      slotId: "F1-A02",
-      reasonCode: "BLOCKING_ACCESS",
-      observedPlateNumber: null,
-      description: null,
-    });
+    expect(screen.getByRole("button", { name: "Gui bao cao" })).toBeDisabled();
+    await user.upload(screen.getByLabelText("Anh bang chung"), imageFile());
+    expect(screen.getByRole("button", { name: "Gui bao cao" })).toBeEnabled();
   });
 
   it("requires a five-character description only for OTHER", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn(async () => undefined);
     render(
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
         onClose={vi.fn()}
-        onSubmit={onSubmit}
+        onSubmit={vi.fn()}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Lý do khác" }));
-    const submit = screen.getByRole("button", { name: "Gửi báo cáo lý do khác" });
+    await user.upload(screen.getByLabelText("Anh bang chung"), imageFile());
+    await user.click(screen.getByRole("button", { name: "Ly do khac" }));
+    const submit = screen.getByRole("button", { name: "Gui bao cao" });
     expect(submit).toBeDisabled();
-    await user.type(screen.getByLabelText(/Mô tả.*bắt buộc/), "Sai");
+    await user.type(screen.getByLabelText(/Mo ta/), "Sai");
     expect(submit).toBeDisabled();
-    await user.type(screen.getByLabelText(/Mô tả.*bắt buộc/), " vị trí");
+    await user.type(screen.getByLabelText(/Mo ta/), " vi tri");
     expect(submit).toBeEnabled();
   });
 
-  it("guards a standard reason against double submission", async () => {
+  it("guards explicit submit against double submission", async () => {
     const user = userEvent.setup();
     let resolveSubmit!: () => void;
-    const onSubmit = vi.fn(() => new Promise<void>((resolve) => { resolveSubmit = resolve; }));
+    const onSubmit = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSubmit = resolve;
+        }),
+    );
     render(
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
@@ -97,11 +101,14 @@ describe("WrongParkingReportDialog", () => {
       />,
     );
 
-    const reason = screen.getByRole("button", { name: "Gửi: Xe đỗ sai ô" });
-    await user.dblClick(reason);
+    await user.upload(screen.getByLabelText("Anh bang chung"), imageFile());
+    const submit = screen.getByRole("button", { name: "Gui bao cao" });
+    await user.dblClick(submit);
     expect(onSubmit).toHaveBeenCalledOnce();
-    expect(screen.getByRole("status")).toHaveTextContent("đang được gửi");
+    expect(screen.getByRole("status")).toHaveTextContent("dang duoc gui");
     resolveSubmit();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Đã gửi báo cáo"));
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("Da gui bao cao"),
+    );
   });
 });

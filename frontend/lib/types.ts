@@ -288,10 +288,17 @@ export interface WrongParkingReport {
   slot_id: FloorScopedId;
   reason_code: WrongParkingReason;
   status: WrongParkingReportStatus;
+  review_status: WrongParkingReviewStatus;
   observed_plate_number: string | null;
   description: string | null;
+  evidence_storage_path: string | null;
+  evidence_content_type: string | null;
+  evidence_size_bytes: number | null;
   created_at: string;
   updated_at: string;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  review_note: string | null;
   resolved_at: string | null;
   resolved_by: string | null;
   resolution_note: string | null;
@@ -299,6 +306,7 @@ export interface WrongParkingReport {
 }
 
 export type WrongParkingReportStatus = "OPEN" | "RESOLVED";
+export type WrongParkingReviewStatus = "PENDING" | "CONFIRMED" | "REJECTED";
 export type WrongParkingReason =
   | "WRONG_SLOT"
   | "CROSSED_LINE"
@@ -312,6 +320,7 @@ export interface CreateWrongParkingReportRequest {
   reason_code: WrongParkingReason;
   observed_plate_number?: string | null;
   description?: string | null;
+  evidence?: File;
 }
 
 export interface AdminReportFilters {
@@ -331,6 +340,21 @@ export interface ReopenWrongParkingReportRequest {
   expected_version: number;
 }
 export type ReopenWrongParkingReportResponse = WrongParkingReport;
+
+export interface ReviewWrongParkingReportRequest {
+  review_note?: string | null;
+  expected_version: number;
+}
+
+export interface ReportEvidenceUrlResponse {
+  signed_url: string;
+  expires_in: number;
+}
+
+export interface AddVehicleRequest {
+  plate_number: string;
+  requires_charging: boolean;
+}
 
 export interface DeleteWrongParkingReportRequest {
   expected_version: number;

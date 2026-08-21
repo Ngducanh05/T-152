@@ -10,6 +10,7 @@ import type {
   ChatResponse,
   CompleteSessionRequest,
   CreateWrongParkingReportRequest,
+  AddVehicleRequest,
   DeleteWrongParkingReportRequest,
   DeleteWrongParkingReportResponse,
   ConfirmLocationRequest,
@@ -26,8 +27,10 @@ import type {
   RecommendationResult,
   ReopenWrongParkingReportRequest,
   ReopenWrongParkingReportResponse,
+  ReportEvidenceUrlResponse,
   ResolveWrongParkingReportRequest,
   ResolveWrongParkingReportResponse,
+  ReviewWrongParkingReportRequest,
   RouteRequest,
   RouteResponse,
   SimulatorStep,
@@ -204,7 +207,11 @@ export class ParkSmartApiClient {
   ) {
     const headers = new Headers(options.headers);
 
-    if (options.body !== undefined && !headers.has("Content-Type")) {
+    if (
+      options.body !== undefined &&
+      !(typeof FormData !== "undefined" && options.body instanceof FormData) &&
+      !headers.has("Content-Type")
+    ) {
       headers.set("Content-Type", "application/json");
     }
 
@@ -292,6 +299,24 @@ export class ParkSmartApiClient {
     return this.request<AuthenticatedProfile>(
       "/auth/me",
       { signal },
+    );
+  }
+
+  onboardCurrentUser(signal?: AbortSignal) {
+    return this.request<AuthenticatedProfile>(
+      "/auth/onboarding",
+      { method: "POST", body: JSON.stringify({}), signal },
+    );
+  }
+
+  addVehicle(payload: AddVehicleRequest, signal?: AbortSignal) {
+    return this.request<AuthenticatedProfile>(
+      "/auth/vehicles",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        signal,
+      },
     );
   }
 
@@ -607,6 +632,27 @@ export class ParkSmartApiClient {
     payload: CreateWrongParkingReportRequest,
     signal?: AbortSignal,
   ) {
+    if (payload.evidence) {
+      const form = new FormData();
+      form.set("user_id", payload.user_id);
+      form.set("slot_id", payload.slot_id);
+      form.set("reason_code", payload.reason_code);
+      if (payload.observed_plate_number) {
+        form.set("observed_plate_number", payload.observed_plate_number);
+      }
+      if (payload.description) {
+        form.set("description", payload.description);
+      }
+      form.set("evidence", payload.evidence);
+      return this.request<WrongParkingReport>(
+        "/reports/wrong-parking",
+        {
+          method: "POST",
+          body: form,
+          signal,
+        },
+      );
+    }
     return this.request<WrongParkingReport>(
       "/reports/wrong-parking",
       {
@@ -676,6 +722,43 @@ export class ParkSmartApiClient {
         body: JSON.stringify(payload),
         signal,
       },
+    );
+  }
+
+  confirmAdminReport(
+    reportId: string,
+    payload: ReviewWrongParkingReportRequest,
+    signal?: AbortSignal,
+  ) {
+    return this.request<WrongParkingReport>(
+      `/admin/reports/${encodeURIComponent(reportId)}/confirm`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        signal,
+      },
+    );
+  }
+
+  rejectAdminReport(
+    reportId: string,
+    payload: ReviewWrongParkingReportRequest,
+    signal?: AbortSignal,
+  ) {
+    return this.request<WrongParkingReport>(
+      `/admin/reports/${encodeURIComponent(reportId)}/reject`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        signal,
+      },
+    );
+  }
+
+  getAdminReportEvidenceUrl(reportId: string, signal?: AbortSignal) {
+    return this.request<ReportEvidenceUrlResponse>(
+      `/admin/reports/${encodeURIComponent(reportId)}/evidence-url`,
+      { signal },
     );
   }
 

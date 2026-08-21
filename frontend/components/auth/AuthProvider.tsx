@@ -38,11 +38,21 @@ interface SignInResult {
   error: string | null;
 }
 
+interface SignUpResult extends SignInResult {
+  confirmationRequired?: boolean;
+}
+
 interface AuthContextValue {
   status: AuthStatus;
   profile: AuthenticatedProfile | null;
   initializationError: string | null;
   signIn: (email: string, password: string) => Promise<SignInResult>;
+  signUp: (input: {
+    fullName: string;
+    email: string;
+    password: string;
+  }) => Promise<SignUpResult>;
+  refreshProfile: () => Promise<AuthenticatedProfile | null>;
   signOut: () => Promise<void>;
 }
 
@@ -82,7 +92,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadBackendProfile = useCallback(async () => {
-    const currentProfile = await parkSmartApi.getCurrentUser();
+    let currentProfile: AuthenticatedProfile;
+    try {
+      currentProfile = await parkSmartApi.getCurrentUser();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "PROFILE_NOT_FOUND") {
+        currentProfile = await parkSmartApi.onboardCurrentUser();
+      } else {
+        throw error;
+      }
+    }
 
     setProfile(currentProfile);
     setInitializationError(null);
@@ -324,6 +343,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [becomeGuest, demoMode, loadBackendProfile],
   );
 
+  const signUp = useCallback(
+    async (input: {
+      fullName: string;
+      email: string;
+      password: string;
+    }): Promise<SignUpResult> => {
+      if (demoMode) {
+        return {
+          profile: DEMO_PROFILE,
+          error: null,
+          confirmationRequired: false,
+        };
+      }
+
+      const supabase = supabaseRef.current;
+      if (!supabase) {
+        return {
+          profile: null,
+          error: "Dich vu dang ky chua san sang. Vui long thu lai.",
+        };
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email: input.email.trim(),
+        password: input.password,
+        options: {
+          data: {
+            full_name: input.fullName.trim(),
+          },
+        },
+      });
+
+      if (error) {
+        return {
+          profile: null,
+          error: "Khong the tao tai khoan. Vui long kiem tra email va mat khau.",
+        };
+      }
+
+      if (!data.session) {
+        return {
+          profile: null,
+          error: null,
+          confirmationRequired: true,
+        };
+      }
+
+      accessTokenRef.current = data.session.access_token;
+      const currentProfile = await loadBackendProfile();
+      return {
+        profile: currentProfile,
+        error: null,
+        confirmationRequired: false,
+      };
+    },
+    [demoMode, loadBackendProfile],
+  );
+
   const signOut = useCallback(async () => {
     const supabase = supabaseRef.current;
 
@@ -342,9 +419,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profile,
       initializationError,
       signIn,
+      signUp,
+      refreshProfile: loadBackendProfile,
       signOut,
     }),
-    [initializationError, profile, signIn, signOut, status],
+    [initializationError, loadBackendProfile, profile, signIn, signOut, signUp, status],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
