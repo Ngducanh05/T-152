@@ -23,6 +23,11 @@ import { StatusLegend } from "./StatusLegend";
 
 const FLOOR_IDS: FloorId[] = ["F1", "F2", "F3"];
 
+const MAP_NODE_LABELS = {
+  ENTRANCE: "LỐI VÀO",
+  EXIT: "LỐI RA",
+} as const;
+
 export interface ParkingMapProps {
   map: ParkingMapData;
   slots: ParkingSlotData[];
@@ -164,6 +169,16 @@ export function ParkingMap({
   // Check if any floor has ramp/elevator (for showing inter-floor indicators)
   const hasRamp = floorNodes.some((n) => n.type === "RAMP");
   const hasElevator = floorNodes.some((n) => n.type === "ELEVATOR");
+  const rampLabel = activeFloor === "F2"
+    ? "↕ LỐI LÊN/XUỐNG TẦNG"
+    : activeFloor === "F3"
+      ? "↑ LỐI LÊN TẦNG"
+      : "↓ LỐI XUỐNG TẦNG";
+  const rampAriaLabel = activeFloor === "F2"
+    ? "Lối lên và xuống tầng"
+    : activeFloor === "F3"
+      ? "Lối lên tầng"
+      : "Lối xuống tầng";
 
   return (
     <section className="card map-card" aria-labelledby="parking-map-heading">
@@ -254,12 +269,29 @@ export function ParkingMap({
                 : node.type === "CHECKPOINT" ? 0.85
                 : node.type === "RAMP" ? 1.35
                 : 1.35;
+              const isGate = node.type === "ENTRANCE" || node.type === "EXIT";
+              const labelX = node.type === "ENTRANCE"
+                ? 4.5
+                : node.type === "EXIT"
+                  ? 95.5
+                  : x;
+              const label = isGate
+                ? MAP_NODE_LABELS[node.type]
+                : node.id.replace(/^F[1-3]-/, "");
+              const showLabel = node.type !== "AISLE"
+                && node.type !== "RAMP"
+                && node.type !== "ELEVATOR";
               return (
                 <g key={node.id} data-node-id={node.id}>
                   <circle cx={x} cy={y} r={radius} className={node.type === "RAMP" ? "ramp-node" : ""} />
-                  {node.type !== "AISLE" && (
-                    <text x={x} y={y - 2.3} textAnchor="middle">
-                      {node.id.replace(/^F[1-3]-/, "")}
+                  {showLabel && (
+                    <text
+                      x={labelX}
+                      y={y - 2.3}
+                      textAnchor="middle"
+                      className={isGate ? "map-gate-label" : undefined}
+                    >
+                      {label}
                     </text>
                   )}
                 </g>
@@ -275,13 +307,15 @@ export function ParkingMap({
           </g>
           {/* Inter-floor connection indicators */}
           {hasRamp && (
-            <g className="map-interfloor-indicator" aria-label="Ramp liên tầng">
-              <text x="88" y="73" textAnchor="middle" className="interfloor-label">↕ Ramp</text>
+            <g className="map-interfloor-indicator map-ramp-indicator" aria-label={rampAriaLabel}>
+              <rect x="76" y="67" width="22" height="5.5" rx="2.75" />
+              <text x="87" y="70.65" textAnchor="middle" className="interfloor-label">{rampLabel}</text>
             </g>
           )}
           {hasElevator && (
-            <g className="map-interfloor-indicator" aria-label="Thang máy liên tầng">
-              <text x="50" y="97" textAnchor="middle" className="interfloor-label">↕ Thang máy</text>
+            <g className="map-interfloor-indicator map-elevator-indicator" aria-label="Thang máy liên tầng">
+              <rect x="42.5" y="91" width="15" height="5.5" rx="2.75" />
+              <text x="50" y="94.65" textAnchor="middle" className="interfloor-label">↕ THANG MÁY</text>
             </g>
           )}
           <RouteOverlay route={route} nodeById={nodeById} />

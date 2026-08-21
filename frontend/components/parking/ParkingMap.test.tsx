@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  MapNode,
   ParkingMap as ParkingMapData,
 } from "@/lib/types";
 import { getDisplayPoint } from "@/lib/map-geometry";
@@ -96,5 +97,40 @@ describe("ParkingMap", () => {
     expect(normalSlot).not.toHaveClass("has-open-reports");
     fireEvent.click(normalSlot);
     expect(onSelectSlot).toHaveBeenCalledWith("F1-A02");
+  });
+
+  it("shows complete Vietnamese gate and inter-floor labels without duplicates", () => {
+    const { map, slots, status } = fixture();
+    const facilityNodes: MapNode[] = [
+      { id: "F1-EXIT", floor_id: "F1", type: "EXIT", x: 100, y: 50 },
+      { id: "F1-RAMP", floor_id: "F1", type: "RAMP", x: 85, y: 75 },
+      { id: "F1-ELEVATOR", floor_id: "F1", type: "ELEVATOR", x: 50, y: 92 },
+      { id: "F2-RAMP", floor_id: "F2", type: "RAMP", x: 85, y: 75 },
+      { id: "F3-RAMP", floor_id: "F3", type: "RAMP", x: 85, y: 75 },
+    ];
+
+    const { container } = render(
+      <ParkingMap
+        map={{ ...map, nodes: [...map.nodes, ...facilityNodes] }}
+        slots={slots}
+        status={status}
+      />,
+    );
+
+    expect(screen.getByText("LỐI VÀO").getAttribute("x")).toBe("4.5");
+    expect(screen.getByText("LỐI RA").getAttribute("x")).toBe("95.5");
+    expect(screen.queryByText("ENTRANCE")).toBeNull();
+    expect(screen.queryByText("EXIT")).toBeNull();
+    expect(screen.queryByText("RAMP")).toBeNull();
+    expect(screen.queryByText("ELEVATOR")).toBeNull();
+    expect(container.querySelectorAll(".map-ramp-indicator text")).toHaveLength(1);
+    expect(container.querySelector(".map-ramp-indicator text")).toHaveTextContent("LỐI XUỐNG TẦNG");
+    expect(container.querySelectorAll(".map-elevator-indicator text")).toHaveLength(1);
+    expect(container.querySelector(".map-elevator-indicator text")).toHaveTextContent("THANG MÁY");
+
+    fireEvent.click(screen.getByRole("button", { name: /Tầng 2:/ }));
+    expect(screen.getByText("↕ LỐI LÊN\/XUỐNG TẦNG")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /Tầng 3:/ }));
+    expect(screen.getByText("↑ LỐI LÊN TẦNG")).toBeDefined();
   });
 });
