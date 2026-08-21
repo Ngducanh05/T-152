@@ -4,6 +4,7 @@ import type {
   SlotStatus,
   WrongParkingReason,
   WrongParkingReportStatus,
+  WrongParkingReviewStatus,
 } from "./types";
 
 const LOCATION_NAMES: Record<string, string> = {
@@ -69,4 +70,14 @@ export function formatWrongParkingReportStatus(
   status: WrongParkingReportStatus,
 ): string {
   return status === "OPEN" ? "Đang mở" : "Đã xử lý";
+}
+
+export function formatWrongParkingReviewStatus(
+  status: WrongParkingReviewStatus,
+): string {
+  return {
+    PENDING: "Chờ kiểm tra",
+    CONFIRMED: "Đã xác nhận",
+    REJECTED: "Đã từ chối",
+  }[status];
 }

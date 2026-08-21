@@ -11,6 +11,7 @@ export interface WrongParkingReportDraft {
   reasonCode: WrongParkingReason;
   observedPlateNumber: string | null;
   description: string | null;
+  evidence: File;
 }
 
 interface WrongParkingReportDialogProps {
@@ -20,14 +21,13 @@ interface WrongParkingReportDialogProps {
   onSubmit: (draft: WrongParkingReportDraft) => Promise<void>;
 }
 
-const STANDARD_REASONS: Array<{
-  code: Exclude<WrongParkingReason, "OTHER">;
-  label: string;
-}> = [
-  { code: "WRONG_SLOT", label: "Xe đỗ sai ô" },
-  { code: "CROSSED_LINE", label: "Xe đỗ chéo vạch" },
-  { code: "BLOCKING_ACCESS", label: "Xe chắn lối đi" },
-  { code: "OCCUPYING_CHARGER", label: "Xe chiếm chỗ sạc" },
+const MAX_IMAGE_BYTES = 5_000_000;
+const REASONS: Array<{ code: WrongParkingReason; label: string }> = [
+  { code: "WRONG_SLOT", label: "Xe do sai o" },
+  { code: "CROSSED_LINE", label: "Xe do cheo vach" },
+  { code: "BLOCKING_ACCESS", label: "Xe chan loi di" },
+  { code: "OCCUPYING_CHARGER", label: "Xe chiem cho sac" },
+  { code: "OTHER", label: "Ly do khac" },
 ];
 
 export function WrongParkingReportDialog({
@@ -40,28 +40,30 @@ export function WrongParkingReportDialog({
     ? initialSlotId ?? ""
     : "";
   const [slotId, setSlotId] = useState(defaultSlotId);
+  const [reasonCode, setReasonCode] =
+    useState<WrongParkingReason>("CROSSED_LINE");
   const [observedPlateNumber, setObservedPlateNumber] = useState("");
   const [description, setDescription] = useState("");
-  const [showMore, setShowMore] = useState(false);
-  const [selectedReason, setSelectedReason] =
-    useState<WrongParkingReason | null>(null);
+  const [evidence, setEvidence] = useState<File | null>(null);
   const [pending, setPending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submittingRef = useRef(false);
 
-  async function submitReason(reasonCode: WrongParkingReason) {
-    const normalizedDescription = description.trim();
-    if (
-      submittingRef.current ||
-      !slotId ||
-      (reasonCode === "OTHER" && normalizedDescription.length < 5)
-    ) {
-      return;
-    }
+  const normalizedDescription = description.trim();
+  const evidenceValid =
+    evidence &&
+    evidence.type.startsWith("image/") &&
+    evidence.size > 0 &&
+    evidence.size <= MAX_IMAGE_BYTES;
+  const canSubmit =
+    Boolean(slotId) &&
+    Boolean(evidenceValid) &&
+    (reasonCode !== "OTHER" || normalizedDescription.length >= 5);
 
+  async function submit() {
+    if (submittingRef.current || !canSubmit || !evidence) return;
     submittingRef.current = true;
-    setSelectedReason(reasonCode);
     setPending(true);
     setErrorMessage(null);
     try {
@@ -70,21 +72,17 @@ export function WrongParkingReportDialog({
         reasonCode,
         observedPlateNumber: observedPlateNumber.trim().toUpperCase() || null,
         description: normalizedDescription || null,
+        evidence,
       });
       setSubmitted(true);
     } catch (error) {
       setErrorMessage(
-        formatApiErrorForOperator(error, "Không thể gửi báo cáo lúc này."),
+        formatApiErrorForOperator(error, "Khong the gui bao cao luc nay."),
       );
     } finally {
       submittingRef.current = false;
       setPending(false);
     }
-  }
-
-  function chooseOtherReason() {
-    setSelectedReason("OTHER");
-    setShowMore(true);
   }
 
   function requestClose() {
@@ -110,36 +108,32 @@ export function WrongParkingReportDialog({
           type="button"
           className="modal-close"
           onClick={requestClose}
-          aria-label="Đóng báo cáo"
+          aria-label="Dong bao cao"
           disabled={pending}
         >
-          ×
+          x
         </button>
-        <p className="eyebrow green">PHẢN ÁNH TRONG BÃI XE</p>
-        <h2 id="wrong-parking-report-title">Báo xe đỗ sai vị trí</h2>
+        <p className="eyebrow green">PHAN ANH TRONG BAI XE</p>
+        <h2 id="wrong-parking-report-title">Bao xe do sai vi tri</h2>
 
         {submitted ? (
           <div className="report-success" role="status" aria-live="polite">
-            <b>Đã gửi báo cáo.</b>
-            <p>Bộ phận vận hành sẽ kiểm tra thông tin bạn cung cấp.</p>
+            <b>Da gui bao cao.</b>
+            <p>Bo phan van hanh se kiem tra thong tin ban cung cap.</p>
             <button type="button" className="primary-button" onClick={requestClose}>
-              Hoàn tất
+              Hoan tat
             </button>
           </div>
         ) : (
           <div className="wrong-parking-report-form">
-            <p>
-              Chọn ô và lý do. Chạm vào một lý do chuẩn sẽ gửi báo cáo ngay;
-              trạng thái ô đỗ không bị thay đổi.
-            </p>
             <label>
-              Ô cần phản ánh
+              O can phan anh
               <select
                 value={slotId}
                 onChange={(event) => setSlotId(event.target.value)}
                 disabled={pending || slots.length === 0}
               >
-                <option value="">Chọn ô đỗ</option>
+                <option value="">Chon o do</option>
                 {slots.map((slot) => (
                   <option key={slot.id} value={slot.id}>
                     {formatParkingLocation(slot.id)}
@@ -148,80 +142,79 @@ export function WrongParkingReportDialog({
               </select>
             </label>
 
-            <fieldset className="report-reasons" disabled={pending || !slotId}>
-              <legend>Chọn lý do để gửi</legend>
-              {STANDARD_REASONS.map((reason) => (
+            <fieldset className="report-reasons" disabled={pending}>
+              <legend>Ly do</legend>
+              {REASONS.map((reason) => (
                 <button
                   key={reason.code}
                   type="button"
-                  onClick={() => void submitReason(reason.code)}
+                  aria-pressed={reasonCode === reason.code}
+                  onClick={() => setReasonCode(reason.code)}
                 >
-                  {pending && selectedReason === reason.code
-                    ? "Đang gửi…"
-                    : `Gửi: ${reason.label}`}
+                  {reason.label}
                 </button>
               ))}
-              <button
-                type="button"
-                aria-expanded={showMore && selectedReason === "OTHER"}
-                onClick={chooseOtherReason}
-              >
-                Lý do khác
-              </button>
             </fieldset>
 
-            <button
-              type="button"
-              className="report-more-toggle"
-              aria-expanded={showMore}
-              onClick={() => setShowMore((current) => !current)}
-              disabled={pending}
-            >
-              {showMore ? "Ẩn thông tin thêm" : "Thêm thông tin"}
-            </button>
+            <label>
+              Anh bang chung
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                disabled={pending}
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  setEvidence(file);
+                  if (
+                    file &&
+                    (!file.type.startsWith("image/") || file.size > MAX_IMAGE_BYTES)
+                  ) {
+                    setErrorMessage("Anh phai dung dinh dang image/* va toi da 5 MB.");
+                  } else {
+                    setErrorMessage(null);
+                  }
+                }}
+              />
+            </label>
 
-            {showMore && (
-              <div className="report-extra-fields">
-                <label>
-                  Biển số quan sát được (không bắt buộc)
-                  <input
-                    value={observedPlateNumber}
-                    onChange={(event) =>
-                      setObservedPlateNumber(event.target.value.toUpperCase())
-                    }
-                    maxLength={32}
-                    placeholder="Ví dụ: 51A-123.45"
-                    disabled={pending}
-                  />
-                </label>
-                <label>
-                  Mô tả {selectedReason === "OTHER" ? "(bắt buộc)" : "(không bắt buộc)"}
-                  <textarea
-                    value={description}
-                    onChange={(event) => setDescription(event.target.value)}
-                    minLength={selectedReason === "OTHER" ? 5 : undefined}
-                    maxLength={500}
-                    placeholder="Thêm chi tiết giúp bộ phận vận hành kiểm tra."
-                    disabled={pending}
-                  />
-                  <small>{description.length}/500 ký tự</small>
-                </label>
-                {selectedReason === "OTHER" && (
-                  <button
-                    type="button"
-                    className="primary-button"
-                    disabled={pending || description.trim().length < 5}
-                    onClick={() => void submitReason("OTHER")}
-                  >
-                    {pending ? "Đang gửi…" : "Gửi báo cáo lý do khác"}
-                  </button>
-                )}
-              </div>
-            )}
+            <label>
+              Bien so quan sat duoc (khong bat buoc)
+              <input
+                value={observedPlateNumber}
+                onChange={(event) =>
+                  setObservedPlateNumber(event.target.value.toUpperCase())
+                }
+                maxLength={32}
+                placeholder="VD: 51A-123.45"
+                disabled={pending}
+              />
+            </label>
+
+            <label>
+              Mo ta {reasonCode === "OTHER" ? "(bat buoc)" : "(khong bat buoc)"}
+              <textarea
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                minLength={reasonCode === "OTHER" ? 5 : undefined}
+                maxLength={500}
+                placeholder="Them chi tiet giup bo phan van hanh kiem tra."
+                disabled={pending}
+              />
+              <small>{description.length}/500 ky tu</small>
+            </label>
 
             {errorMessage && <p className="report-error" role="alert">{errorMessage}</p>}
+            <button
+              type="button"
+              className="primary-button"
+              disabled={pending || !canSubmit}
+              onClick={() => void submit()}
+            >
+              {pending ? "Dang gui..." : "Gui bao cao"}
+            </button>
             <p className="report-submit-status" role="status" aria-live="polite">
-              {pending ? "Báo cáo đang được gửi. Vui lòng chờ." : ""}
+              {pending ? "Bao cao dang duoc gui. Vui long cho." : ""}
             </p>
           </div>
         )}

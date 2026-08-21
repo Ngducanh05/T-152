@@ -28,6 +28,7 @@ from src.models.schemas import (
     SlotStatus,
     WrongParkingReason,
     WrongParkingReportStatus,
+    WrongParkingReviewStatus,
 )
 
 
@@ -319,6 +320,11 @@ class WrongParkingReport(Base):
         Index("ix_wrong_parking_reports_slot_created", "slot_id", "created_at"),
         Index("ix_wrong_parking_reports_status_created", "status", "created_at"),
         Index(
+            "ix_wrong_parking_reports_review_status_created",
+            "review_status",
+            "created_at",
+        ),
+        Index(
             "ix_wrong_parking_reports_slot_status_created",
             "slot_id",
             "status",
@@ -353,8 +359,21 @@ class WrongParkingReport(Base):
         default=WrongParkingReportStatus.OPEN,
         server_default=text("'OPEN'"),
     )
+    review_status: Mapped[WrongParkingReviewStatus] = mapped_column(
+        Enum(
+            WrongParkingReviewStatus,
+            name="wrong_parking_review_status_enum",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=WrongParkingReviewStatus.PENDING,
+        server_default=text("'PENDING'"),
+    )
     observed_plate_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    evidence_storage_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    evidence_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    evidence_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -367,6 +386,11 @@ class WrongParkingReport(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reviewed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     resolved_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolution_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     version: Mapped[int] = mapped_column(
@@ -394,4 +418,5 @@ __all__ = [
     "WrongParkingReason",
     "WrongParkingReport",
     "WrongParkingReportStatus",
+    "WrongParkingReviewStatus",
 ]

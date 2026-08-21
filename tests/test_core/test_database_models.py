@@ -60,8 +60,9 @@ def test_parking_migration_follows_profiles_revision():
     wrong_parking_report_revision = scripts.get_revision("20260815_0005")
     report_lifecycle_revision = scripts.get_revision("20260819_0006")
     role_auth_revision = scripts.get_revision("20260819_0007")
+    report_review_revision = scripts.get_revision("20260821_0008")
 
-    assert scripts.get_current_head() == "20260819_0007"
+    assert scripts.get_current_head() == "20260821_0008"
 
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
@@ -80,6 +81,9 @@ def test_parking_migration_follows_profiles_revision():
 
     assert role_auth_revision is not None
     assert role_auth_revision.down_revision == "20260819_0006"
+
+    assert report_review_revision is not None
+    assert report_review_revision.down_revision == "20260819_0007"
 
 
 def test_cold_start_sql_rebuilds_profile_enum_for_role_normalization():
@@ -229,10 +233,15 @@ def test_wrong_parking_report_lifecycle_model_has_required_contract_shape():
     assert table.c.description.nullable is True
     assert table.c.reason_code.nullable is False
     assert table.c.status.nullable is False
+    assert table.c.review_status.nullable is False
     assert table.c.updated_at.nullable is False
     assert table.c.version.nullable is False
     assert table.c.reason_code.type.name == "wrong_parking_reason_enum"
     assert table.c.status.type.name == "wrong_parking_report_status_enum"
+    assert table.c.review_status.type.name == "wrong_parking_review_status_enum"
+    assert table.c.evidence_storage_path.nullable is True
+    assert table.c.evidence_content_type.nullable is True
+    assert table.c.evidence_size_bytes.nullable is True
     assert table.c.resolved_by.foreign_keys == set()
     assert {
         constraint.name for constraint in table.constraints
@@ -251,6 +260,10 @@ def test_wrong_parking_report_lifecycle_model_has_required_contract_shape():
         "status",
         "created_at",
     )
+    assert index_columns["ix_wrong_parking_reports_review_status_created"] == (
+        "review_status",
+        "created_at",
+    )
 
 
 def test_wrong_parking_report_schema_exposes_lifecycle_and_rejects_negative_version():
@@ -260,9 +273,16 @@ def test_wrong_parking_report_schema_exposes_lifecycle_and_rejects_negative_vers
         "slot_id": "F1-D01",
         "reason_code": WrongParkingReason.CROSSED_LINE,
         "status": WrongParkingReportStatus.OPEN,
+        "review_status": "PENDING",
         "description": None,
+        "evidence_storage_path": None,
+        "evidence_content_type": None,
+        "evidence_size_bytes": None,
         "created_at": datetime(2026, 8, 19, 8, 0, tzinfo=UTC),
         "updated_at": datetime(2026, 8, 19, 8, 0, tzinfo=UTC),
+        "reviewed_at": None,
+        "reviewed_by": None,
+        "review_note": None,
         "resolved_at": None,
         "resolved_by": None,
         "resolution_note": None,

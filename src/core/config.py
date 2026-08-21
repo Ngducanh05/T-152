@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_anon_key: str | None = None
     supabase_service_role_key: str | None = None
+    supabase_report_evidence_bucket: str = "wrong-parking-evidence"
+    report_evidence_max_bytes: int = Field(default=5_000_000, gt=0, le=15_000_000)
 
     llm_api_key: str | None = Field(
         default=None,

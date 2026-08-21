@@ -927,5 +927,6 @@ def test_admin_report_lifecycle_is_exposed_in_openapi():
     detail_operations = paths["/api/v1/admin/reports/{report_id}"]
     assert {"get", "patch", "delete"} <= detail_operations.keys()
     assert "post" in paths["/api/v1/admin/reports/{report_id}/reopen"]
-    create_schema = openapi["components"]["schemas"]["WrongParkingReportRequest"]
-    assert "reason_code" in create_schema["required"]
+    assert "post" in paths["/api/v1/admin/reports/{report_id}/confirm"]
+    assert "post" in paths["/api/v1/admin/reports/{report_id}/reject"]
+    assert "get" in paths["/api/v1/admin/reports/{report_id}/evidence-url"]
