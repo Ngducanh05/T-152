@@ -107,11 +107,11 @@ async def test_read_interfaces_return_deterministic_current_state(state_db: Stat
 
     assert slot.id == "F1-D01"
     assert [item.id for item in all_slots] == sorted(item.id for item in all_slots)
-    assert len(all_slots) == 40
-    assert len(ev_slots) == 10
-    assert status.total == status.available == 40
+    assert len(all_slots) == 120
+    assert len(ev_slots) == 30
+    assert status.total == status.available == 120
     assert status.reserved == status.occupied == 0
-    assert all(zone_counts[SlotStatus.AVAILABLE] == 10 for zone_counts in status.by_zone.values())
+    assert all(zone_counts[SlotStatus.AVAILABLE] == 30 for zone_counts in status.by_zone.values())
 
     with pytest.raises(ParkingStateError) as error:
         await service.get_slot("F1-Z99")

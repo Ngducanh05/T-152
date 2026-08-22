@@ -1,7 +1,7 @@
 import type { CSSProperties, KeyboardEvent } from "react";
 
 import type { MapNode, ParkingSlot as ParkingSlotData } from "@/lib/types";
-import { getDisplayPoint } from "@/lib/map-geometry";
+import { getDisplayPoint, type MapPoint } from "@/lib/map-geometry";
 
 const STATUS_SIGNALS = {
   AVAILABLE: { icon: "✓", label: "Đang trống" },
@@ -20,6 +20,15 @@ export interface ParkingSlotProps {
   openReportCount?: number;
   onSelect?: (slotId: string) => void;
   onOpenReportedSlot?: (slotId: string) => void;
+
+  /** Vị trí % đã tính sẵn. Bỏ trống thì dùng getDisplayPoint(displayNode) như cũ. */
+  position?: MapPoint;
+
+  /** "flat" (mặc định) giữ nguyên; "iso" thêm class .map-slot--iso. */
+  variant?: "flat" | "iso";
+
+  /** z-index nội tuyến, chỉ dùng khi variant="iso". */
+  depthIndex?: number;
 }
 
 export function ParkingSlot({
@@ -33,6 +42,9 @@ export function ParkingSlot({
   openReportCount = 0,
   onSelect,
   onOpenReportedSlot,
+  position,
+  variant = "flat",
+  depthIndex,
 }: ParkingSlotProps) {
   const signal = STATUS_SIGNALS[slot.status];
   const flags = [
@@ -47,6 +59,7 @@ export function ParkingSlot({
   ].filter(Boolean);
   const className = [
     "map-slot",
+    variant === "iso" ? "map-slot--iso" : "",
     `status-${slot.status.toLowerCase()}`,
     slot.has_charger ? "is-ev" : "",
     slot.is_accessible ? "is-accessible" : "",
@@ -59,10 +72,11 @@ export function ParkingSlot({
   ]
     .filter(Boolean)
     .join(" ");
-  const [displayX, displayY] = getDisplayPoint(displayNode);
+  const [displayX, displayY] = position ?? getDisplayPoint(displayNode);
   const style = {
     left: `${displayX}%`,
     top: `${displayY}%`,
+    ...(depthIndex !== undefined ? { zIndex: depthIndex } : {}),
   } as CSSProperties;
 
   function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
@@ -78,6 +92,59 @@ export function ParkingSlot({
       return;
     }
     onSelect?.(slot.id);
+  }
+
+  if (variant === "iso") {
+    return (
+      <div
+        className="map-slot-wrapper map-slot-wrapper--iso"
+        style={style}
+        data-slot-id={slot.id}
+      >
+        <button
+          type="button"
+          className={className}
+          onClick={activateSlot}
+          onKeyDown={handleKeyDown}
+          aria-pressed={selected}
+          aria-label={`Ô đỗ ${slot.id}, Khu ${slot.zone_id}, ${signal.label}${flags.length ? `, ${flags.join(", ")}` : ""}`}
+          data-slot-id={slot.id}
+          data-status={slot.status}
+          data-zone={slot.zone_id}
+          data-x={displayX}
+          data-y={displayY}
+        >
+          <span className="map-slot-signal" aria-hidden="true">
+            {signal.icon}
+          </span>
+          <b>{slot.id.slice(3)}</b>
+          <span className="map-slot-features" aria-hidden="true">
+            {slot.has_charger ? "⚡" : ""}
+            {slot.is_accessible ? "♿" : ""}
+          </span>
+        </button>
+        <div className="map-slot-badges--iso" aria-hidden="true">
+          {currentLocation && (
+            <span className="map-slot-current-marker" aria-hidden="true">
+              ⌖
+            </span>
+          )}
+          {recommended && <span className="map-slot-badge">Đề xuất</span>}
+          {activeReservation && (
+            <span className="map-slot-badge reservation">Đã giữ</span>
+          )}
+          {parkedVehicle && (
+            <span className="map-slot-badge parked">Xe của bạn</span>
+          )}
+          {openReportCount > 0 && (
+            <span className="map-slot-report-warning">
+              <span>!</span>
+              <b>{openReportCount}</b>
+            </span>
+          )}
+        </div>
+      </div>
+    );
   }
 
   return (

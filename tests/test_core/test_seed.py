@@ -58,12 +58,12 @@ async def _count(session: AsyncSession, model: type[object]) -> int:
 async def test_seed_empty_database_then_second_run_is_idempotent(seed_session: AsyncSession):
     first = await seed_if_missing(seed_session)
 
-    assert first.nodes_created == 54
-    assert first.edges_created == 58
-    assert first.slots_created == 40
+    assert first.nodes_created == 161
+    assert first.edges_created == 177
+    assert first.slots_created == 120
     assert first.users_created == 1
     assert first.vehicles_created == 1
-    assert first.rows_created == 154
+    assert first.rows_created == 460
 
     counts_after_first = {
         "nodes": await _count(seed_session, MapNode),
@@ -82,9 +82,9 @@ async def test_seed_empty_database_then_second_run_is_idempotent(seed_session: A
     }
 
     assert counts_after_first == {
-        "nodes": 54,
-        "edges": 58,
-        "slots": 40,
+        "nodes": 161,
+        "edges": 177,
+        "slots": 120,
         "users": 1,
         "vehicles": 1,
     }
@@ -108,10 +108,16 @@ async def test_seeded_ids_ev_baseline_and_graph_references(seed_session: AsyncSe
     assert vehicle.user_id == user.id
     assert vehicle.requires_charging is True
     assert {slot.id for slot in slots} == {
-        f"F1-{zone}{number:02d}" for zone in "ABCD" for number in range(1, 11)
+        f"{floor}-{zone}{number:02d}"
+        for floor in ("F1", "F2", "F3")
+        for zone in "ABCD"
+        for number in range(1, 11)
     }
     assert {slot.id for slot in slots if slot.has_charger} == {
-        f"F1-{zone}{number:02d}" for zone in "CD" for number in range(1, 6)
+        f"{floor}-{zone}{number:02d}"
+        for floor in ("F1", "F2", "F3")
+        for zone in "CD"
+        for number in range(1, 6)
     }
     assert all(slot.node_id in nodes for slot in slots)
     assert all(edge.from_node in nodes and edge.to_node in nodes for edge in edges)
@@ -121,7 +127,11 @@ async def test_seeded_ids_ev_baseline_and_graph_references(seed_session: AsyncSe
         for node in await seed_session.scalars(
             select(MapNode).where(MapNode.type == MapNodeType.CHECKPOINT)
         )
-    } == {"F1-CP1", "F1-CP2", "F1-CP3"}
+    } == {
+        f"{floor}-CP{n}"
+        for floor in ("F1", "F2", "F3")
+        for n in (1, 2, 3)
+    }
 
     adjacency = {node_id: set() for node_id in nodes}
     for edge in edges:

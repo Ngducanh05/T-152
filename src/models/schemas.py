@@ -13,9 +13,10 @@ from pydantic import (
 )
 
 EntityId = Annotated[str, Field(min_length=1)]
-FloorId = Literal["F1"]
-FloorScopedId = Annotated[str, Field(pattern=r"^F1-", min_length=4)]
+FloorId = Literal["F1", "F2", "F3"]
+FloorScopedId = Annotated[str, Field(pattern=r"^F[1-3]-", min_length=4)]
 ZoneId = Literal["A", "B", "C", "D"]
+FLOOR_IDS: tuple[str, ...] = ("F1", "F2", "F3")
 
 
 class SlotStatus(StrEnum):
@@ -42,8 +43,20 @@ class MapNodeType(StrEnum):
     EXIT = "EXIT"
     CHECKPOINT = "CHECKPOINT"
     ELEVATOR = "ELEVATOR"
+    RAMP = "RAMP"
     AISLE = "AISLE"
     SLOT = "SLOT"
+
+
+class RouteMode(StrEnum):
+    """Traversal mode used to filter mode-restricted edges before routing.
+
+    Vehicles use ramps between floors; pedestrians use elevators. An edge whose
+    ``allowed_mode`` is ``None`` is open to both modes.
+    """
+
+    VEHICLE = "VEHICLE"
+    PEDESTRIAN = "PEDESTRIAN"
 
 
 class ActorType(StrEnum):
@@ -195,6 +208,10 @@ class MapEdge(ContractModel):
     distance_m: float = Field(gt=0)
     bidirectional: bool = True
     enabled: bool = True
+    allowed_mode: RouteMode | None = Field(
+        default=None,
+        description="Restrict traversal to one mode; null keeps the edge open to both.",
+    )
 
 
 class RouteResult(ContractModel):
@@ -206,6 +223,10 @@ class RouteResult(ContractModel):
 class RecommendationRequest(ContractModel):
     user_id: EntityId
     start_node_id: FloorScopedId
+    floor_id: FloorId | None = Field(
+        default=None,
+        description="Restrict candidates to one floor; null ranks every floor by real route distance.",
+    )
     zone_id: ZoneId | None = None
     charging_required: bool = False
     accessible_required: bool = False
@@ -296,11 +317,11 @@ class ChatUIAction(ContractModel):
             raise ValueError("ui action preference is not supported")
         slot_id = value.get("slot_id")
         if slot_id is not None and re.fullmatch(
-            r"^F1-[A-D](?:0[1-9]|10)$", slot_id
+            r"^F[1-3]-[A-D](?:0[1-9]|10)$", slot_id
         ) is None:
             raise ValueError("ui action slot_id is not canonical")
         node_id = value.get("node_id")
-        if node_id is not None and re.fullmatch(r"^F1-[A-Z0-9-]+$", node_id) is None:
+        if node_id is not None and re.fullmatch(r"^F[1-3]-[A-Z0-9-]+$", node_id) is None:
             raise ValueError("ui action node_id is not canonical")
         return value
 
