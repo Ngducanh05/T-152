@@ -38,7 +38,7 @@ export function ProtectedRoute({
         <p>
           {initializationError && status === "guest"
             ? initializationError
-            : "Đang xác minh phiên đăng nhập…"}
+            : "Dang xac minh phien dang nhap..."}
         </p>
       </div>
     </main>

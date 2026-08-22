@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, parkSmartApi, type ParkSmartApiClient } from "@/lib/api";
-import { MVP_DEMO_USER_ID } from "@/lib/demo";
 import type {
   ActiveParkingSession,
   Location,
@@ -62,39 +61,66 @@ function asApiError(error: unknown, message: string) {
 
 export async function loadAuthoritativeState(
   api: ParkSmartApiClient,
-  userId: string,
+  userId: string | null,
   signal?: AbortSignal,
 ): Promise<ParkSmartSnapshot> {
-  const [map, slots, status, currentLocation, activeReservation, activeSession] =
+  const [map, slots, status] =
     await Promise.all([
       api.getMap(signal),
       api.getSlots({}, signal),
       api.getParkingStatus(signal),
+    ]);
+
+  if (!userId) {
+    return {
+      map,
+      slots,
+      status,
+      currentLocation: null,
+      activeReservation: null,
+      activeSession: null,
+    };
+  }
+
+  const [currentLocation, activeReservation, activeSession] =
+    await Promise.all([
       api.getCurrentLocation(userId, signal),
       api.getActiveReservation(userId, signal),
       api.getActiveSession(userId, signal),
     ]);
+
   return { map, slots, status, currentLocation, activeReservation, activeSession };
 }
 
 export function useParkSmartData(
   api: ParkSmartApiClient = parkSmartApi,
-  userId = MVP_DEMO_USER_ID,
+  userId: string | null = null,
 ): ParkSmartData {
   const [state, setState] = useState<ParkSmartDataState>(initialState);
   const mountedRef = useRef(false);
   const lifecycleControllerRef = useRef<AbortController | null>(null);
   const pollControllerRef = useRef<AbortController | null>(null);
-  const refreshPromiseRef = useRef<Promise<ParkSmartSnapshot> | null>(null);
+  const refreshPromiseRef = useRef<{
+    controller: AbortController | null;
+    promise: Promise<ParkSmartSnapshot>;
+  } | null>(null);
 
   const refresh = useCallback((): Promise<ParkSmartSnapshot> => {
-    if (refreshPromiseRef.current) return refreshPromiseRef.current;
+    const controller = lifecycleControllerRef.current;
+    const existingRefresh = refreshPromiseRef.current;
+    if (existingRefresh?.controller === controller) {
+      return existingRefresh.promise;
+    }
+
     pollControllerRef.current?.abort();
     setState((current) => ({ ...current, refreshing: true }));
-    const signal = lifecycleControllerRef.current?.signal;
+    const signal = controller?.signal;
     const promise = loadAuthoritativeState(api, userId, signal)
       .then((snapshot) => {
-        if (mountedRef.current) {
+        if (
+          mountedRef.current &&
+          lifecycleControllerRef.current === controller
+        ) {
           setState({
             ...snapshot,
             lastUpdatedAt: new Date().toISOString(),
@@ -106,7 +132,11 @@ export function useParkSmartData(
         return snapshot;
       })
       .catch((error: unknown) => {
-        if (mountedRef.current && !signal?.aborted) {
+        if (
+          mountedRef.current &&
+          lifecycleControllerRef.current === controller &&
+          !signal?.aborted
+        ) {
           setState((current) => ({
             ...current,
             loading: false,
@@ -117,36 +147,58 @@ export function useParkSmartData(
         throw error;
       })
       .finally(() => {
-        refreshPromiseRef.current = null;
+        if (refreshPromiseRef.current?.promise === promise) {
+          refreshPromiseRef.current = null;
+        }
       });
-    refreshPromiseRef.current = promise;
+    refreshPromiseRef.current = { controller, promise };
     return promise;
   }, [api, userId]);
 
   useEffect(() => {
     mountedRef.current = true;
-    lifecycleControllerRef.current = new AbortController();
+    const lifecycleController = new AbortController();
+    lifecycleControllerRef.current = lifecycleController;
+    let active = true;
+    let timer: number | null = null;
+
+    setState((current) => ({
+      ...current,
+      currentLocation: null,
+      activeReservation: null,
+      activeSession: null,
+      loading: true,
+      error: null,
+    }));
 
     async function loadInitialState() {
       const existingRefresh = refreshPromiseRef.current;
       if (existingRefresh) {
         try {
-          await existingRefresh;
+          await existingRefresh.promise;
         } catch {
           // React Strict Mode intentionally mounts, cleans up, and mounts again
           // in development. The first lifecycle's aborted request must settle
           // before the active lifecycle can start its own authoritative load.
         }
       }
-      if (mountedRef.current && !refreshPromiseRef.current) {
+      if (
+        active &&
+        mountedRef.current &&
+        lifecycleControllerRef.current === lifecycleController &&
+        !refreshPromiseRef.current
+      ) {
         await refresh();
       }
     }
 
-    void loadInitialState().catch(() => undefined);
-
     async function pollParking() {
-      if (refreshPromiseRef.current || pollControllerRef.current) return;
+      if (!active || lifecycleController.signal.aborted) return;
+      if (refreshPromiseRef.current || pollControllerRef.current) {
+        timer = window.setTimeout(pollParking, PARKING_POLL_INTERVAL_MS);
+        return;
+      }
+
       const controller = new AbortController();
       pollControllerRef.current = controller;
       try {
@@ -154,7 +206,11 @@ export function useParkSmartData(
           api.getSlots({}, controller.signal),
           api.getParkingStatus(controller.signal),
         ]);
-        if (mountedRef.current) {
+        if (
+          active &&
+          mountedRef.current &&
+          lifecycleControllerRef.current === lifecycleController
+        ) {
           setState((current) => ({
             ...current,
             slots,
@@ -164,7 +220,12 @@ export function useParkSmartData(
           }));
         }
       } catch (error) {
-        if (mountedRef.current && !controller.signal.aborted) {
+        if (
+          active &&
+          mountedRef.current &&
+          lifecycleControllerRef.current === lifecycleController &&
+          !controller.signal.aborted
+        ) {
           setState((current) => ({
             ...current,
             error: asApiError(error, "Unable to refresh parking data."),
@@ -174,21 +235,32 @@ export function useParkSmartData(
         if (pollControllerRef.current === controller) {
           pollControllerRef.current = null;
         }
+        if (active && !lifecycleController.signal.aborted) {
+          timer = window.setTimeout(pollParking, PARKING_POLL_INTERVAL_MS);
+        }
       }
     }
 
-    const timer = window.setInterval(
-      () => void pollParking(),
-      PARKING_POLL_INTERVAL_MS,
-    );
+    void loadInitialState()
+      .catch(() => undefined)
+      .finally(() => {
+        if (active && !lifecycleController.signal.aborted) {
+          timer = window.setTimeout(pollParking, PARKING_POLL_INTERVAL_MS);
+        }
+      });
 
     return () => {
+      active = false;
       mountedRef.current = false;
-      window.clearInterval(timer);
-      pollControllerRef.current?.abort();
-      lifecycleControllerRef.current?.abort();
-      pollControllerRef.current = null;
-      lifecycleControllerRef.current = null;
+      if (timer) window.clearTimeout(timer);
+      if (pollControllerRef.current) {
+        pollControllerRef.current.abort();
+        pollControllerRef.current = null;
+      }
+      lifecycleController.abort();
+      if (lifecycleControllerRef.current === lifecycleController) {
+        lifecycleControllerRef.current = null;
+      }
     };
   }, [api, refresh]);
 
