@@ -206,6 +206,16 @@ function ParkSmartUserApp({
     notifyWrongParkingReportCreated();
   }
 
+  function clearPendingVehicleIntent() {
+    pendingVehicleIntentRef.current = null;
+    setPendingVehicleIntent(null);
+  }
+
+  function closeVehicleGate() {
+    setVehicleGateOpen(false);
+    clearPendingVehicleIntent();
+  }
+
   function requireVehicle(intent: VehiclePendingIntent) {
     if (identity.vehicleId) return true;
     pendingVehicleIntentRef.current = intent;
@@ -474,15 +484,10 @@ function ParkSmartUserApp({
       )}
       {vehicleGateOpen && (
         <FirstVehicleDialog
-          onClose={() => setVehicleGateOpen(false)}
+          onClose={closeVehicleGate}
           onCreated={async () => {
-            const intent = pendingVehicleIntentRef.current ?? pendingVehicleIntent;
             setVehicleGateOpen(false);
             await refreshProfile();
-            if (intent) {
-              pendingVehicleIntentRef.current = intent;
-              setPendingVehicleIntent(intent);
-            }
           }}
         />
       )}

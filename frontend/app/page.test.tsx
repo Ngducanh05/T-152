@@ -72,18 +72,20 @@ afterEach(() => {
 });
 
 function mockAuthenticatedUser(vehicleId: string | null = "VEHICLE-A") {
+  const profile = {
+    id: "11111111-1111-4111-8111-111111111111",
+    email: "user@example.com",
+    full_name: "User",
+    role: "user",
+    parking_user_id: "USER-A",
+    default_vehicle_id: vehicleId,
+  };
   mocks.useAuth.mockReturnValue({
     status: "authenticated",
-    profile: {
-      id: "11111111-1111-4111-8111-111111111111",
-      email: "user@example.com",
-      full_name: "User",
-      role: "user",
-      parking_user_id: "USER-A",
-      default_vehicle_id: vehicleId,
-    },
+    profile,
     refreshProfile: mocks.refreshProfile,
   });
+  return profile;
 }
 
 function workflowFixture(): ParkingWorkflow {
@@ -152,6 +154,39 @@ function dataFixture(overrides: Record<string, unknown> = {}) {
     refresh: vi.fn(),
     ...overrides,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function workflowWithReserveAction() {
+  const workflow = workflowFixture();
+  workflow.messages = [
+    {
+      id: "reserve-message",
+      role: "agent",
+      text: "Chá»n Ă´ F1-D01.",
+      consumedActionIds: [],
+      uiActions: [
+        {
+          id: "reserve-f1-d01",
+          type: "RESERVE_AND_ROUTE",
+          label: "Giá»¯ Ă´ F1-D01",
+          payload: { slot_id: "F1-D01" },
+          style: "primary",
+          requires_confirmation: false,
+        },
+      ],
+    },
+  ];
+  return workflow;
 }
 
 describe("authenticated user chat page", () => {
@@ -259,9 +294,10 @@ describe("authenticated user chat page", () => {
   it("replays the exact vehicle-gated reserve action once after first vehicle creation", async () => {
     const user = userEvent.setup();
     mockAuthenticatedUser(null);
-    mocks.refreshProfile.mockResolvedValue(null);
+    const profileRefresh = deferred<ReturnType<typeof mockAuthenticatedUser>>();
+    mocks.refreshProfile.mockReturnValue(profileRefresh.promise);
     mocks.addVehicle.mockResolvedValue({});
-    const workflow = workflowFixture();
+    const workflow = workflowWithReserveAction();
     workflow.messages = [
       {
         id: "reserve-message",
@@ -284,7 +320,7 @@ describe("authenticated user chat page", () => {
     mocks.useParkingWorkflow.mockReturnValue(workflow);
 
     const view = render(<Home />);
-    await user.click(screen.getByRole("button", { name: "Giữ ô F1-D01" }));
+    await user.click(screen.getByRole("button", { name: /F1-D01/ }));
     expect(screen.getByRole("dialog", { name: "Them xe dau tien" })).toBeVisible();
     expect(workflow.executeUiAction).not.toHaveBeenCalled();
 
@@ -296,7 +332,8 @@ describe("authenticated user chat page", () => {
     );
     expect(workflow.executeUiAction).not.toHaveBeenCalled();
 
-    mockAuthenticatedUser("VEHICLE-NEW");
+    const refreshedProfile = mockAuthenticatedUser("VEHICLE-NEW");
+    profileRefresh.resolve(refreshedProfile);
     view.rerender(<Home />);
     expect(mocks.useParkingWorkflow).toHaveBeenLastCalledWith(
       expect.anything(),
@@ -310,9 +347,102 @@ describe("authenticated user chat page", () => {
     );
     expect(workflow.executeUiAction).toHaveBeenCalledWith(
       "reserve-message",
-      expect.objectContaining({ type: "RESERVE_AND_ROUTE" }),
+      expect.objectContaining({
+        type: "RESERVE_AND_ROUTE",
+        payload: { slot_id: "F1-D01" },
+      }),
     );
     view.rerender(<Home />);
+    view.rerender(<Home />);
     expect(workflow.executeUiAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reinsert the pending reserve action when refreshProfile races a vehicle identity render", async () => {
+    const user = userEvent.setup();
+    mockAuthenticatedUser(null);
+    mocks.addVehicle.mockResolvedValue({});
+    const workflow = workflowWithReserveAction();
+    mocks.useParkSmartData.mockReturnValue(dataFixture());
+    mocks.useParkingWorkflow.mockReturnValue(workflow);
+
+    const view = render(<Home />);
+    mocks.refreshProfile.mockImplementation(async () => {
+      const refreshedProfile = mockAuthenticatedUser("VEHICLE-NEW");
+      view.rerender(<Home />);
+      await waitFor(() =>
+        expect(workflow.executeUiAction).toHaveBeenCalledTimes(1),
+      );
+      return refreshedProfile;
+    });
+
+    await user.click(screen.getByRole("button", { name: /F1-D01/ }));
+    expect(screen.getByRole("dialog", { name: "Them xe dau tien" })).toBeVisible();
+    expect(workflow.executeUiAction).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText("Bien so"), "51a12345");
+    await user.click(screen.getByRole("button", { name: "Them xe" }));
+
+    await waitFor(() => expect(mocks.refreshProfile).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Them xe dau tien" })).not.toBeInTheDocument(),
+    );
+    expect(mocks.useParkingWorkflow).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { userId: "USER-A", vehicleId: "VEHICLE-NEW" },
+    );
+    expect(workflow.executeUiAction).toHaveBeenCalledTimes(1);
+    expect(workflow.executeUiAction).toHaveBeenCalledWith(
+      "reserve-message",
+      expect.objectContaining({
+        type: "RESERVE_AND_ROUTE",
+        payload: { slot_id: "F1-D01" },
+      }),
+    );
+
+    view.rerender(<Home />);
+    view.rerender(<Home />);
+    expect(workflow.executeUiAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not execute the pending reserve action when first vehicle creation fails", async () => {
+    const user = userEvent.setup();
+    mockAuthenticatedUser(null);
+    mocks.addVehicle.mockRejectedValue(new Error("add vehicle failed"));
+    const workflow = workflowWithReserveAction();
+    mocks.useParkSmartData.mockReturnValue(dataFixture());
+    mocks.useParkingWorkflow.mockReturnValue(workflow);
+
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: /F1-D01/ }));
+    await user.type(screen.getByLabelText("Bien so"), "51a12345");
+    await user.click(screen.getByRole("button", { name: "Them xe" }));
+
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(mocks.refreshProfile).not.toHaveBeenCalled();
+    expect(workflow.executeUiAction).not.toHaveBeenCalled();
+  });
+
+  it("clears the pending reserve action when the first vehicle dialog is canceled", async () => {
+    const user = userEvent.setup();
+    mockAuthenticatedUser(null);
+    const workflow = workflowWithReserveAction();
+    mocks.useParkSmartData.mockReturnValue(dataFixture());
+    mocks.useParkingWorkflow.mockReturnValue(workflow);
+
+    const view = render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: /F1-D01/ }));
+    expect(screen.getByRole("dialog", { name: "Them xe dau tien" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "x" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Them xe dau tien" })).not.toBeInTheDocument(),
+    );
+    expect(workflow.executeUiAction).not.toHaveBeenCalled();
+
+    mockAuthenticatedUser("VEHICLE-NEW");
+    view.rerender(<Home />);
+    expect(workflow.executeUiAction).not.toHaveBeenCalled();
   });
 });
