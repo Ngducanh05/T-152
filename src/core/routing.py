@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.db_models import MapEdge, MapNode
-from src.models.schemas import ErrorCode, RouteResult
+from src.models.schemas import ErrorCode, RouteMode, RouteResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,17 +55,27 @@ class RoutingService:
         self,
         start_node_id: str,
         destination_node_id: str,
+        *,
+        mode: RouteMode | None = None,
     ) -> RouteResult:
-        graph = await self.load_graph()
+        graph = await self.load_graph(mode=mode)
         return self.route_on_graph(graph, start_node_id, destination_node_id)
 
-    async def load_graph(self) -> RoutingGraph:
-        """Load one current snapshot of nodes and enabled edges from the database."""
+    async def load_graph(self, *, mode: RouteMode | None = None) -> RoutingGraph:
+        """Load one current snapshot of nodes and enabled edges from the database.
+
+        When *mode* is given, edges whose ``allowed_mode`` is set to a *different*
+        mode are excluded.  Edges with ``allowed_mode IS NULL`` are always included
+        because they are open to both vehicles and pedestrians.
+        """
         nodes = list(await self.session.scalars(select(MapNode).order_by(MapNode.id)))
-        edges = list(
-            await self.session.scalars(
-                select(MapEdge).where(MapEdge.enabled.is_(True)).order_by(MapEdge.from_node, MapEdge.to_node)
+        edge_query = select(MapEdge).where(MapEdge.enabled.is_(True))
+        if mode is not None:
+            edge_query = edge_query.where(
+                (MapEdge.allowed_mode.is_(None)) | (MapEdge.allowed_mode == mode)
             )
+        edges = list(
+            await self.session.scalars(edge_query.order_by(MapEdge.from_node, MapEdge.to_node))
         )
         node_by_id = {
             node.id: RoutingNode(
@@ -257,8 +267,10 @@ async def get_route(
     session: AsyncSession,
     start_node_id: str,
     destination_node_id: str,
+    *,
+    mode: RouteMode | None = None,
 ) -> RouteResult:
-    return await RoutingService(session).get_route(start_node_id, destination_node_id)
+    return await RoutingService(session).get_route(start_node_id, destination_node_id, mode=mode)
 
 
 __all__ = [

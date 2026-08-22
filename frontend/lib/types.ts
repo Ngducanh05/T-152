@@ -1,6 +1,6 @@
 export type EntityId = string;
 export type FloorScopedId = string;
-export type FloorId = "F1";
+export type FloorId = "F1" | "F2" | "F3";
 export type ZoneId = "A" | "B" | "C" | "D";
 
 export type SlotStatus = "AVAILABLE" | "RESERVED" | "OCCUPIED";
@@ -24,6 +24,7 @@ export type MapNodeType =
   | "EXIT"
   | "CHECKPOINT"
   | "ELEVATOR"
+  | "RAMP"
   | "AISLE"
   | "SLOT";
 
@@ -75,12 +76,15 @@ export interface MapNode {
   y: number;
 }
 
+export type RouteMode = "VEHICLE" | "PEDESTRIAN";
+
 export interface MapEdge {
   from_node: FloorScopedId;
   to_node: FloorScopedId;
   distance_m: number;
   bidirectional: boolean;
   enabled: boolean;
+  allowed_mode: RouteMode | null;
 }
 
 export interface ParkingMap {
@@ -110,6 +114,7 @@ export interface ConfirmLocationRequest {
 export interface RecommendationRequest {
   user_id: EntityId;
   start_node_id: FloorScopedId;
+  floor_id?: FloorId | null;
   zone_id?: ZoneId | null;
   charging_required?: boolean;
   accessible_required?: boolean;
@@ -155,6 +160,7 @@ export interface RouteResult {
 export interface RouteRequest {
   start_node_id: FloorScopedId;
   destination_node_id: FloorScopedId;
+  mode?: RouteMode | null;
 }
 
 export interface RouteResponse extends RouteResult {

@@ -268,7 +268,7 @@ button, input, select, textarea, label, p, small { line-height: 1.45; }
 .api-parking-map { height: 640px; padding: 0; overflow-x: auto; overflow-y: hidden; background-color: #eef2f0; background-image: linear-gradient(#e3e9e6 1px, transparent 1px), linear-gradient(90deg, #e3e9e6 1px, transparent 1px); background-size: 24px 24px; }
 .api-parking-map::before { display: none; }
 .map-card { min-width: 0; max-width: 100%; overflow: hidden; }
-.map-viewport { position: relative; width: 100%; min-width: 1180px; height: 100%; }
+.map-viewport { position: relative; width: 100%; min-width: 900px; height: 100%; }
 .map-network, .map-slot-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
 .map-network { overflow: visible; }
 .map-zone-surfaces rect { fill: #f9fbfa; stroke: #cbd5d0; stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
@@ -281,8 +281,9 @@ button, input, select, textarea, label, p, small { line-height: 1.45; }
 .map-edges .slot-connector { stroke: #bac5bf; stroke-width: 1; stroke-dasharray: 3 3; }
 .map-edges .pedestrian-path { stroke: #8ba99a; stroke-dasharray: 2 3; }
 .map-core-nodes circle { fill: #61736a; stroke: #fff; stroke-width: .45; vector-effect: non-scaling-stroke; }
-.map-core-nodes text { fill: #465850; font-size: 2.1px; font-weight: 800; letter-spacing: .08em; }
-.map-zone-labels text { fill: #66776f; font-size: 2.2px; font-weight: 900; letter-spacing: .18em; }
+.map-core-nodes text { fill: #3e554b; font-size: 1.8px; font-weight: 900; letter-spacing: .055em; paint-order: stroke; stroke: #eef2f0; stroke-width: .22px; stroke-linejoin: round; }
+.map-core-nodes .map-gate-label { fill: #28533f; font-size: 1.65px; letter-spacing: .035em; }
+.map-zone-labels text { fill: #536960; font-size: 2px; font-weight: 900; letter-spacing: .13em; paint-order: stroke; stroke: #eef2f0; stroke-width: .24px; stroke-linejoin: round; }
 .map-route-glow { stroke: #fff; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .map-route-line { stroke: var(--blue); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 9 5; vector-effect: non-scaling-stroke; animation: route-dash 1s linear infinite; }
 .map-route marker path { fill: var(--blue); }
@@ -443,6 +444,31 @@ body .admin-event-list span, body .admin-event-list small, body .admin-event-lis
 .location-picker { max-height: calc(100dvh - 28px); overflow-y: auto; }.location-tap-list { margin-top: 18px; display: grid; gap: 8px; }.location-tap-list button, .slot-nearby-toggle { width: 100%; min-height: 46px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 11px; color: var(--ink); background: #fff; text-align: left; cursor: pointer; }.location-tap-list button[aria-pressed="true"] { border-color: var(--green); background: var(--green-soft); }.slot-nearby-toggle { margin-top: 8px; border-color: #9bcdb5; background: var(--green-soft); }.location-tap-list button:disabled, .slot-nearby-toggle:disabled, .slot-tap-picker button:disabled { opacity: .5; cursor: not-allowed; }.slot-tap-picker { margin-top: 12px; padding: 13px; display: grid; gap: 9px; border-radius: 12px; background: #f4f8f6; }.slot-tap-picker p { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .3px; }.zone-tap-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }.zone-tap-grid button, .slot-number-grid button { min-height: 42px; border: 1px solid #cddbd4; border-radius: 9px; background: #fff; font-weight: 800; cursor: pointer; }.zone-tap-grid button[aria-pressed="true"], .slot-number-grid button[aria-pressed="true"] { color: #fff; border-color: var(--green); background: var(--green); }.slot-number-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; }
 
 .report-reasons { padding: 0; display: grid; gap: 8px; border: 0; }.report-reasons legend { margin-bottom: 7px; font-size: 12px; font-weight: 800; }.report-reasons button { min-height: 44px; padding: 9px 12px; border: 1px solid #cbdad2; border-radius: 10px; color: #244638; background: #f8fbf9; font-size: 12px; font-weight: 750; text-align: left; cursor: pointer; }.report-reasons button::after { content: " →"; float: right; }.report-reasons:disabled button { opacity: .5; cursor: not-allowed; }.report-more-toggle { min-height: 40px; border: 1px dashed #a9bdb3; border-radius: 10px; color: #365f4d; background: #fff; font-weight: 750; cursor: pointer; }.report-extra-fields { padding: 12px; display: grid; gap: 12px; border-radius: 12px; background: #f5f8f6; }.report-submit-status { min-height: 18px; color: var(--muted); font-size: 11px; }
+
+/* Floor selector tabs */
+.floor-tabs { display: flex; gap: 6px; padding: 0 16px 12px; }
+.floor-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 8px 12px; border: 1.5px solid #cddbd4; border-radius: 11px; background: #fff; color: var(--ink); font-size: 13px; cursor: pointer; transition: all .18s ease; }
+.floor-tab:hover { border-color: #9bcdb5; background: #f4f8f6; }
+.floor-tab--active { border-color: var(--green); background: var(--green); color: #fff; box-shadow: 0 2px 8px rgba(34, 139, 78, .18); }
+.floor-tab--active:hover { background: var(--green); }
+.floor-tab strong { font-weight: 800; font-size: 13px; }
+.floor-tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 38px; padding: 2px 7px; border-radius: 20px; font-size: 11px; font-weight: 700; background: #e8f0ec; color: var(--muted); }
+.floor-tab--active .floor-tab-badge { background: rgba(255, 255, 255, .25); color: #fff; }
+
+/* Vietnamese inter-floor labels. Each connector has one readable badge. */
+.ramp-node { fill: #b07d10; }
+.ramp-path { stroke: #b07d10 !important; stroke-dasharray: 3 2; }
+.map-interfloor-indicator rect { fill: #fff; stroke-width: .8; vector-effect: non-scaling-stroke; filter: drop-shadow(0 2px 3px #243b331f); }
+.map-ramp-indicator rect { fill: #fff8e8; stroke: #d29a2d; }
+.map-elevator-indicator rect { fill: #edf8f2; stroke: #5ba17f; }
+.interfloor-label { fill: #365147; font-size: 1.45px; font-weight: 900; letter-spacing: .035em; paint-order: stroke; stroke: #fff; stroke-width: .18px; stroke-linejoin: round; }
+.map-ramp-indicator .interfloor-label { fill: #805600; }
+
+/* Keep the demo controls readable at presentation distance. */
+body .admin-operations label { font-size: 12px; }
+body .admin-operations select, body .admin-operations input { font-size: 13px; }
+body .admin-operations form h3 { font-size: 15px; }
+body .admin-operations button { min-height: 40px; font-size: 12px; }
 
 @media (min-width: 720px) {
   .chat-app-header { padding-inline: max(24px, calc((100vw - 960px) / 2)); }

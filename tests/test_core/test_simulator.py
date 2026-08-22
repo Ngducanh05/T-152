@@ -332,7 +332,7 @@ async def test_reset_produces_expected_baseline(simulator_db: SimulatorDatabase)
     finally:
         await session.close()
 
-    assert (status.available, status.reserved, status.occupied) == (39, 0, 1)
+    assert (status.available, status.reserved, status.occupied) == (119, 0, 1)
     assert slots["F1-B03"].status is SlotStatus.OCCUPIED
     assert slots["F1-B03"].occupied_by_vehicle_id == "SIM-CAR-02"
     assert slots["F1-A04"].status is SlotStatus.AVAILABLE
@@ -440,7 +440,7 @@ async def test_fixed_scenario_final_state(simulator_db: SimulatorDatabase):
         ("F1-B03", "SIM-CAR-02"),
         ("F1-D07", "SIM-CAR-03"),
     ]
-    assert (status.available, status.reserved, status.occupied) == (38, 0, 2)
+    assert (status.available, status.reserved, status.occupied) == (118, 0, 2)
     assert slots["F1-A04"].occupied_by_vehicle_id == "SIM-CAR-01"
     assert slots["F1-B03"].status is SlotStatus.AVAILABLE
     assert slots["F1-D07"].occupied_by_vehicle_id == "SIM-CAR-03"
@@ -503,4 +503,4 @@ async def test_reset_requires_simulator_demo_mode(simulator_db: SimulatorDatabas
     finally:
         await session.close()
 
-    assert (status.available, status.reserved, status.occupied) == (40, 0, 0)
+    assert (status.available, status.reserved, status.occupied) == (120, 0, 0)

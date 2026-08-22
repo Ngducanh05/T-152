@@ -60,12 +60,12 @@ async def test_parking_status_returns_seeded_baseline(parking_client: AsyncClien
     assert response.json() == {
         "success": True,
         "data": {
-            "total": 40,
-            "available": 40,
+            "total": 120,
+            "available": 120,
             "reserved": 0,
             "occupied": 0,
             "by_zone": {
-                zone: {"AVAILABLE": 10, "RESERVED": 0, "OCCUPIED": 0}
+                zone: {"AVAILABLE": 30, "RESERVED": 0, "OCCUPIED": 0}
                 for zone in "ABCD"
             },
         },
@@ -76,15 +76,18 @@ async def test_parking_status_returns_seeded_baseline(parking_client: AsyncClien
 @pytest.mark.asyncio
 async def test_parking_slots_and_all_filters(parking_client: AsyncClient):
     cases = (
-        ({}, 40),
-        ({"zone_id": "A"}, 10),
-        ({"status": "AVAILABLE"}, 40),
+        ({}, 120),
+        ({"zone_id": "A"}, 30),
+        ({"floor_id": "F1"}, 40),
+        ({"floor_id": "F2"}, 40),
+        ({"floor_id": "F1", "zone_id": "A"}, 10),
+        ({"status": "AVAILABLE"}, 120),
         ({"status": "RESERVED"}, 0),
-        ({"has_charger": "true"}, 10),
-        ({"has_charger": "false"}, 30),
+        ({"has_charger": "true"}, 30),
+        ({"has_charger": "false"}, 90),
         ({"is_accessible": "true"}, 0),
-        ({"is_accessible": "false"}, 40),
-        ({"zone_id": "C", "has_charger": "true"}, 5),
+        ({"is_accessible": "false"}, 120),
+        ({"zone_id": "C", "has_charger": "true"}, 15),
     )
 
     for parameters, expected_count in cases:
@@ -95,7 +98,7 @@ async def test_parking_slots_and_all_filters(parking_client: AsyncClient):
     response = await parking_client.get("/api/v1/parking/slots")
     slots = response.json()["data"]
     assert [slot["id"] for slot in slots] == sorted(slot["id"] for slot in slots)
-    assert sum(slot["has_charger"] for slot in slots) == 10
+    assert sum(slot["has_charger"] for slot in slots) == 30
 
 
 @pytest.mark.asyncio
@@ -140,20 +143,27 @@ async def test_parking_map_returns_canonical_graph_and_current_slots(
 
     assert response.status_code == 200
     parking_map = response.json()["data"]
-    assert len(parking_map["nodes"]) == 54
-    assert len(parking_map["edges"]) == 58
-    assert len(parking_map["slots"]) == 40
-    assert sum(slot["has_charger"] for slot in parking_map["slots"]) == 10
-    assert {edge["to_node"] for edge in parking_map["edges"] if edge["from_node"] == "F1-ELEVATOR"} == set()
-    elevator_edges = {
+    # 3 floors: F1 has 55 nodes (with gates), F2 & F3 have 53 each = 161 total
+    assert len(parking_map["nodes"]) == 161
+    # 3 floors: F1 has 59 edges (with gates), F2 & F3 have 57 each + 4 inter-floor = 177
+    assert len(parking_map["edges"]) == 177
+    assert len(parking_map["slots"]) == 120
+    assert sum(slot["has_charger"] for slot in parking_map["slots"]) == 30
+    # Elevator edges per floor connect to C-E and D-W
+    elevator_edges_f1 = {
         frozenset((edge["from_node"], edge["to_node"]))
         for edge in parking_map["edges"]
         if "F1-ELEVATOR" in (edge["from_node"], edge["to_node"])
+        and "F2-ELEVATOR" not in (edge["from_node"], edge["to_node"])
     }
-    assert elevator_edges == {
-        frozenset(("F1-C-E", "F1-ELEVATOR")),
-        frozenset(("F1-D-W", "F1-ELEVATOR")),
+    assert frozenset(("F1-C-E", "F1-ELEVATOR")) in elevator_edges_f1
+    assert frozenset(("F1-D-W", "F1-ELEVATOR")) in elevator_edges_f1
+    # F1 is the only floor with entrance and exit
+    gate_node_ids = {
+        node["id"] for node in parking_map["nodes"]
+        if node["type"] in ("ENTRANCE", "EXIT")
     }
+    assert gate_node_ids == {"F1-ENTRANCE", "F1-EXIT"}
 
 
 @pytest.mark.asyncio

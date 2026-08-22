@@ -67,7 +67,7 @@ export async function confirmLocation(page: Page, nodeId: string) {
   const dialog = page.getByRole("dialog", { name: "Xác nhận vị trí hiện tại" });
   await expect(dialog).toBeVisible();
 
-  const slot = /^F1-([A-D])(\d{2})$/.exec(nodeId);
+  const slot = /^(?:F[1-3])-([A-D])(\d{2})$/.exec(nodeId);
   if (slot) {
     await dialog.getByRole("button", { name: "Tôi đang cạnh một ô đỗ" }).click();
     await dialog.getByRole("button", { name: `Khu ${slot[1]}` }).click();

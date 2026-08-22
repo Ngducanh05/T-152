@@ -32,6 +32,7 @@ export function createCanonicalMap(): ParkingMap {
       distance_m: 15,
       bidirectional: true,
       enabled: true,
+      allowed_mode: null,
     },
   ];
   const slots: ParkingSlot[] = [];
@@ -53,6 +54,7 @@ export function createCanonicalMap(): ParkingMap {
       distance_m: 20,
       bidirectional: true,
       enabled: true,
+      allowed_mode: null,
     });
 
     for (let index = 1; index <= 10; index += 1) {
@@ -89,6 +91,7 @@ export function createCanonicalMap(): ParkingMap {
         distance_m: 4,
         bidirectional: true,
         enabled: true,
+        allowed_mode: null,
       });
     }
   }
