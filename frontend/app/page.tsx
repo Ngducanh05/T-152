@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AgentComposer } from "@/components/assistant/AgentComposer";
@@ -31,6 +31,13 @@ type PendingIntent =
   | { type: "location" }
   | { type: "report" }
   | { type: "chat"; message: string };
+
+type VehiclePendingIntent =
+  | { type: "find-vehicle" }
+  | { type: "reserve-and-route"; slotId?: string }
+  | { type: "confirm-parking" }
+  | { type: "complete-session" }
+  | { type: "ui-action"; messageId: string; action: ChatUiAction };
 
 const PENDING_INTENT_KEY = "parksmart-pending-intent";
 
@@ -154,7 +161,8 @@ function ParkSmartUserApp({
   const [manualReportDialog, setManualReportDialog] = useState(false);
   const [vehicleGateOpen, setVehicleGateOpen] = useState(false);
   const [pendingVehicleIntent, setPendingVehicleIntent] =
-    useState<PendingIntent | null>(null);
+    useState<VehiclePendingIntent | null>(null);
+  const pendingVehicleIntentRef = useRef<VehiclePendingIntent | null>(null);
 
   const showLocationPicker =
     manualLocationPicker || workflow.requestedPanel?.kind === "location";
@@ -164,10 +172,17 @@ function ParkSmartUserApp({
   const routeInstructions = workflow.activeRoute
     ? buildRouteInstructions(workflow.activeRoute, data.map)
     : [];
+  const currentLocationIsParkingSlot = data.slots.some(
+    (slot) => slot.id === workflow.currentLocationId,
+  );
   const initialReportSlotId =
     (workflow.requestedPanel?.kind === "wrong-parking-report"
       ? workflow.requestedPanel.slotId
-      : null) ?? workflow.currentLocationId ?? workflow.selectedSlotId;
+      : null) ??
+    (currentLocationIsParkingSlot ? workflow.currentLocationId : null) ??
+    workflow.selectedSlotId;
+  const reservationLocationMatches =
+    data.activeReservation?.slot_id === workflow.currentLocationId;
 
   function closeLocationPicker() {
     setManualLocationPicker(false);
@@ -191,8 +206,9 @@ function ParkSmartUserApp({
     notifyWrongParkingReportCreated();
   }
 
-  function requireVehicle(intent: PendingIntent) {
+  function requireVehicle(intent: VehiclePendingIntent) {
     if (identity.vehicleId) return true;
+    pendingVehicleIntentRef.current = intent;
     setPendingVehicleIntent(intent);
     setVehicleGateOpen(true);
     return false;
@@ -225,12 +241,37 @@ function ParkSmartUserApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workflow.threadId]);
 
+  async function resumeVehicleIntent(intent: VehiclePendingIntent) {
+    if (intent.type === "find-vehicle") {
+      await workflow.findVehicleAndRoute();
+    } else if (intent.type === "reserve-and-route") {
+      await workflow.reserveSelectedAndRoute(intent.slotId);
+    } else if (intent.type === "confirm-parking") {
+      await workflow.confirmParking();
+    } else if (intent.type === "complete-session") {
+      await workflow.completeSession();
+    } else if (intent.type === "ui-action") {
+      await workflow.executeUiAction(intent.messageId, intent.action);
+    }
+  }
+
+  useEffect(() => {
+    if (!identity.vehicleId) return;
+    const intent = pendingVehicleIntent ?? pendingVehicleIntentRef.current;
+    if (!intent) return;
+    pendingVehicleIntentRef.current = null;
+    setPendingVehicleIntent(null);
+    const timer = window.setTimeout(() => void resumeVehicleIntent(intent), 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity.vehicleId, pendingVehicleIntent]);
+
   async function gatedUiAction(messageId: string, action: ChatUiAction) {
     if (
       ["FIND_VEHICLE", "RESERVE_AND_ROUTE", "CONFIRM_PARKING", "COMPLETE_SESSION"].includes(
         action.type,
       ) &&
-      !requireVehicle({ type: "find-vehicle" })
+      !requireVehicle({ type: "ui-action", messageId, action })
     ) {
       return;
     }
@@ -249,10 +290,11 @@ function ParkSmartUserApp({
             type="button"
             className="chat-location-button"
             onClick={() => setManualLocationPicker(true)}
+            aria-label={`Vị trí hiện tại: ${formatParkingLocation(workflow.currentLocationId)}. Thay đổi vị trí`}
           >
             <span aria-hidden="true">⌖</span>
             <span>
-              <small>Vi tri hien tai</small>
+              <small>Vị trí hiện tại</small>
               <b>{formatParkingLocation(workflow.currentLocationId)}</b>
             </span>
           </button>
@@ -260,24 +302,24 @@ function ParkSmartUserApp({
         </div>
       </header>
 
-      <section className="chat-workspace" aria-label="Tro chuyen voi ParkSmart">
+      <section className="chat-workspace" aria-label="Trò chuyện với ParkSmart">
         <div className="chat-conversation" aria-live="polite">
           <div className="conversation-intro">
             <span className="agent-avatar" aria-hidden="true">AI</span>
             <div>
-              <h1>Tro ly ParkSmart</h1>
-              <p>{workflow.threadId ? "San sang ho tro" : "Dang khoi tao..."}</p>
+              <h1>Trợ lý ParkSmart</h1>
+              <p>{workflow.threadId ? "Sẵn sàng hỗ trợ" : "Đang khởi tạo..."}</p>
             </div>
           </div>
 
           {data.loading && (
             <p className="conversation-system-status" role="status">
-              Dang dong bo thong tin cua ban...
+              Đang đồng bộ thông tin của bạn...
             </p>
           )}
           {data.error && !data.loading && (
             <p className="conversation-alert" role="alert">
-              {formatApiErrorForOperator(data.error, "Khong the tai thong tin cua ban.")}
+              {formatApiErrorForOperator(data.error, "Không thể tải thông tin của bạn.")}
             </p>
           )}
           {workflow.notice && (
@@ -286,14 +328,46 @@ function ParkSmartUserApp({
             </p>
           )}
 
+          {data.activeReservation && (
+            <article className="conversation-state-card reservation-state-card" aria-label="Chỗ đỗ đã giữ">
+              <span className="state-card-icon" aria-hidden="true">R</span>
+              <div>
+                <small>CHỖ ĐỖ ĐÃ GIỮ</small>
+                <h2>{formatParkingLocation(data.activeReservation.slot_id)}</h2>
+                <p>
+                  {reservationLocationMatches
+                    ? "Vị trí của bạn trùng với ô đã giữ."
+                    : "Khi đến cạnh đúng ô, hãy cập nhật vị trí để xác nhận đã đỗ."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (requireVehicle({ type: "confirm-parking" })) {
+                    void workflow.confirmParking();
+                  }
+                }}
+                disabled={workflow.pending === "confirm-parking"}
+              >
+                {workflow.pending === "confirm-parking"
+                  ? reservationLocationMatches
+                    ? "Đang xác nhận..."
+                    : "Đang xác nhận đến nơi..."
+                  : reservationLocationMatches
+                    ? "Xác nhận đã đỗ"
+                    : "Tôi đã đến nơi"}
+              </button>
+            </article>
+          )}
+
           {data.activeSession && (
             <>
-              <article className="conversation-state-card session-state-card" aria-label="Xe dang do trong bai">
+              <article className="conversation-state-card session-state-card" aria-label="Xe đang đỗ trong bãi">
                 <span className="state-card-icon" aria-hidden="true">P</span>
                 <div>
-                  <small>XE CUA BAN</small>
+                  <small>XE CỦA BẠN</small>
                   <h2>{formatParkingLocation(data.activeSession.slot_id)}</h2>
-                  <p>Phien do xe dang hoat dong.</p>
+                  <p>Phiên đỗ xe đang hoạt động.</p>
                 </div>
                 <div className="state-card-actions">
                   <button
@@ -305,15 +379,19 @@ function ParkSmartUserApp({
                     }}
                     disabled={workflow.pending === "find-car"}
                   >
-                    Chi duong toi xe
+                    Chỉ đường tới xe
                   </button>
                   <button
                     type="button"
                     className="danger-text-button"
-                    onClick={() => void workflow.completeSession()}
+                    onClick={() => {
+                      if (requireVehicle({ type: "complete-session" })) {
+                        void workflow.completeSession();
+                      }
+                    }}
                     disabled={workflow.pending === "complete-session"}
                   >
-                    Ket thuc phien
+                    Kết thúc phiên
                   </button>
                 </div>
               </article>
@@ -330,7 +408,7 @@ function ParkSmartUserApp({
             <article key={message.id} className={`chat-message message-${message.role}`}>
               <div className="message-card">
                 <p>{message.text}</p>
-                <small>{message.role === "agent" ? "ParkSmart AI" : "Ban"}</small>
+                <small>{message.role === "agent" ? "ParkSmart AI" : "Bạn"}</small>
               </div>
               {message.role === "agent" && (
                 <ConversationActionList
@@ -343,11 +421,11 @@ function ParkSmartUserApp({
           ))}
 
           {workflow.activeRoute && (
-            <article className="conversation-route-card" aria-label="Chi duong trong bai">
+            <article className="conversation-route-card" aria-label="Chỉ đường trong bãi">
               <header>
                 <div>
-                  <small>CHI DUONG TRONG BAI</small>
-                  <h2>Den {formatParkingLocation(workflow.activeRoute.path.at(-1))}</h2>
+                  <small>CHỈ ĐƯỜNG TRONG BÃI</small>
+                  <h2>Đến {formatParkingLocation(workflow.activeRoute.path.at(-1))}</h2>
                 </div>
                 <strong>{workflow.activeRoute.distance_m} m</strong>
               </header>
@@ -399,11 +477,18 @@ function ParkSmartUserApp({
         <FirstVehicleDialog
           onClose={() => setVehicleGateOpen(false)}
           onCreated={async () => {
+            const intent = pendingVehicleIntentRef.current ?? pendingVehicleIntent;
             setVehicleGateOpen(false);
             await refreshProfile();
-            if (pendingVehicleIntent) {
-              savePendingIntent(pendingVehicleIntent);
+            if (intent?.type === "ui-action") {
+              pendingVehicleIntentRef.current = null;
               setPendingVehicleIntent(null);
+              await resumeVehicleIntent(intent);
+              return;
+            }
+            if (intent) {
+              pendingVehicleIntentRef.current = intent;
+              setPendingVehicleIntent(intent);
             }
           }}
         />

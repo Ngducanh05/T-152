@@ -45,7 +45,20 @@ class ReportEvidenceStorage:
 
     def _configured(self) -> bool:
         return bool(
-            self.settings.supabase_url and self.settings.supabase_service_role_key
+            self.settings.supabase_url
+            and self.settings.supabase_service_role_key
+            and self.settings.supabase_report_evidence_bucket
+        )
+
+    def _require_configured(self) -> bool:
+        if self._configured():
+            return True
+        if self.settings.demo_mode:
+            return False
+        raise _storage_error(
+            "REPORT_EVIDENCE_STORAGE_UNCONFIGURED",
+            "Report evidence storage is not configured.",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
     async def upload(
@@ -69,7 +82,7 @@ class ReportEvidenceStorage:
         }[content_type]
         storage_path = f"reports/{report_id}/{uuid4()}.{extension}"
 
-        if not self._configured():
+        if not self._require_configured():
             return StoredReportEvidence(storage_path, content_type, len(data))
 
         base_url = self.settings.supabase_url.rstrip("/")
@@ -106,7 +119,7 @@ class ReportEvidenceStorage:
         return StoredReportEvidence(storage_path, content_type, len(data))
 
     async def create_signed_url(self, storage_path: str, *, expires_in: int = 300) -> str:
-        if not self._configured():
+        if not self._require_configured():
             return f"demo-private://{storage_path}"
 
         base_url = self.settings.supabase_url.rstrip("/")
@@ -149,19 +162,23 @@ class ReportEvidenceStorage:
             return signed_url
         return f"{base_url}/storage/v1{signed_url}"
 
-    async def delete(self, storage_path: str | None) -> None:
+    async def delete(self, storage_path: str | None) -> bool:
         if not storage_path or not self._configured():
-            return
+            return True
 
         base_url = self.settings.supabase_url.rstrip("/")
         service_key = self.settings.supabase_service_role_key
         assert service_key is not None
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.delete(
-                f"{base_url}/storage/v1/object/{self.settings.supabase_report_evidence_bucket}",
-                headers={
-                    "apikey": service_key,
-                    "Authorization": f"Bearer {service_key}",
-                },
-                json={"prefixes": [storage_path]},
-            )
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.delete(
+                    f"{base_url}/storage/v1/object/{self.settings.supabase_report_evidence_bucket}",
+                    headers={
+                        "apikey": service_key,
+                        "Authorization": f"Bearer {service_key}",
+                    },
+                    json={"prefixes": [storage_path]},
+                )
+        except httpx.HTTPError:
+            return False
+        return status.HTTP_200_OK <= response.status_code < status.HTTP_300_MULTIPLE_CHOICES

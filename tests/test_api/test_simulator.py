@@ -1,11 +1,12 @@
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from types import SimpleNamespace
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -13,6 +14,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 from src.api.dependencies import get_optional_current_user
 from src.api.main import REQUEST_ID_HEADER, create_app
+from src.api.routes import reports as report_routes
 from src.core.config import Settings, get_settings
 from src.core.database import get_db_session
 from src.core.db_models import (
@@ -24,17 +26,20 @@ from src.core.db_models import (
     Vehicle,
 )
 from src.core.db_models import WrongParkingReport as WrongParkingReportRow
+from src.core.parking_report import ParkingReportError
 from src.core.parking_state import ParkingStateService
 from src.core.reservation import ReservationService
 from src.core.seed import seed_if_missing
 from src.models.auth import AppRole, CurrentUser
 from src.models.schemas import (
     ActorType,
+    ErrorCode,
     ParkingEventType,
     ParkingSessionStatus,
     ReservationStatus,
     SlotStatus,
 )
+from src.services.report_evidence import StoredReportEvidence
 
 
 @dataclass(slots=True)
@@ -610,6 +615,123 @@ async def test_wrong_parking_report_validates_input(
 
     assert response.status_code == expected_status
     assert response.json()["error"]["code"] == expected_code
+
+
+@pytest.mark.asyncio
+async def test_malformed_wrong_parking_json_returns_validation_envelope(
+    simulator_api: SimulatorApi,
+):
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        content=b"{not-json",
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_uploaded_wrong_parking_evidence_is_cleaned_up_after_db_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    deleted_paths: list[str | None] = []
+
+    class FakeStorage:
+        def __init__(self, _settings: Settings) -> None:
+            return None
+
+        async def upload(
+            self,
+            *,
+            report_id: str,
+            data: bytes,
+            content_type: str,
+        ) -> StoredReportEvidence:
+            return StoredReportEvidence(
+                storage_path=f"reports/{report_id}/evidence.jpg",
+                content_type=content_type,
+                size_bytes=len(data),
+            )
+
+        async def delete(self, storage_path: str | None) -> bool:
+            deleted_paths.append(storage_path)
+            return True
+
+    class FailingReportService:
+        def __init__(self, _session: AsyncSession) -> None:
+            return None
+
+        async def create_wrong_parking_report(self, **_kwargs: object) -> object:
+            raise ParkingReportError(
+                ErrorCode.SLOT_NOT_FOUND,
+                "Parking slot was not found.",
+                slot_id="F1-D01",
+            )
+
+    monkeypatch.setitem(
+        report_routes.create_wrong_parking_report.__globals__,
+        "ReportEvidenceStorage",
+        FakeStorage,
+    )
+    monkeypatch.setitem(
+        report_routes.create_wrong_parking_report.__globals__,
+        "ParkingReportService",
+        FailingReportService,
+    )
+
+    class FakeEvidence:
+        content_type = "image/jpeg"
+
+        async def read(self) -> bytes:
+            return b"fake-image"
+
+    class FakeRequest:
+        headers = {"content-type": "multipart/form-data; boundary=test"}
+        state = SimpleNamespace(request_id="cleanup-test")
+
+        async def form(self) -> dict[str, object]:
+            return {
+                "user_id": "USER-001",
+                "slot_id": "F1-D01",
+                "reason_code": "CROSSED_LINE",
+                "evidence": FakeEvidence(),
+            }
+
+    class FakeTransaction:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    class FakeSession:
+        def begin(self) -> FakeTransaction:
+            return FakeTransaction()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await report_routes.create_wrong_parking_report(
+            FakeRequest(),  # type: ignore[arg-type]
+            FakeSession(),  # type: ignore[arg-type]
+            CurrentUser(
+                id=UUID("11111111-1111-4111-8111-111111111111"),
+                email="user@example.com",
+                role=AppRole.USER,
+                parking_user_id="USER-001",
+                default_vehicle_id="VEHICLE-001",
+            ),
+            Settings(demo_mode=True),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == {
+        "code": "SLOT_NOT_FOUND",
+        "message": "Parking slot was not found.",
+    }
+    assert len(deleted_paths) == 1
+    assert deleted_paths[0].startswith("reports/REPORT-")
 
 
 @pytest.mark.asyncio

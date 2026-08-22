@@ -1,6 +1,7 @@
 """User-facing API for reporting vehicles parked in the wrong position."""
 
 import logging
+from json import JSONDecodeError
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -111,7 +112,7 @@ async def create_wrong_parking_report(
                 evidence_content_type = getattr(evidence, "content_type", None)
         else:
             request = WrongParkingReportRequest.model_validate(await http_request.json())
-    except ValidationError as error:
+    except (JSONDecodeError, ValidationError, ValueError) as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "VALIDATION_ERROR", "message": "Request validation failed."},
@@ -140,6 +141,19 @@ async def create_wrong_parking_report(
             },
         )
 
+    evidence_storage = ReportEvidenceStorage(settings)
+
+    async def cleanup_uploaded_evidence() -> None:
+        if stored_evidence is None:
+            return
+        cleaned = await evidence_storage.delete(stored_evidence.storage_path)
+        if not cleaned:
+            logger.warning(
+                "wrong_parking_report_evidence_cleanup_failed report_id=%s request_id=%s",
+                report_id,
+                getattr(http_request.state, "request_id", "unknown"),
+            )
+
     try:
         async with session.begin():
             report = await ParkingReportService(session).create_wrong_parking_report(
@@ -160,8 +174,7 @@ async def create_wrong_parking_report(
                 ),
             )
     except ParkingReportError as error:
-        if stored_evidence is not None:
-            await ReportEvidenceStorage(settings).delete(stored_evidence.storage_path)
+        await cleanup_uploaded_evidence()
         logger.warning(
             "wrong_parking_report_action action=create report_id=%s slot_id=%s "
             "actor_id=%s outcome=failure request_id=%s error_code=%s",
@@ -180,6 +193,9 @@ async def create_wrong_parking_report(
             status_code=status_code,
             detail={"code": error.code.value, "message": error.message},
         ) from error
+    except Exception:
+        await cleanup_uploaded_evidence()
+        raise
     logger.info(
         "wrong_parking_report_action action=create report_id=%s slot_id=%s "
         "actor_id=%s outcome=success request_id=%s",

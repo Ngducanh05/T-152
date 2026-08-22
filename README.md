@@ -252,8 +252,9 @@ có cấu trúc.
 
 ## 12. Demo report lifecycle
 
-1. Tại `/`, chạm **Báo xe đỗ sai**, chọn ô rồi chạm một reason chuẩn để gửi; không cần nhập
-   mô tả và report không làm thay đổi trạng thái ô.
+1. Tại `/`, chạm **Báo xe đỗ sai**, chọn ô, chọn reason, đính kèm ảnh bằng chứng bắt buộc,
+   rồi chạm nút gửi báo cáo. Với reason chuẩn không cần nhập mô tả; report không làm thay đổi
+   trạng thái ô.
 2. Tại `/admin`, tìm viền đỏ và badge OPEN trên map, click ô để mở drawer.
 3. Resolve report với version hiện tại. Cảnh báo chỉ biến mất khi ô không còn report OPEN;
    reopen làm cảnh báo xuất hiện lại.

@@ -84,38 +84,43 @@ async def onboard_authenticated_user(
             "The access token is invalid or expired.",
         ) from error
 
-    async with session.begin():
-        existing = await session.scalar(select(Profile).where(Profile.id == auth_user_id))
-        if existing is not None:
-            return SuccessResponse(
-                data=await get_current_user(credentials, session),
-                message="Existing ParkSmart profile loaded.",
-            )
+    created = False
+    try:
+        async with session.begin():
+            existing = await session.scalar(select(Profile).where(Profile.id == auth_user_id))
+            if existing is not None:
+                return SuccessResponse(
+                    data=await get_current_user(credentials, session),
+                    message="Existing ParkSmart profile loaded.",
+                )
 
-        email = str(auth_user.get("email") or "") or None
-        full_name = None
-        metadata = auth_user.get("user_metadata")
-        if isinstance(metadata, dict):
-            raw_name = metadata.get("full_name") or metadata.get("name")
-            full_name = str(raw_name).strip() if raw_name else None
-        display_name = full_name or email or "ParkSmart User"
-        parking_user_id = await _new_parking_user_id(session)
-        session.add(ParkingUser(id=parking_user_id, display_name=display_name))
-        session.add(
-            Profile(
-                id=auth_user_id,
-                email=email,
-                full_name=full_name,
-                app_role=AppRoleEnum.USER,
-                parking_user_id=parking_user_id,
-                default_vehicle_id=None,
+            email = str(auth_user.get("email") or "") or None
+            full_name = None
+            metadata = auth_user.get("user_metadata")
+            if isinstance(metadata, dict):
+                raw_name = metadata.get("full_name") or metadata.get("name")
+                full_name = str(raw_name).strip() if raw_name else None
+            display_name = full_name or email or "ParkSmart User"
+            parking_user_id = await _new_parking_user_id(session)
+            session.add(ParkingUser(id=parking_user_id, display_name=display_name))
+            session.add(
+                Profile(
+                    id=auth_user_id,
+                    email=email,
+                    full_name=full_name,
+                    app_role=AppRoleEnum.USER,
+                    parking_user_id=parking_user_id,
+                    default_vehicle_id=None,
+                )
             )
-        )
-        await session.flush()
+            await session.flush()
+            created = True
+    except IntegrityError:
+        await session.rollback()
 
     return SuccessResponse(
         data=await get_current_user(credentials, session),
-        message="ParkSmart profile created.",
+        message="ParkSmart profile created." if created else "Existing ParkSmart profile loaded.",
     )
 
 

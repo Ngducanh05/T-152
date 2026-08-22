@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export default function RegisterPage() {
   return (
     <main className={styles.loginPage}>
-      <LoginForm />
+      <LoginForm initialMode="register" />
     </main>
   );
 }

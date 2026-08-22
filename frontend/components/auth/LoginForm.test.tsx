@@ -33,6 +33,7 @@ describe("LoginForm", () => {
       profile: null,
       initializationError: null,
       signIn,
+      signUp: vi.fn(),
       signOut: vi.fn(),
     });
     const user = userEvent.setup();
@@ -66,6 +67,7 @@ describe("LoginForm", () => {
       profile: null,
       initializationError: null,
       signIn,
+      signUp: vi.fn(),
       signOut: vi.fn(),
     });
     const user = userEvent.setup();
@@ -91,11 +93,29 @@ describe("LoginForm", () => {
       },
       initializationError: null,
       signIn: vi.fn(),
+      signUp: vi.fn(),
       signOut: vi.fn(),
     });
 
     render(<LoginForm />);
 
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/admin"));
+  });
+
+  it("can open in registration mode by default without a role selector", () => {
+    mocks.useAuth.mockReturnValue({
+      status: "guest",
+      profile: null,
+      initializationError: null,
+      signIn: vi.fn(),
+      signUp: vi.fn(),
+      signOut: vi.fn(),
+    });
+
+    render(<LoginForm initialMode="register" />);
+
+    expect(screen.getByLabelText("Họ tên")).toBeVisible();
+    expect(screen.getByLabelText("Xác nhận mật khẩu")).toBeVisible();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 });

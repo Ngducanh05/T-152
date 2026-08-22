@@ -7,10 +7,14 @@ import { roleHome } from "@/lib/auth";
 import { useAuth } from "./AuthProvider";
 import styles from "./auth.module.css";
 
-export function LoginForm() {
+export function LoginForm({
+  initialMode = "login",
+}: {
+  initialMode?: "login" | "register";
+}) {
   const router = useRouter();
   const { status, profile, initializationError, signIn, signUp } = useAuth();
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

@@ -83,6 +83,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const supabaseRef = useRef<SupabaseClient | null>(null);
   const accessTokenRef = useRef<string | null>(null);
   const signInInFlightRef = useRef(false);
+  const backendProfileInFlightRef =
+    useRef<Promise<AuthenticatedProfile> | null>(null);
 
   const becomeGuest = useCallback((error: string | null = null) => {
     accessTokenRef.current = null;
@@ -92,22 +94,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadBackendProfile = useCallback(async () => {
-    let currentProfile: AuthenticatedProfile;
-    try {
-      currentProfile = await parkSmartApi.getCurrentUser();
-    } catch (error) {
-      if (error instanceof ApiError && error.code === "PROFILE_NOT_FOUND") {
-        currentProfile = await parkSmartApi.onboardCurrentUser();
-      } else {
-        throw error;
-      }
+    if (backendProfileInFlightRef.current) {
+      return backendProfileInFlightRef.current;
     }
 
-    setProfile(currentProfile);
-    setInitializationError(null);
-    setStatus("authenticated");
+    const promise = (async () => {
+      let currentProfile: AuthenticatedProfile;
+      try {
+        currentProfile = await parkSmartApi.getCurrentUser();
+      } catch (error) {
+        if (error instanceof ApiError && error.code === "PROFILE_NOT_FOUND") {
+          currentProfile = await parkSmartApi.onboardCurrentUser();
+        } else {
+          throw error;
+        }
+      }
 
-    return currentProfile;
+      setProfile(currentProfile);
+      setInitializationError(null);
+      setStatus("authenticated");
+
+      return currentProfile;
+    })().finally(() => {
+      backendProfileInFlightRef.current = null;
+    });
+    backendProfileInFlightRef.current = promise;
+    return promise;
   }, []);
 
   useEffect(() => {
@@ -365,40 +377,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      const { data, error } = await supabase.auth.signUp({
-        email: input.email.trim(),
-        password: input.password,
-        options: {
-          data: {
-            full_name: input.fullName.trim(),
+      signInInFlightRef.current = true;
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email: input.email.trim(),
+          password: input.password,
+          options: {
+            data: {
+              full_name: input.fullName.trim(),
+            },
           },
-        },
-      });
+        });
 
-      if (error) {
+        if (error) {
+          return {
+            profile: null,
+            error: "Khong the tao tai khoan. Vui long kiem tra email va mat khau.",
+          };
+        }
+
+        if (!data.session) {
+          return {
+            profile: null,
+            error: null,
+            confirmationRequired: true,
+          };
+        }
+
+        accessTokenRef.current = data.session.access_token;
+        try {
+          const currentProfile = await loadBackendProfile();
+          return {
+            profile: currentProfile,
+            error: null,
+            confirmationRequired: false,
+          };
+        } catch (profileError) {
+          accessTokenRef.current = null;
+          await supabase.auth.signOut();
+
+          const message = safeProfileError(profileError);
+          becomeGuest(message);
+
+          return {
+            profile: null,
+            error: message,
+            confirmationRequired: false,
+          };
+        }
+      } catch {
         return {
           profile: null,
-          error: "Khong the tao tai khoan. Vui long kiem tra email va mat khau.",
+          error: "Khong the tao tai khoan. Vui long thu lai.",
         };
+      } finally {
+        signInInFlightRef.current = false;
       }
-
-      if (!data.session) {
-        return {
-          profile: null,
-          error: null,
-          confirmationRequired: true,
-        };
-      }
-
-      accessTokenRef.current = data.session.access_token;
-      const currentProfile = await loadBackendProfile();
-      return {
-        profile: currentProfile,
-        error: null,
-        confirmationRequired: false,
-      };
     },
-    [demoMode, loadBackendProfile],
+    [becomeGuest, demoMode, loadBackendProfile],
   );
 
   const signOut = useCallback(async () => {
