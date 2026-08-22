@@ -188,9 +188,9 @@ export class ParkSmartApiClient {
     if (options.fetcher) {
       this.fetcher = options.fetcher;
     } else if (typeof window !== "undefined") {
-      this.fetcher = window.fetch.bind(window);
+      this.fetcher = (input, init) => window.fetch(input, init);
     } else {
-      this.fetcher = globalThis.fetch.bind(globalThis);
+      this.fetcher = (input, init) => globalThis.fetch(input, init);
     }
 
     this.authProvider = options.authProvider ?? null;
