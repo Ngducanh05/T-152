@@ -10,7 +10,7 @@ from src.api.dependencies import require_authenticated_or_demo
 from src.core.database import get_db_session
 from src.core.routing import RoutingError, RoutingService
 from src.models.common import ErrorResponse, SuccessResponse
-from src.models.schemas import ErrorCode, FloorScopedId, RouteResult
+from src.models.schemas import ErrorCode, FloorScopedId, RouteMode, RouteResult
 
 router = APIRouter(
     prefix="/routes",
@@ -25,6 +25,7 @@ class RouteRequest(BaseModel):
 
     start_node_id: FloorScopedId
     destination_node_id: FloorScopedId
+    mode: RouteMode | None = None
 
 
 class RouteResponse(RouteResult):
@@ -60,6 +61,7 @@ async def shortest_route(
         route = await RoutingService(session).get_route(
             request.start_node_id,
             request.destination_node_id,
+            mode=request.mode,
         )
     except RoutingError as error:
         raise _domain_error(error) from error

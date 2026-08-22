@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+﻿import { spawnSync } from "node:child_process";
 import path from "node:path";
 
 const backendUrl =
@@ -8,6 +8,7 @@ const environment = {
   ...process.env,
   NEXT_TELEMETRY_DISABLED: "1",
   NEXT_PUBLIC_DEMO_MODE: "true",
+  NEXT_PUBLIC_ENABLE_TEST_HARNESS: "true",
   NEXT_PUBLIC_API_BASE_URL: "/api/v1",
   E2E_BACKEND_URL: backendUrl,
   E2E_API_URL:

@@ -13,12 +13,13 @@ from src.api.dependencies import (
     resolve_parking_user_id,
 )
 from src.core.database import get_db_session
-from src.core.parking_map import build_canonical_f1_map
+from src.core.parking_map import build_canonical_parking_map
 from src.core.parking_state import ParkingStateError, ParkingStateService
 from src.core.slot_observation import SlotObservationService
 from src.models.common import SuccessResponse
 from src.models.schemas import (
     ErrorCode,
+    FloorId,
     MapEdge,
     MapNode,
     ParkingSlot,
@@ -79,6 +80,7 @@ async def parking_status(
 @router.get("/slots", response_model=SuccessResponse[list[ParkingSlot]])
 async def parking_slots(
     session: SessionDependency,
+    floor_id: Annotated[FloorId | None, Query()] = None,
     zone_id: Annotated[ZoneId | None, Query()] = None,
     status: Annotated[SlotStatus | None, Query()] = None,
     has_charger: Annotated[bool | None, Query()] = None,
@@ -90,6 +92,8 @@ async def parking_slots(
         has_charger=has_charger,
         is_accessible=is_accessible,
     )
+    if floor_id is not None:
+        slots = [slot for slot in slots if slot.floor_id == floor_id]
     return SuccessResponse(data=[_slot_response(slot) for slot in slots])
 
 
@@ -137,7 +141,7 @@ async def observe_adjacent_parking_slot(
 
 @router.get("/map", response_model=SuccessResponse[ParkingMapResponse])
 async def parking_map(session: SessionDependency) -> SuccessResponse[ParkingMapResponse]:
-    canonical_map = build_canonical_f1_map()
+    canonical_map = build_canonical_parking_map()
     slots = await ParkingStateService(session).list_slots()
     return SuccessResponse(
         data=ParkingMapResponse(

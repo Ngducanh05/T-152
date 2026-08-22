@@ -19,8 +19,8 @@ def test_builder_is_deterministic_and_canonical_map_validates():
     assert first == second
     assert first is not second
     assert len(first.slots) == 40
-    assert len(first.nodes) == 54
-    assert len(first.edges) == 58
+    assert len(first.nodes) == 55
+    assert len(first.edges) == 59
     validate_canonical_f1_map(first)
 
 
@@ -63,7 +63,7 @@ def test_edges_are_bidirectional_stored_once_with_canonical_distances():
         frozenset((edge.from_node, edge.to_node)): edge for edge in parking_map.edges
     }
 
-    assert len(edges) == len(parking_map.edges) == 58
+    assert len(edges) == len(parking_map.edges) == 59
     assert all(edge.bidirectional and edge.enabled for edge in parking_map.edges)
     assert edges[frozenset(("F1-CP1", "F1-CP2"))].distance_m == 35
     assert edges[frozenset(("F1-C-E", "F1-ELEVATOR"))].distance_m == 23
@@ -129,7 +129,7 @@ def test_all_nodes_are_connected_and_elevator_has_only_canonical_neighbors():
                 edges=parking_map.edges[:-1]
                 + (MapEdge("F1-CP2", "F1-ELEVATOR", 1),),
             ),
-            "edge endpoints or canonical distances",
+            "edge endpoints",
         ),
         (
             lambda parking_map: replace(

@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     "test-results-auth/**",
     "blob-report/**",
     "next-env.d.ts",
+    "playwright-report/**",
+    "test-results/**",
   ]),
 ]);
 

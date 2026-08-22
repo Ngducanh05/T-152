@@ -19,8 +19,11 @@ from src.models.schemas import (
     SlotStatus,
 )
 
-ELEVATOR_NODE_ID = "F1-ELEVATOR"
 EXIT_NODE_ID = "F1-EXIT"
+
+
+def _elevator_node_id(floor_id: str) -> str:
+    return f"{floor_id}-ELEVATOR"
 
 
 class RecommendationError(Exception):
@@ -79,15 +82,23 @@ class RecommendationService:
             self.session,
             self.parking_state,
         ).expire_due_reservations(now=self._utc_now())
+        # Use the full unrestricted graph for recommendation scoring.
+        # Mode-restricted routing is for actual navigation (get_route);
+        # recommendation needs all paths to compute elevator distances.
         graph = await self.routing.load_graph()
         start_node = self._get_start_node(graph, request.start_node_id)
         slots = await self.parking_state.list_slots()
         parking_state_version = sum(slot.version for slot in slots)
+
+        # When request.floor_id is set, restrict candidates to that floor.
+        # Otherwise, use the start node's floor for backward compatibility.
+        target_floor_id = request.floor_id if request.floor_id is not None else start_node.floor_id
+
         eligible_slots = [
             slot
             for slot in slots
             if slot.status is SlotStatus.AVAILABLE
-            and slot.floor_id == start_node.floor_id
+            and slot.floor_id == target_floor_id
             and (request.zone_id is None or slot.zone_id == request.zone_id)
             and (not request.charging_required or slot.has_charger)
             and (not request.accessible_required or slot.is_accessible)
@@ -98,7 +109,7 @@ class RecommendationService:
                 parking_state_version=parking_state_version,
             )
 
-        reachable = self._reachable_candidates(graph, eligible_slots, request)
+        reachable = self._reachable_candidates(graph, eligible_slots, request, target_floor_id)
         max_distance = self._max_relevant_distance(reachable)
         scored = [self._score_candidate(candidate, request, max_distance) for candidate in reachable]
 
@@ -127,7 +138,9 @@ class RecommendationService:
         graph: RoutingGraph,
         slots: list[ParkingSlot],
         request: RecommendationRequest,
+        target_floor_id: str,
     ) -> list[_ReachableCandidate]:
+        elevator_node_id = _elevator_node_id(target_floor_id)
         try:
             from_start = self.routing.shortest_distances(
                 graph,
@@ -141,10 +154,10 @@ class RecommendationService:
             to_elevator = (
                 self.routing.shortest_distances(
                     graph,
-                    ELEVATOR_NODE_ID,
+                    elevator_node_id,
                     reverse=True,
                 )
-                if request.near_elevator
+                if request.near_elevator and elevator_node_id in graph.nodes
                 else None
             )
         except RoutingError as error:

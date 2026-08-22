@@ -22,7 +22,7 @@ describe("LocationConfirmationOutcome", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Bạn đã xác nhận đang ở Ô A01 (F1-A01)",
+      "Bạn đã xác nhận đang ở Ô A01 — Tầng 1 (F1-A01)",
     );
     expect(onConfirmParking).not.toHaveBeenCalled();
 
@@ -41,7 +41,7 @@ describe("LocationConfirmationOutcome", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Đã cập nhật vị trí hiện tại thành Ô D01 (F1-D01)",
+      "Đã cập nhật vị trí hiện tại thành Ô D01 — Tầng 1 (F1-D01)",
     );
     expect(screen.queryByRole("button", { name: "Xác nhận đã đỗ" })).not.toBeInTheDocument();
   });
@@ -58,7 +58,7 @@ describe("LocationConfirmationOutcome", () => {
     );
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "đang giữ Ô A01 (F1-A01) nhưng vị trí vừa xác nhận là Ô C03 (F1-C03)",
+      "đang giữ Ô A01 — Tầng 1 (F1-A01) nhưng vị trí vừa xác nhận là Ô C03 — Tầng 1 (F1-C03)",
     );
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Xe vẫn chưa được ghi nhận là đã đỗ",

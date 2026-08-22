@@ -1,4 +1,4 @@
-from collections.abc import AsyncGenerator
+﻿from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -126,8 +126,8 @@ async def _assert_current_baseline(api: SimulatorApi) -> None:
 
     status = status_response.json()["data"]
     assert (status["total"], status["available"], status["reserved"], status["occupied"]) == (
-        40,
-        39,
+        120,
+        119,
         0,
         1,
     )
@@ -302,7 +302,7 @@ async def test_fixed_scenario_updates_parking_status(simulator_api: SimulatorApi
         "PARK",
     ]
     status = status_response.json()["data"]
-    assert (status["available"], status["reserved"], status["occupied"]) == (38, 0, 2)
+    assert (status["available"], status["reserved"], status["occupied"]) == (118, 0, 2)
 
 
 @pytest.mark.asyncio
@@ -366,7 +366,7 @@ async def test_simulator_disabled_rejects_endpoint(
             status["available"],
             status["reserved"],
             status["occupied"],
-        ) == (40, 0, 0)
+        ) == (120, 0, 0)
     else:
         assert status_response.status_code == 401
         assert status_response.json()["error"]["code"] == "AUTH_REQUIRED"
@@ -539,7 +539,7 @@ async def test_user_can_report_wrong_parking_and_admin_can_read_it(
             "slot_id": "F1-D01",
             "reason_code": "CROSSED_LINE",
             "observed_plate_number": "  51a-123.45  ",
-            "description": "Xe đang đỗ chéo và lấn sang ô bên cạnh.",
+            "description": "Xe Ä‘ang Ä‘á»— chĂ©o vĂ  láº¥n sang Ă´ bĂªn cáº¡nh.",
         },
     )
 
@@ -551,7 +551,7 @@ async def test_user_can_report_wrong_parking_and_admin_can_read_it(
     assert report["reason_code"] == "CROSSED_LINE"
     assert report["status"] == "OPEN"
     assert report["observed_plate_number"] == "51A-123.45"
-    assert report["description"] == "Xe đang đỗ chéo và lấn sang ô bên cạnh."
+    assert report["description"] == "Xe Ä‘ang Ä‘á»— chĂ©o vĂ  láº¥n sang Ă´ bĂªn cáº¡nh."
     assert report["created_at"].endswith("Z")
     assert report["updated_at"].endswith("Z")
     assert report["resolved_at"] is None
@@ -575,7 +575,7 @@ async def test_user_can_report_wrong_parking_and_admin_can_read_it(
                 "user_id": "USER-MISSING",
                 "slot_id": "F1-D01",
                 "reason_code": "OTHER",
-                "description": "Xe đỗ không đúng vị trí.",
+                "description": "Xe Ä‘á»— khĂ´ng Ä‘Ăºng vá»‹ trĂ­.",
             },
             404,
             "USER_NOT_FOUND",
@@ -585,7 +585,7 @@ async def test_user_can_report_wrong_parking_and_admin_can_read_it(
                 "user_id": "USER-001",
                 "slot_id": "F1-Z99",
                 "reason_code": "OTHER",
-                "description": "Xe đỗ không đúng vị trí.",
+                "description": "Xe Ä‘á»— khĂ´ng Ä‘Ăºng vá»‹ trĂ­.",
             },
             404,
             "SLOT_NOT_FOUND",
@@ -816,7 +816,7 @@ async def test_admin_report_lifecycle_filters_conflicts_reopens_and_hard_deletes
         f"/api/v1/admin/reports/{report_id}",
         json={
             "status": "RESOLVED",
-            "resolution_note": "  Đã kiểm tra hiện trường.  ",
+            "resolution_note": "  ÄĂ£ kiá»ƒm tra hiá»‡n trÆ°á»ng.  ",
             "expected_version": 0,
         },
     )
@@ -825,7 +825,7 @@ async def test_admin_report_lifecycle_filters_conflicts_reopens_and_hard_deletes
     assert resolved["status"] == "RESOLVED"
     assert resolved["resolved_at"].endswith("Z")
     assert resolved["resolved_by"] == "DEMO-ADMIN"
-    assert resolved["resolution_note"] == "Đã kiểm tra hiện trường."
+    assert resolved["resolution_note"] == "ÄĂ£ kiá»ƒm tra hiá»‡n trÆ°á»ng."
     assert resolved["version"] == 1
 
     stale_resolve = await simulator_api.client.patch(

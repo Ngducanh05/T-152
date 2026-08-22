@@ -25,6 +25,7 @@ from src.models.schemas import (
     ParkingEventType,
     ParkingSessionStatus,
     ReservationStatus,
+    RouteMode,
     SlotStatus,
     WrongParkingReason,
     WrongParkingReportStatus,
@@ -82,8 +83,8 @@ class Profile(Base):
 class MapNode(Base):
     __tablename__ = "map_nodes"
     __table_args__ = (
-        CheckConstraint("id LIKE 'F1-%'", name="ck_map_nodes_id_f1"),
-        CheckConstraint("floor_id = 'F1'", name="ck_map_nodes_floor_f1"),
+        CheckConstraint("id ~ '^F[1-3]-'", name="ck_map_nodes_id_floor_prefix"),
+        CheckConstraint("floor_id IN ('F1', 'F2', 'F3')", name="ck_map_nodes_floor"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -141,16 +142,21 @@ class MapEdge(Base):
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
+    allowed_mode: Mapped[RouteMode | None] = mapped_column(
+        Enum(RouteMode, name="route_mode_enum", values_callable=_enum_values),
+        nullable=True,
+    )
 
 
 class ParkingSlot(Base):
     __tablename__ = "parking_slots"
     __table_args__ = (
-        CheckConstraint("id LIKE 'F1-%'", name="ck_parking_slots_id_f1"),
-        CheckConstraint("floor_id = 'F1'", name="ck_parking_slots_floor_f1"),
+        CheckConstraint("id ~ '^F[1-3]-'", name="ck_parking_slots_id_floor_prefix"),
+        CheckConstraint("floor_id IN ('F1', 'F2', 'F3')", name="ck_parking_slots_floor"),
         CheckConstraint("zone_id IN ('A', 'B', 'C', 'D')", name="ck_parking_slots_zone"),
         CheckConstraint("version >= 0", name="ck_parking_slots_version_nonnegative"),
         Index("ix_parking_slots_status_zone", "status", "zone_id"),
+        Index("ix_parking_slots_floor_status", "floor_id", "status"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -413,6 +419,7 @@ __all__ = [
     "ParkingUser",
     "Profile",
     "ReservationStatus",
+    "RouteMode",
     "SlotStatus",
     "Vehicle",
     "WrongParkingReason",
