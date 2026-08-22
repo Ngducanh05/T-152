@@ -66,6 +66,19 @@ function safeProfileError(error: unknown) {
   return "Không thể xác minh tài khoản ParkSmart. Vui lòng đăng nhập lại.";
 }
 
+function safeSignUpError(error: unknown) {
+  if (
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "over_email_send_rate_limit"
+  ) {
+    return "Supabase dang tam gioi han so email xac nhan. Vui long cho mot luc roi thu lai.";
+  }
+
+  return "Khong the tao tai khoan. Vui long kiem tra email va mat khau.";
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
@@ -392,7 +405,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error) {
           return {
             profile: null,
-            error: "Khong the tao tai khoan. Vui long kiem tra email va mat khau.",
+            error: safeSignUpError(error),
+            confirmationRequired: false,
           };
         }
 

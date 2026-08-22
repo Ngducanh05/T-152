@@ -45,7 +45,7 @@ function createSupabaseMock(
       user: { id: string } | null;
       session: { access_token: string } | null;
     };
-    error: null;
+    error: { code?: string; message?: string } | null;
   },
 ) {
   const auth: SupabaseAuthMock = {
@@ -171,5 +171,47 @@ describe("AuthProvider signup", () => {
     expect(mocks.getCurrentUser).not.toHaveBeenCalled();
     expect(mocks.onboardCurrentUser).not.toHaveBeenCalled();
     expect(authValue.status).toBe("loading");
+  });
+
+  it("maps Supabase email rate limit without retrying or calling the backend", async () => {
+    const supabase = createSupabaseMock({
+      data: {
+        user: null,
+        session: null,
+      },
+      error: {
+        code: "over_email_send_rate_limit",
+        message: "email rate limit exceeded",
+      },
+    });
+    mocks.createBrowserSupabaseClient.mockReturnValue(supabase);
+    let authValue = null as unknown as AuthValue;
+
+    render(
+      <AuthProvider>
+        <AuthProbe onValue={(value) => { authValue = value; }} />
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(mocks.createBrowserSupabaseClient).toHaveBeenCalledOnce(),
+    );
+
+    const result = await authValue.signUp({
+      fullName: "User",
+      email: "user@example.com",
+      password: "safe-test-password",
+    });
+
+    expect(result).toEqual({
+      profile: null,
+      error:
+        "Supabase dang tam gioi han so email xac nhan. Vui long cho mot luc roi thu lai.",
+      confirmationRequired: false,
+    });
+    expect(supabase.auth.signUp).toHaveBeenCalledOnce();
+    expect(mocks.getCurrentUser).not.toHaveBeenCalled();
+    expect(mocks.onboardCurrentUser).not.toHaveBeenCalled();
+    expect(supabase.auth.signOut).not.toHaveBeenCalled();
   });
 });

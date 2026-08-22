@@ -608,6 +608,57 @@ async def test_wrong_parking_report_accepts_real_multipart_request(
 
 
 @pytest.mark.asyncio
+async def test_authenticated_wrong_parking_report_requires_real_storage(
+    simulator_api: SimulatorApi,
+):
+    async def authenticated_user() -> CurrentUser:
+        return CurrentUser(
+            id=UUID("11111111-1111-4111-8111-111111111111"),
+            email="user@example.com",
+            full_name="User",
+            role=AppRole.USER,
+            parking_user_id="USER-001",
+            default_vehicle_id="VEHICLE-001",
+        )
+
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
+        demo_mode=True,
+        supabase_url=None,
+        supabase_service_role_key=None,
+        supabase_report_evidence_bucket="",
+    )
+    simulator_api.application.dependency_overrides[get_optional_current_user] = (
+        authenticated_user
+    )
+
+    async with simulator_api.session_factory() as session:
+        before_count = await session.scalar(select(func.count(WrongParkingReportRow.id)))
+
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        data={
+            "user_id": "USER-001",
+            "slot_id": "F1-D01",
+            "reason_code": "CROSSED_LINE",
+        },
+        files={
+            "evidence": (
+                "evidence.jpg",
+                b"\xff\xd8\xff\xe0fake-jpeg-evidence\xff\xd9",
+                "image/jpeg",
+            )
+        },
+    )
+
+    async with simulator_api.session_factory() as session:
+        after_count = await session.scalar(select(func.count(WrongParkingReportRow.id)))
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "REPORT_EVIDENCE_STORAGE_UNCONFIGURED"
+    assert after_count == before_count
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("payload", "expected_status", "expected_code"),
     [
@@ -690,7 +741,9 @@ async def test_uploaded_wrong_parking_evidence_is_cleaned_up_after_db_failure(
             report_id: str,
             data: bytes,
             content_type: str,
+            allow_demo_fallback: bool = False,
         ) -> StoredReportEvidence:
+            assert allow_demo_fallback is False
             return StoredReportEvidence(
                 storage_path=f"reports/{report_id}/evidence.jpg",
                 content_type=content_type,

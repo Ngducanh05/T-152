@@ -127,10 +127,27 @@ async def create_wrong_parking_report(
             size_bytes=len(evidence_bytes),
             max_bytes=settings.report_evidence_max_bytes,
         )
-        stored_evidence = await ReportEvidenceStorage(settings).upload(
-            report_id=report_id,
-            data=evidence_bytes,
-            content_type=normalized_content_type,
+        try:
+            stored_evidence = await ReportEvidenceStorage(settings).upload(
+                report_id=report_id,
+                data=evidence_bytes,
+                content_type=normalized_content_type,
+                allow_demo_fallback=current_user is None,
+            )
+        except HTTPException:
+            logger.warning(
+                "report_evidence_upload report_id=%s storage_mode=real "
+                "outcome=failure request_id=%s",
+                report_id,
+                getattr(http_request.state, "request_id", "unknown"),
+            )
+            raise
+        logger.info(
+            "report_evidence_upload report_id=%s storage_mode=%s "
+            "outcome=success request_id=%s",
+            report_id,
+            stored_evidence.storage_mode,
+            getattr(http_request.state, "request_id", "unknown"),
         )
     elif not settings.demo_mode:
         raise HTTPException(

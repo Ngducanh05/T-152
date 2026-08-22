@@ -16,6 +16,7 @@ class StoredReportEvidence:
     storage_path: str
     content_type: str
     size_bytes: int
+    storage_mode: str = "real"
 
 
 def _storage_error(code: str, message: str, status_code: int = 422) -> HTTPException:
@@ -50,10 +51,10 @@ class ReportEvidenceStorage:
             and self.settings.supabase_report_evidence_bucket
         )
 
-    def _require_configured(self) -> bool:
+    def _require_configured(self, *, allow_demo_fallback: bool) -> bool:
         if self._configured():
             return True
-        if self.settings.demo_mode:
+        if self.settings.demo_mode and allow_demo_fallback:
             return False
         raise _storage_error(
             "REPORT_EVIDENCE_STORAGE_UNCONFIGURED",
@@ -67,6 +68,7 @@ class ReportEvidenceStorage:
         report_id: str,
         data: bytes,
         content_type: str,
+        allow_demo_fallback: bool = False,
     ) -> StoredReportEvidence:
         content_type = validate_report_image(
             content_type=content_type,
@@ -82,8 +84,13 @@ class ReportEvidenceStorage:
         }[content_type]
         storage_path = f"reports/{report_id}/{uuid4()}.{extension}"
 
-        if not self._require_configured():
-            return StoredReportEvidence(storage_path, content_type, len(data))
+        if not self._require_configured(allow_demo_fallback=allow_demo_fallback):
+            return StoredReportEvidence(
+                storage_path,
+                content_type,
+                len(data),
+                storage_mode="demo-synthetic",
+            )
 
         base_url = self.settings.supabase_url.rstrip("/")
         service_key = self.settings.supabase_service_role_key
@@ -119,7 +126,7 @@ class ReportEvidenceStorage:
         return StoredReportEvidence(storage_path, content_type, len(data))
 
     async def create_signed_url(self, storage_path: str, *, expires_in: int = 300) -> str:
-        if not self._require_configured():
+        if not self._require_configured(allow_demo_fallback=True):
             return f"demo-private://{storage_path}"
 
         base_url = self.settings.supabase_url.rstrip("/")
