@@ -261,8 +261,7 @@ function ParkSmartUserApp({
     if (!intent) return;
     pendingVehicleIntentRef.current = null;
     setPendingVehicleIntent(null);
-    const timer = window.setTimeout(() => void resumeVehicleIntent(intent), 0);
-    return () => window.clearTimeout(timer);
+    void resumeVehicleIntent(intent);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity.vehicleId, pendingVehicleIntent]);
 
@@ -480,12 +479,6 @@ function ParkSmartUserApp({
             const intent = pendingVehicleIntentRef.current ?? pendingVehicleIntent;
             setVehicleGateOpen(false);
             await refreshProfile();
-            if (intent?.type === "ui-action") {
-              pendingVehicleIntentRef.current = null;
-              setPendingVehicleIntent(null);
-              await resumeVehicleIntent(intent);
-              return;
-            }
             if (intent) {
               pendingVehicleIntentRef.current = intent;
               setPendingVehicleIntent(intent);

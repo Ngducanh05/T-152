@@ -259,10 +259,7 @@ describe("authenticated user chat page", () => {
   it("replays the exact vehicle-gated reserve action once after first vehicle creation", async () => {
     const user = userEvent.setup();
     mockAuthenticatedUser(null);
-    mocks.refreshProfile.mockImplementation(async () => {
-      mockAuthenticatedUser("VEHICLE-NEW");
-      return null;
-    });
+    mocks.refreshProfile.mockResolvedValue(null);
     mocks.addVehicle.mockResolvedValue({});
     const workflow = workflowFixture();
     workflow.messages = [
@@ -294,6 +291,12 @@ describe("authenticated user chat page", () => {
     await user.type(screen.getByLabelText("Bien so"), "51a12345");
     await user.click(screen.getByRole("button", { name: "Them xe" }));
     await waitFor(() => expect(mocks.refreshProfile).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Them xe dau tien" })).not.toBeInTheDocument(),
+    );
+    expect(workflow.executeUiAction).not.toHaveBeenCalled();
+
+    mockAuthenticatedUser("VEHICLE-NEW");
     view.rerender(<Home />);
     expect(mocks.useParkingWorkflow).toHaveBeenLastCalledWith(
       expect.anything(),
@@ -309,5 +312,7 @@ describe("authenticated user chat page", () => {
       "reserve-message",
       expect.objectContaining({ type: "RESERVE_AND_ROUTE" }),
     );
+    view.rerender(<Home />);
+    expect(workflow.executeUiAction).toHaveBeenCalledTimes(1);
   });
 });

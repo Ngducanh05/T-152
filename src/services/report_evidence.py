@@ -163,8 +163,10 @@ class ReportEvidenceStorage:
         return f"{base_url}/storage/v1{signed_url}"
 
     async def delete(self, storage_path: str | None) -> bool:
-        if not storage_path or not self._configured():
+        if not storage_path:
             return True
+        if not self._configured():
+            return self.settings.demo_mode
 
         base_url = self.settings.supabase_url.rstrip("/")
         service_key = self.settings.supabase_service_role_key

@@ -474,9 +474,14 @@ async def delete_wrong_parking_report(
         actor_id=actor_id,
         outcome="success",
     )
+    cleanup_succeeded = False
     try:
-        await ReportEvidenceStorage(settings).delete(report.evidence_storage_path)
+        cleanup_succeeded = await ReportEvidenceStorage(settings).delete(
+            report.evidence_storage_path
+        )
     except Exception:  # noqa: BLE001 - storage cleanup is best effort after DB delete
+        cleanup_succeeded = False
+    if not cleanup_succeeded:
         logger.warning(
             "wrong_parking_report_evidence_cleanup report_id=%s outcome=failure request_id=%s",
             report.id,

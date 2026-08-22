@@ -59,3 +59,31 @@ async def test_report_evidence_delete_surfaces_failed_storage_result(
     )
 
     assert await storage.delete("reports/REPORT-001/evidence.jpg") is False
+
+
+@pytest.mark.asyncio
+async def test_report_evidence_delete_fails_closed_when_unconfigured_outside_demo() -> None:
+    storage = ReportEvidenceStorage(
+        Settings(
+            demo_mode=False,
+            supabase_url=None,
+            supabase_service_role_key=None,
+            supabase_report_evidence_bucket="",
+        )
+    )
+
+    assert await storage.delete("reports/REPORT-001/evidence.jpg") is False
+
+
+@pytest.mark.asyncio
+async def test_report_evidence_delete_accepts_synthetic_demo_path_when_unconfigured() -> None:
+    storage = ReportEvidenceStorage(
+        Settings(
+            demo_mode=True,
+            supabase_url=None,
+            supabase_service_role_key=None,
+            supabase_report_evidence_bucket="",
+        )
+    )
+
+    assert await storage.delete("reports/REPORT-001/evidence.jpg") is True

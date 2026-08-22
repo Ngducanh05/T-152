@@ -14,6 +14,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 from src.api.dependencies import get_optional_current_user
 from src.api.main import REQUEST_ID_HEADER, create_app
+from src.api.routes import admin as admin_routes
 from src.api.routes import reports as report_routes
 from src.core.config import Settings, get_settings
 from src.core.database import get_db_session
@@ -567,6 +568,46 @@ async def test_user_can_report_wrong_parking_and_admin_can_read_it(
 
 
 @pytest.mark.asyncio
+async def test_wrong_parking_report_accepts_real_multipart_request(
+    simulator_api: SimulatorApi,
+):
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        data={
+            "user_id": "USER-001",
+            "slot_id": "F1-D01",
+            "reason_code": "CROSSED_LINE",
+            "observed_plate_number": "51a-123.45",
+            "description": "Xe do lan vach giua hai o.",
+        },
+        files={
+            "evidence": (
+                "evidence.jpg",
+                b"\xff\xd8\xff\xe0fake-jpeg-evidence\xff\xd9",
+                "image/jpeg",
+            )
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["success"] is True
+    report = payload["data"]
+    assert report["id"].startswith("REPORT-")
+    assert report["slot_id"] == "F1-D01"
+
+    async with simulator_api.session_factory() as session:
+        persisted = await session.get(WrongParkingReportRow, report["id"])
+
+    assert persisted is not None
+    assert persisted.slot_id == "F1-D01"
+    assert persisted.evidence_storage_path is not None
+    assert persisted.evidence_content_type == "image/jpeg"
+    assert persisted.evidence_size_bytes is not None
+    assert persisted.evidence_size_bytes > 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("payload", "expected_status", "expected_code"),
     [
@@ -883,6 +924,55 @@ async def test_admin_report_lifecycle_filters_conflicts_reopens_and_hard_deletes
     assert missing.json()["error"]["code"] == "REPORT_NOT_FOUND"
     async with simulator_api.session_factory() as session:
         assert await session.get(WrongParkingReportRow, report_id) is None
+
+
+@pytest.mark.asyncio
+async def test_admin_hard_delete_warns_when_storage_delete_returns_false(
+    simulator_api: SimulatorApi,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    class FailedCleanupStorage:
+        def __init__(self, _settings: Settings) -> None:
+            return None
+
+        async def delete(self, storage_path: str | None) -> bool:
+            assert storage_path == "reports/REPORT-CLEANUP/evidence.jpg"
+            return False
+
+    monkeypatch.setitem(
+        admin_routes.delete_wrong_parking_report.__globals__,
+        "ReportEvidenceStorage",
+        FailedCleanupStorage,
+    )
+    report = await _create_lifecycle_report(simulator_api, slot_id="F1-D02")
+    report_id = str(report["id"])
+    async with simulator_api.session_factory() as session, session.begin():
+        persisted = await session.get(WrongParkingReportRow, report_id)
+        assert persisted is not None
+        persisted.evidence_storage_path = "reports/REPORT-CLEANUP/evidence.jpg"
+        persisted.evidence_content_type = "image/jpeg"
+        persisted.evidence_size_bytes = 128
+        persisted.observed_plate_number = "SECRET-PLATE"
+        persisted.description = "SECRET-DESCRIPTION"
+
+    request_id = str(uuid4())
+    caplog.set_level("WARNING", logger="src.api.routes.admin")
+    deleted = await simulator_api.client.delete(
+        f"/api/v1/admin/reports/{report_id}",
+        params={"expected_version": 0},
+        headers={REQUEST_ID_HEADER: request_id},
+    )
+
+    assert deleted.status_code == 200
+    assert deleted.json()["data"] == {"deleted_report_id": report_id}
+    async with simulator_api.session_factory() as session:
+        assert await session.get(WrongParkingReportRow, report_id) is None
+    assert f"report_id={report_id}" in caplog.text
+    assert "outcome=failure" in caplog.text
+    assert f"request_id={request_id}" in caplog.text
+    assert "SECRET-PLATE" not in caplog.text
+    assert "SECRET-DESCRIPTION" not in caplog.text
 
 
 @pytest.mark.asyncio
