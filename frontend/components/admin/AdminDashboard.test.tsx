@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   parkSimulatedVehicle: vi.fn(),
   leaveSimulatedVehicle: vi.fn(),
   updateAdminSlotStatus: vi.fn(),
+  getAdminReportEvidenceUrl: vi.fn(async () => ({ signed_url: "https://example.test/evidence.jpg" })),
 }));
 
 vi.mock("@/hooks/use-parksmart-data", () => ({
@@ -49,6 +50,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       parkSimulatedVehicle: mocks.parkSimulatedVehicle,
       leaveSimulatedVehicle: mocks.leaveSimulatedVehicle,
       updateAdminSlotStatus: mocks.updateAdminSlotStatus,
+      getAdminReportEvidenceUrl: mocks.getAdminReportEvidenceUrl,
     },
   };
 });
@@ -65,6 +67,9 @@ function report(id: string, createdAt: string): WrongParkingReport {
     status: "OPEN",
     observed_plate_number: null,
     description: null,
+    evidence_storage_path: null,
+    evidence_content_type: null,
+    evidence_size_bytes: null,
     created_at: createdAt,
     updated_at: createdAt,
     resolved_at: null,
@@ -135,6 +140,15 @@ afterEach(() => {
 });
 
 describe("AdminDashboard report warnings", () => {
+  it("does not render simulator controls", async () => {
+    render(<AdminDashboard />);
+
+    expect(await screen.findByTestId("parking-map")).toBeVisible();
+    expect(screen.queryByText("MÔ PHỎNG BÃI XE")).not.toBeInTheDocument();
+    expect(screen.queryByText("Điều khiển thủ công")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Chạy kịch bản cố định" })).not.toBeInTheDocument();
+  });
+
   it("keeps the admin map and decrements warnings only after authoritative refetch", async () => {
     const user = userEvent.setup();
     render(<AdminDashboard />);
@@ -215,5 +229,20 @@ describe("AdminDashboard report warnings", () => {
       "F1-A02",
       { status: "OCCUPIED", expected_version: expect.any(Number) },
     ));
+  });
+
+  it("lets admin close the selected slot detail and clears the map highlight", async () => {
+    const user = userEvent.setup();
+    render(<AdminDashboard />);
+
+    const slot = await screen.findByRole("button", { name: /F1-A02, Khu A/ });
+    await user.click(slot);
+    expect(await screen.findByRole("heading", { name: /Ô A02 — Tầng 1/ })).toBeVisible();
+    expect(slot).toHaveClass("is-selected");
+
+    await user.click(screen.getByRole("button", { name: "Đóng chi tiết ô đỗ" }));
+
+    expect(screen.queryByText("CHI TIẾT Ô ĐỖ")).not.toBeInTheDocument();
+    expect(slot).not.toHaveClass("is-selected");
   });
 });

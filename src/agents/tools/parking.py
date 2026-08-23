@@ -30,6 +30,7 @@ from src.core.reservation import ReservationService
 from src.core.routing import RoutingService
 from src.models.schemas import (
     ErrorCode,
+    FloorId,
     FloorScopedId,
     ParkingReservation,
     ParkingSession,
@@ -126,6 +127,7 @@ async def get_parking_slot_status(
 
 @tool
 async def recommend_parking_slot(
+    floor_id: FloorId | None = None,
     zone_id: ZoneId | None = None,
     charging_required: bool = False,
     accessible_required: bool = False,
@@ -141,6 +143,7 @@ async def recommend_parking_slot(
         request = RecommendationRequest(
             user_id=runtime.context.user_id,
             start_node_id=start_node_id,
+            floor_id=floor_id,
             zone_id=zone_id,
             charging_required=charging_required,
             accessible_required=accessible_required,

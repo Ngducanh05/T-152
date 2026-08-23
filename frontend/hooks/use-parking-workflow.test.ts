@@ -198,6 +198,7 @@ describe("useParkingWorkflow", () => {
     expect(api.recommend).toHaveBeenCalledWith({
       user_id: "USER-001",
       start_node_id: "F1-ENTRANCE",
+      floor_id: "F1",
       charging_required: true,
       accessible_required: false,
       near_elevator: true,

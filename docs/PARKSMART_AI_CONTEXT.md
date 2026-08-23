@@ -13,6 +13,24 @@
 
 # ParkSmart AI – Project Context
 
+## Cập nhật ngữ cảnh hiện hành — 2026-08-24
+
+Nội dung dài phía dưới là baseline MVP lịch sử. Các thay đổi đã tích hợp và được xem là
+nguồn ngữ cảnh hiện hành gồm:
+
+- bản đồ F1/F2/F3 với 120 ô, renderer phẳng và isometric hiện có;
+- Supabase PostgreSQL, Auth và Storage ảnh report riêng tư;
+- đăng nhập user/admin theo session riêng từng tab;
+- report progressive: chọn lý do chưa gửi ngay, biển số/mô tả/ảnh tùy chọn, nút gửi xác nhận;
+- verified adjacent observations, verified wrong-parking reports và ParkSmart Points từ
+  reward ledger, không cộng điểm trước khi admin xác minh;
+- Agent lọc đề xuất theo `floor_id` mà không bắt buộc `zone_id`;
+- dashboard admin không hiển thị bộ điều khiển simulator và cho phép đóng panel chi tiết ô.
+
+Khi baseline bên dưới nói “một tầng”, “40 ô” hoặc yêu cầu simulator controls, dùng
+`docs/architecture.md`, `docs/architecture/parking-map-spec.md` và
+`docs/api/api-contract.md` làm nguồn chuẩn mới hơn.
+
 ## 1. Mục đích tài liệu
 
 Tài liệu này là nguồn ngữ cảnh chung cho dự án **ParkSmart AI**.

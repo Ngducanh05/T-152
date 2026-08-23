@@ -285,5 +285,3 @@ describe("IsometricMap", () => {
     expect(screen.getByText("3")).toBeDefined();
   });
 });
-
-

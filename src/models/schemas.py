@@ -161,6 +161,7 @@ class ErrorCode(StrEnum):
     REPORT_NOT_FOUND = "REPORT_NOT_FOUND"
     REPORT_VERSION_CONFLICT = "REPORT_VERSION_CONFLICT"
     INVALID_REPORT_TRANSITION = "INVALID_REPORT_TRANSITION"
+    REPORT_EVIDENCE_INVALID = "REPORT_EVIDENCE_INVALID"
     OBSERVATION_NOT_FOUND = "OBSERVATION_NOT_FOUND"
     OBSERVATION_ALREADY_EXISTS = "OBSERVATION_ALREADY_EXISTS"
     OBSERVATION_EXPIRED = "OBSERVATION_EXPIRED"
@@ -329,6 +330,9 @@ class WrongParkingReport(ContractModel):
     status: WrongParkingReportStatus
     observed_plate_number: str | None = None
     description: str | None = None
+    evidence_storage_path: str | None = None
+    evidence_content_type: str | None = None
+    evidence_size_bytes: int | None = Field(default=None, ge=0)
     created_at: AwareDatetime
     updated_at: AwareDatetime
     resolved_at: AwareDatetime | None = None

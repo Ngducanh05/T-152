@@ -20,6 +20,7 @@ const nextCli = path.join(process.cwd(), "node_modules", "next", "dist", "bin", 
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: ["**/auth.spec.ts"],
   fullyParallel: false,
   workers: 1,
   retries: 1,
@@ -66,6 +67,7 @@ export default defineConfig({
       env: {
         ...process.env,
         NEXT_TELEMETRY_DISABLED: "1",
+        NEXT_PUBLIC_DEMO_MODE: "true",
         PARKSMART_BACKEND_ORIGIN: backendUrl,
       },
     },

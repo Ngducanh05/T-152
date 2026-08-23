@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo, useState } from "react";
 
 import {
@@ -36,6 +37,7 @@ interface ReportDetailDrawerProps {
   ) => Promise<boolean>;
   onReopen: (report: WrongParkingReport) => Promise<boolean>;
   onDelete: (report: WrongParkingReport) => Promise<boolean>;
+  onLoadEvidence: (report: WrongParkingReport) => Promise<string | null>;
 }
 
 function formatReportTime(value: string) {
@@ -56,6 +58,7 @@ export function ReportDetailDrawer({
   onResolve,
   onReopen,
   onDelete,
+  onLoadEvidence,
 }: ReportDetailDrawerProps) {
   const [resolutionNotes, setResolutionNotes] = useState<Record<string, string>>({});
   const [resolutionOutcomes, setResolutionOutcomes] = useState<
@@ -63,6 +66,8 @@ export function ReportDetailDrawer({
   >({});
   const [deleteCandidate, setDeleteCandidate] =
     useState<WrongParkingReport | null>(null);
+  const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
+  const [loadingEvidenceId, setLoadingEvidenceId] = useState<string | null>(null);
   const orderedReports = useMemo(
     () =>
       [...reports].toSorted(
@@ -77,6 +82,19 @@ export function ReportDetailDrawer({
     if (!deleteCandidate || anyMutationPending) return;
     const deleted = await onDelete(deleteCandidate);
     if (deleted) setDeleteCandidate(null);
+  }
+
+  async function loadEvidence(report: WrongParkingReport) {
+    if (loadingEvidenceId) return;
+    setLoadingEvidenceId(report.id);
+    try {
+      const signedUrl = await onLoadEvidence(report);
+      if (signedUrl) {
+        setEvidenceUrls((current) => ({ ...current, [report.id]: signedUrl }));
+      }
+    } finally {
+      setLoadingEvidenceId(null);
+    }
   }
 
   return (
@@ -141,6 +159,27 @@ export function ReportDetailDrawer({
                   <p><strong>Biển số:</strong> {report.observed_plate_number}</p>
                 )}
                 {report.description && <p>{report.description}</p>}
+                {evidenceUrls[report.id] ? (
+                  <Image
+                    className="report-evidence-image"
+                    src={evidenceUrls[report.id]}
+                    alt={`Ảnh hiện trường của report ${report.id}`}
+                    width={720}
+                    height={480}
+                    unoptimized
+                  />
+                ) : report.evidence_storage_path ? (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={loadingEvidenceId !== null}
+                    onClick={() => void loadEvidence(report)}
+                  >
+                    {loadingEvidenceId === report.id ? "Đang tải ảnh…" : "Xem ảnh hiện trường"}
+                  </button>
+                ) : (
+                  <p><strong>Ảnh hiện trường:</strong> Không có ảnh đính kèm</p>
+                )}
                 {report.resolution_note && (
                   <p className="resolution-note"><strong>Ghi chú xử lý:</strong> {report.resolution_note}</p>
                 )}

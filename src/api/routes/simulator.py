@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies import require_admin_or_demo
 from src.core.config import Settings, get_settings
 from src.core.database import get_db_session
 from src.core.demo_reset import DemoResetService
@@ -21,11 +22,17 @@ from src.core.simulator import (
 from src.models.common import ErrorResponse, SuccessResponse
 from src.models.schemas import ErrorCode, FloorScopedId, ParkingSlot, SlotStatus
 
-router = APIRouter(prefix="/simulator", tags=["Simulator"])
+router = APIRouter(
+    prefix="/simulator",
+    tags=["Simulator"],
+    dependencies=[Depends(require_admin_or_demo)],
+)
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 SettingsDependency = Annotated[Settings, Depends(get_settings)]
 ERROR_RESPONSES = {
     400: {"model": ErrorResponse},
+    401: {"model": ErrorResponse},
+    403: {"model": ErrorResponse},
     404: {"model": ErrorResponse},
     409: {"model": ErrorResponse},
 }

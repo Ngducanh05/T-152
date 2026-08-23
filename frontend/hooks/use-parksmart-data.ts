@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, parkSmartApi, type ParkSmartApiClient } from "@/lib/api";
-import { MVP_DEMO_USER_ID } from "@/lib/demo";
 import type {
   ActiveParkingSession,
   ContributionRecord,
@@ -25,7 +24,7 @@ export interface ParkSmartSnapshot {
   currentLocation: Location | null;
   activeReservation: ParkingReservation | null;
   activeSession: ActiveParkingSession | null;
-  rewardSummary: RewardSummary;
+  rewardSummary: RewardSummary | null;
   rewardConfiguration: RewardConfiguration;
   contributions: ContributionRecord[];
 }
@@ -74,31 +73,41 @@ function asApiError(error: unknown, message: string) {
 
 export async function loadAuthoritativeState(
   api: ParkSmartApiClient,
-  userId: string,
+  userId: string | null,
   signal?: AbortSignal,
 ): Promise<ParkSmartSnapshot> {
+  const [map, slots, status, rewardConfiguration] = await Promise.all([
+    api.getMap(signal),
+    api.getSlots({}, signal),
+    api.getParkingStatus(signal),
+    api.getRewardConfiguration(signal),
+  ]);
+  if (!userId) {
+    return {
+      map,
+      slots,
+      status,
+      currentLocation: null,
+      activeReservation: null,
+      activeSession: null,
+      rewardSummary: null,
+      rewardConfiguration,
+      contributions: [],
+    };
+  }
   const [
-    map,
-    slots,
-    status,
     currentLocation,
     activeReservation,
     activeSession,
     rewardSummary,
-    rewardConfiguration,
     contributions,
-  ] =
-    await Promise.all([
-      api.getMap(signal),
-      api.getSlots({}, signal),
-      api.getParkingStatus(signal),
-      api.getCurrentLocation(userId, signal),
-      api.getActiveReservation(userId, signal),
-      api.getActiveSession(userId, signal),
-      api.getRewardSummary(userId, signal),
-      api.getRewardConfiguration(signal),
-      api.getUserContributions(userId, signal),
-    ]);
+  ] = await Promise.all([
+    api.getCurrentLocation(userId, signal),
+    api.getActiveReservation(userId, signal),
+    api.getActiveSession(userId, signal),
+    api.getRewardSummary(userId, signal),
+    api.getUserContributions(userId, signal),
+  ]);
   return {
     map,
     slots,
@@ -114,7 +123,7 @@ export async function loadAuthoritativeState(
 
 export function useParkSmartData(
   api: ParkSmartApiClient = parkSmartApi,
-  userId = MVP_DEMO_USER_ID,
+  userId: string | null = null,
 ): ParkSmartData {
   const [state, setState] = useState<ParkSmartDataState>(initialState);
   const mountedRef = useRef(false);
@@ -185,12 +194,16 @@ export function useParkSmartData(
       const controller = new AbortController();
       pollControllerRef.current = controller;
       try {
-        const [slots, status, rewardSummary, contributions] = await Promise.all([
+        const [slots, status] = await Promise.all([
           api.getSlots({}, controller.signal),
           api.getParkingStatus(controller.signal),
-          api.getRewardSummary(userId, controller.signal),
-          api.getUserContributions(userId, controller.signal),
         ]);
+        const [rewardSummary, contributions] = userId
+          ? await Promise.all([
+              api.getRewardSummary(userId, controller.signal),
+              api.getUserContributions(userId, controller.signal),
+            ])
+          : [null, []];
         if (mountedRef.current) {
           setState((current) => ({
             ...current,

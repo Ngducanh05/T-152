@@ -214,4 +214,3 @@ describe("iso-scene", () => {
     expect(scene.routePoints).toBeNull();
   });
 });
-

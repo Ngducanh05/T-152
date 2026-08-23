@@ -344,3 +344,41 @@ bốn report flows nêu trên, đã chạy trên production frontend và API/dat
   admin click slot để mở report/observation và đổi trạng thái qua
   Parking State Service. Reward
   summary/contribution ledger được polling nên settlement hiện ra mà không reload.
+
+## 10. Integration và UX follow-up — 2026-08-24
+
+Các kết quả dưới đây thay thế mô tả “chọn lý do là gửi ngay” của demo 2026-08-19:
+
+- Wrong-parking dialog hiện là luồng xác nhận hai bước: chọn lý do chỉ mở form; biển số,
+  mô tả và ảnh đều tùy chọn; chỉ nút gửi cuối mới gọi API. Modal giới hạn theo viewport,
+  phần nội dung cuộn độc lập và nút gửi sticky nên dùng được trên màn hình thấp.
+- Auth frontend dùng Supabase `sessionStorage` theo tab. Hai tab mở độc lập có thể giữ user
+  và admin riêng; tab được nhân bản vẫn có thể nhận bản sao session ban đầu theo hành vi
+  trình duyệt.
+- Agent recommendation truyền `floor_id` xuống tool như hard filter và không bắt buộc khu,
+  khắc phục hội thoại tìm “tầng 1” nhưng bị hỏi A/B/C/D rồi trả rỗng.
+- Dashboard admin đã bỏ hoàn toàn bộ điều khiển simulator. Click lại ô đang chọn hoặc nút
+  “Đóng” đóng panel chi tiết và xóa highlight; report/observation vẫn mở trực tiếp từ overlay.
+- Supabase shared database đã chạy seed idempotent bổ sung dữ liệu nhiều tầng: 120 slot,
+  mỗi F1/F2/F3 có 40; node theo tầng là 55/53/53. Lần bổ sung tạo 306 row
+  (`nodes=107`, `edges=119`, `slots=80`) cho database trước đó chỉ có F1.
+
+Verification đã thực chạy cho các thay đổi liên quan:
+
+| Scope | Result |
+|---|---|
+| Report/map/isometric unit tests | 29 passed |
+| Seed tests | 4 passed |
+| Report popup tests | 5 passed |
+| Admin dashboard tests | 5 passed |
+| Auth/session tests | 5 passed |
+| Parking workflow frontend tests | 25 passed |
+| Agent tool backend tests | 28 passed |
+| Agent orchestration/eval tests | 34 passed, 1 skipped |
+| Ruff (changed backend scope) | PASS |
+| Frontend lint | PASS |
+| Frontend production build | PASS |
+
+Đây là verification theo phạm vi follow-up; không diễn giải các số trên thành một lần chạy
+lại toàn bộ backend/frontend/E2E suite. Real Supabase smoke cho upload/xem ảnh và phiên user/
+admin riêng tab vẫn cần chạy trên trình duyệt với credential triển khai.

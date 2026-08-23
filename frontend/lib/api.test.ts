@@ -239,4 +239,33 @@ describe("admin operations client", () => {
     expect(fetcher.mock.calls[4]?.[1]?.method).toBe("POST");
     expect(fetcher.mock.calls[5]?.[1]?.method).toBe("DELETE");
   });
+
+  it("uses multipart only when optional report evidence is selected", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope({ id: "REPORT-IMAGE" })),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+    });
+    const evidence = new File(["image-bytes"], "scene.jpg", {
+      type: "image/jpeg",
+    });
+
+    await api.reportWrongParking({
+      user_id: "USER-001",
+      slot_id: "F2-D03",
+      reason_code: "BLOCKING_ACCESS",
+      evidence,
+    });
+
+    const request = fetcher.mock.calls[0]?.[1];
+    expect(request?.body).toBeInstanceOf(FormData);
+    const body = request?.body as FormData;
+    expect(body.get("user_id")).toBe("USER-001");
+    expect(body.get("slot_id")).toBe("F2-D03");
+    expect(body.get("reason_code")).toBe("BLOCKING_ACCESS");
+    expect(body.get("evidence")).toBe(evidence);
+    expect(new Headers(request?.headers).has("Content-Type")).toBe(false);
+  });
 });
