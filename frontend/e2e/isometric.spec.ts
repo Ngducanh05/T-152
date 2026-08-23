@@ -78,6 +78,9 @@ test.describe("Isometric View (Phase 12)", () => {
       },
     });
     expect(reportRes.status()).toBe(201);
+    const report = (await reportRes.json()) as {
+      data: { id: string; version: number };
+    };
 
     await page.goto("/admin");
     await expect(page.getByTestId("parking-map")).toBeVisible();
@@ -108,6 +111,11 @@ test.describe("Isometric View (Phase 12)", () => {
     await expect(drawer).toBeVisible();
     await expect(drawer).toContainText("Ô A02");
     await expect(drawer).not.toContainText("F1-A01");
+
+    const deleted = await page.request.delete(
+      `${apiUrl}/admin/reports/${report.data.id}?expected_version=${report.data.version}`,
+    );
+    expect(deleted.status()).toBe(200);
   });
 
   test("AC-30: Ô đang là vị trí hiện tại: marker ⌖ hiển thị đầy đủ và không bị clip-path xén", async ({ page }) => {

@@ -21,9 +21,17 @@ function reportCard(page: Page, reportId: string) {
   return page.locator(`[data-report-id="${reportId}"]`);
 }
 
-async function resolveReport(page: Page, report: E2eWrongParkingReport) {
+async function resolveReport(
+  page: Page,
+  report: E2eWrongParkingReport,
+  outcome: Exclude<
+    E2eWrongParkingReport["verification_outcome"],
+    "PENDING"
+  > = "CONFIRMED",
+) {
   const card = reportCard(page, report.id);
   await expect(card).toBeVisible();
+  await card.getByLabel(/Kết quả xác minh/).selectOption(outcome);
   await card.getByRole("button", { name: "Resolve report" }).click();
   await expect(card.getByRole("button", { name: "Reopen report" })).toBeVisible();
   return { ...report, status: "RESOLVED" as const, version: report.version + 1 };
@@ -33,6 +41,8 @@ test("admin resolves the last OPEN report and removes the slot warning", async (
   page,
 }) => {
   const created = await createWrongParkingReport(page, "F1-C02");
+  expect(created.reward_points).toBe(20);
+  expect(created.reward_status).toBe("PENDING");
   await page.goto("/admin");
 
   const slot = await openReportDrawer(page, created.slot_id, 1);
@@ -41,15 +51,27 @@ test("admin resolves the last OPEN report and removes the slot warning", async (
 
   const detail = await page.request.get(`${apiUrl}/admin/reports/${created.id}`);
   expect(detail.status()).toBe(200);
-  expect(((await detail.json()) as { data: E2eWrongParkingReport }).data.status).toBe(
-    "RESOLVED",
-  );
+  const resolvedDetail = ((await detail.json()) as { data: E2eWrongParkingReport })
+    .data;
+  expect(resolvedDetail).toMatchObject({
+    status: "RESOLVED",
+    verification_outcome: "CONFIRMED",
+    reward_status: "EARNED",
+  });
+  const summary = await page.request.get(`${apiUrl}/rewards/users/USER-001/summary`);
+  expect((await summary.json()).data.available_points).toBeGreaterThanOrEqual(20);
   await deleteWrongParkingReport(page, resolved);
 });
 
 test("two OPEN reports keep the warning until both are resolved", async ({ page }) => {
   const first = await createWrongParkingReport(page, "F1-C03");
   const second = await createWrongParkingReport(page, "F1-C03");
+  expect(first.reward_points).toBe(20);
+  expect(second).toMatchObject({
+    reward_points: 0,
+    reward_status: null,
+    duplicate_candidate_of_id: first.id,
+  });
   await page.goto("/admin");
 
   const slot = await openReportDrawer(page, first.slot_id, 2);
@@ -57,12 +79,33 @@ test("two OPEN reports keep the warning until both are resolved", async ({ page 
   await expect(slot).toHaveClass(/has-open-reports/);
   await expect(slot.locator(".map-slot-report-warning b")).toHaveText("1");
 
-  const secondResolved = await resolveReport(page, second);
+  const secondResolved = await resolveReport(page, second, "DUPLICATE");
   await expect(slot).not.toHaveClass(/has-open-reports/);
   await expect(slot.locator(".map-slot-report-warning")).toHaveCount(0);
 
   await deleteWrongParkingReport(page, firstResolved);
   await deleteWrongParkingReport(page, secondResolved);
+});
+
+test("a rejected report cancels its reward without changing the slot", async ({
+  page,
+}) => {
+  const before = await page.request.get(`${apiUrl}/parking/slots/F1-C05`);
+  const beforeStatus = (await before.json()).data.status as string;
+  const created = await createWrongParkingReport(page, "F1-C05");
+  expect(created.reward_status).toBe("PENDING");
+  await page.goto("/admin");
+
+  await openReportDrawer(page, created.slot_id, 1);
+  const resolved = await resolveReport(page, created, "REJECTED");
+  const detail = await page.request.get(`${apiUrl}/admin/reports/${created.id}`);
+  expect(((await detail.json()) as { data: E2eWrongParkingReport }).data).toMatchObject({
+    verification_outcome: "REJECTED",
+    reward_status: "CANCELLED",
+  });
+  const after = await page.request.get(`${apiUrl}/parking/slots/F1-C05`);
+  expect((await after.json()).data.status).toBe(beforeStatus);
+  await deleteWrongParkingReport(page, resolved);
 });
 
 test("hard delete requires confirmation and GET returns 404 afterward", async ({

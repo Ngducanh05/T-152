@@ -9,6 +9,8 @@ import { formatFloorName } from "@/lib/parking-display";
 import type {
   FloorId,
   FloorScopedId,
+  MapEdge,
+  MapNode,
   ParkingMap as ParkingMapData,
   ParkingSlot as ParkingSlotData,
   ParkingStatus,
@@ -43,7 +45,9 @@ export interface ParkingMapProps {
   route?: RouteResult | null;
   onSelectSlot?: (slotId: string) => void;
   openReportCountBySlot?: Record<string, number>;
+  pendingObservationCountBySlot?: Record<string, number>;
   onOpenReportedSlot?: (slotId: string) => void;
+  onOpenObservedSlot?: (slotId: string) => void;
   heading?: string;
   description?: string;
   showSummary?: boolean;
@@ -53,6 +57,55 @@ export interface ParkingMapProps {
 function floorOfId(id: string): FloorId | null {
   const m = /^(F[1-3])-/.exec(id);
   return m ? (m[1] as FloorId) : null;
+}
+
+function cloneIdToFloor(id: string, floorId: FloorId) {
+  return id.replace(/^F1-/, `${floorId}-`);
+}
+
+function completeFloorNodes(nodes: MapNode[], floorId: FloorId): MapNode[] {
+  const existing = nodes.filter((node) => node.floor_id === floorId);
+  if (floorId === "F1") return existing;
+  const ids = new Set(existing.map((node) => node.id));
+  const fallbacks = nodes
+    .filter(
+      (node) =>
+        node.floor_id === "F1" &&
+        node.type !== "ENTRANCE" &&
+        node.type !== "EXIT",
+    )
+    .map((node) => ({
+      ...node,
+      id: cloneIdToFloor(node.id, floorId) as FloorScopedId,
+      floor_id: floorId,
+    }))
+    .filter((node) => !ids.has(node.id));
+  return [...existing, ...fallbacks];
+}
+
+function completeFloorEdges(edges: MapEdge[], floorId: FloorId): MapEdge[] {
+  const existing = edges.filter(
+    (edge) =>
+      floorOfId(edge.from_node) === floorId &&
+      floorOfId(edge.to_node) === floorId,
+  );
+  if (floorId === "F1") return existing;
+  const keys = new Set(
+    existing.map((edge) => `${edge.from_node}:${edge.to_node}`),
+  );
+  const fallbacks = edges
+    .filter(
+      (edge) =>
+        floorOfId(edge.from_node) === "F1" &&
+        floorOfId(edge.to_node) === "F1",
+    )
+    .map((edge) => ({
+      ...edge,
+      from_node: cloneIdToFloor(edge.from_node, floorId) as FloorScopedId,
+      to_node: cloneIdToFloor(edge.to_node, floorId) as FloorScopedId,
+    }))
+    .filter((edge) => !keys.has(`${edge.from_node}:${edge.to_node}`));
+  return [...existing, ...fallbacks];
 }
 
 export function ParkingMap({
@@ -67,7 +120,9 @@ export function ParkingMap({
   route = null,
   onSelectSlot,
   openReportCountBySlot = {},
+  pendingObservationCountBySlot = {},
   onOpenReportedSlot,
+  onOpenObservedSlot,
   heading = "Sơ đồ bãi xe",
   description = "Trạng thái các ô được cập nhật tự động",
   showSummary = true,
@@ -88,11 +143,19 @@ export function ParkingMap({
     return "F1";
   }, [currentLocationNodeId, selectedSlotId]);
 
-  const [activeFloor, setActiveFloor] = useState<FloorId>(initialFloor);
+  const [floorChoice, setFloorChoice] = useState<{
+    floor: FloorId;
+    selectedSlotId: FloorScopedId | null;
+  }>(() => ({ floor: initialFloor, selectedSlotId }));
+  const newlySelectedFloor = selectedSlotId ? floorOfId(selectedSlotId) : null;
+  const activeFloor =
+    selectedSlotId !== floorChoice.selectedSlotId && newlySelectedFloor
+      ? newlySelectedFloor
+      : floorChoice.floor;
 
   // Filter data to the active floor
   const floorNodes = useMemo(() => {
-    const base = map.nodes.filter((node) => node.floor_id === activeFloor);
+    const base = completeFloorNodes(map.nodes, activeFloor);
     if (activeFloor === "F2") {
       // F2 có 2 dốc: lên F1 [85, 75] và xuống F3 [15, 25]
       return [
@@ -110,11 +173,7 @@ export function ParkingMap({
   }, [map.nodes, activeFloor]);
 
   const floorEdges = useMemo(() => {
-    const base = map.edges.filter((edge) => {
-      const fromFloor = floorOfId(edge.from_node);
-      const toFloor = floorOfId(edge.to_node);
-      return fromFloor === activeFloor && toFloor === activeFloor;
-    });
+    const base = completeFloorEdges(map.edges, activeFloor);
 
     if (activeFloor === "F2") {
       // Thêm edge từ CP1 sang RAMP-DOWN cho F2
@@ -304,7 +363,7 @@ export function ParkingMap({
               key={floorId}
               type="button"
               className={`floor-tab ${activeFloor === floorId ? "floor-tab--active" : ""}`}
-              onClick={() => setActiveFloor(floorId)}
+              onClick={() => setFloorChoice({ floor: floorId, selectedSlotId })}
               aria-pressed={activeFloor === floorId}
               aria-label={`${formatFloorName(floorId)}: ${counts.available}/${counts.total} trống`}
             >
@@ -477,12 +536,12 @@ export function ParkingMap({
               </g>
             )}
             {floorRoute && <RouteOverlay route={floorRoute} nodeById={nodeById} />}
-            {currentNode && currentNode.type !== "SLOT" && (
+            {currentNode && currentNode.type !== "SLOT" && currentNode.type !== "CHECKPOINT" && (
               <g
                 className="current-location-node"
                 transform={`translate(${getDisplayPoint(currentNode).join(" ")})`}
                 data-testid="current-location"
-                aria-label={`Vị trí hiện tại ${currentNode.id}`}
+                aria-label="Vị trí hiện tại trong bãi"
               >
                 <circle r="3.2" />
                 <text textAnchor="middle" y="1.1">⌖</text>
@@ -506,8 +565,10 @@ export function ParkingMap({
                     parkedVehicle={parkedVehicleSlotId === slot.id}
                     currentLocation={currentLocationNodeId === slot.id}
                     openReportCount={openReportCountBySlot[slot.id] ?? 0}
+                    pendingObservationCount={pendingObservationCountBySlot[slot.id] ?? 0}
                     onSelect={onSelectSlot}
                     onOpenReportedSlot={onOpenReportedSlot}
+                    onOpenObservedSlot={onOpenObservedSlot}
                   />
                 );
               })}
@@ -528,8 +589,10 @@ export function ParkingMap({
             parkedVehicleSlotId={parkedVehicleSlotId}
             currentLocationNodeId={currentLocationNodeId}
             openReportCountBySlot={openReportCountBySlot}
+            pendingObservationCountBySlot={pendingObservationCountBySlot}
             onSelectSlot={onSelectSlot}
             onOpenReportedSlot={onOpenReportedSlot}
+            onOpenObservedSlot={onOpenObservedSlot}
           />
         </div>
       )}

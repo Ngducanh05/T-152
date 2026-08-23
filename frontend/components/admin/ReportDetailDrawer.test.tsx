@@ -26,6 +26,10 @@ function report(
     resolved_at: null,
     resolved_by: null,
     resolution_note: null,
+    verification_outcome: "PENDING",
+    reward_points: 20,
+    reward_status: "PENDING",
+    duplicate_candidate_of_id: null,
     version: 0,
     ...overrides,
   };

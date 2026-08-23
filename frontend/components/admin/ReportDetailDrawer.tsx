@@ -5,10 +5,15 @@ import { useMemo, useState } from "react";
 import {
   formatParkingLocation,
   formatSlotStatus,
+  formatVerificationOutcome,
   formatWrongParkingReason,
   formatWrongParkingReportStatus,
 } from "@/lib/parking-display";
-import type { ParkingSlot, WrongParkingReport } from "@/lib/types";
+import type {
+  ParkingSlot,
+  WrongParkingReport,
+  WrongParkingReportVerificationOutcome,
+} from "@/lib/types";
 
 export type ReportMutationAction = "resolve" | "reopen" | "delete";
 export interface PendingReportMutation {
@@ -26,6 +31,7 @@ interface ReportDetailDrawerProps {
   onRefresh: () => Promise<void>;
   onResolve: (
     report: WrongParkingReport,
+    outcome: Exclude<WrongParkingReportVerificationOutcome, "PENDING">,
     resolutionNote: string | null,
   ) => Promise<boolean>;
   onReopen: (report: WrongParkingReport) => Promise<boolean>;
@@ -52,6 +58,9 @@ export function ReportDetailDrawer({
   onDelete,
 }: ReportDetailDrawerProps) {
   const [resolutionNotes, setResolutionNotes] = useState<Record<string, string>>({});
+  const [resolutionOutcomes, setResolutionOutcomes] = useState<
+    Record<string, Exclude<WrongParkingReportVerificationOutcome, "PENDING"> | "">
+  >({});
   const [deleteCandidate, setDeleteCandidate] =
     useState<WrongParkingReport | null>(null);
   const orderedReports = useMemo(
@@ -135,22 +144,48 @@ export function ReportDetailDrawer({
                 {report.resolution_note && (
                   <p className="resolution-note"><strong>Ghi chú xử lý:</strong> {report.resolution_note}</p>
                 )}
+                <p><strong>Kết quả xác minh:</strong> {formatVerificationOutcome(report.verification_outcome)}</p>
+                <p><strong>Điểm:</strong> {report.reward_points} · {report.reward_status ?? "Không có reward"}</p>
+                {report.duplicate_candidate_of_id && (
+                  <p><strong>Report tương tự:</strong> <code>{report.duplicate_candidate_of_id}</code></p>
+                )}
 
                 {report.status === "OPEN" && (
-                  <label>
-                    Ghi chú xử lý (không bắt buộc)
-                    <textarea
-                      value={resolutionNotes[report.id] ?? ""}
-                      maxLength={500}
-                      disabled={anyMutationPending}
-                      onChange={(event) =>
-                        setResolutionNotes((current) => ({
-                          ...current,
-                          [report.id]: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
+                  <>
+                    <label>
+                      Kết quả xác minh (bắt buộc)
+                      <select
+                        value={resolutionOutcomes[report.id] ?? ""}
+                        disabled={anyMutationPending}
+                        onChange={(event) =>
+                          setResolutionOutcomes((current) => ({
+                            ...current,
+                            [report.id]: event.target.value as Exclude<WrongParkingReportVerificationOutcome, "PENDING">,
+                          }))
+                        }
+                      >
+                        <option value="">Chọn kết quả</option>
+                        <option value="CONFIRMED">Xác nhận hợp lệ</option>
+                        <option value="REJECTED">Từ chối</option>
+                        <option value="DUPLICATE">Trùng report</option>
+                        <option value="UNVERIFIABLE">Không thể xác minh</option>
+                      </select>
+                    </label>
+                    <label>
+                      Ghi chú xử lý (không bắt buộc)
+                      <textarea
+                        value={resolutionNotes[report.id] ?? ""}
+                        maxLength={500}
+                        disabled={anyMutationPending}
+                        onChange={(event) =>
+                          setResolutionNotes((current) => ({
+                            ...current,
+                            [report.id]: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  </>
                 )}
 
                 <div className="report-detail-actions">
@@ -158,10 +193,11 @@ export function ReportDetailDrawer({
                     <button
                       type="button"
                       className="primary-button"
-                      disabled={anyMutationPending}
+                      disabled={anyMutationPending || !resolutionOutcomes[report.id]}
                       onClick={() =>
                         void onResolve(
                           report,
+                          resolutionOutcomes[report.id] as Exclude<WrongParkingReportVerificationOutcome, "PENDING">,
                           resolutionNotes[report.id]?.trim() || null,
                         )
                       }

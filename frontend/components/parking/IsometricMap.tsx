@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 
 import { pointsToPolygon } from "@/lib/iso-geometry";
 import { buildIsoScene } from "@/lib/iso-scene";
-import type { IsoBay, IsoCarFaces, IsoProp } from "@/lib/iso-scene";
+import type { IsoBay, IsoProp } from "@/lib/iso-scene";
 import { formatFloorName } from "@/lib/parking-display";
 import type {
   FloorId,
@@ -27,8 +27,10 @@ export interface IsometricMapProps {
   parkedVehicleSlotId?: FloorScopedId | null;
   currentLocationNodeId?: FloorScopedId | null;
   openReportCountBySlot?: Record<string, number>;
+  pendingObservationCountBySlot?: Record<string, number>;
   onSelectSlot?: (slotId: string) => void;
   onOpenReportedSlot?: (slotId: string) => void;
+  onOpenObservedSlot?: (slotId: string) => void;
 }
 
 type SceneDepthItem =
@@ -47,8 +49,10 @@ export function IsometricMap({
   parkedVehicleSlotId = null,
   currentLocationNodeId = null,
   openReportCountBySlot = {},
+  pendingObservationCountBySlot = {},
   onSelectSlot,
   onOpenReportedSlot,
+  onOpenObservedSlot,
 }: IsometricMapProps): React.JSX.Element {
   const scene = useMemo(
     () =>
@@ -239,7 +243,7 @@ export function IsometricMap({
             const displayNode = nodeById.get(bay.slotId);
             if (!slot || !displayNode) return null;
 
-            const carData = bay.car as (IsoCarFaces | null);
+            const carData = bay.car;
 
             return (
               <div
@@ -259,135 +263,28 @@ export function IsometricMap({
                     preserveAspectRatio="none"
                     aria-hidden="true"
                   >
-                    <defs>
-                      <linearGradient id={`car-glare-${bay.slotId}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#ffffff" stopOpacity="0.5" />
-                        <stop offset="60%" stopColor="#38bdf8" stopOpacity="0.25" />
-                        <stop offset="100%" stopColor="#0f172a" stopOpacity="0.85" />
-                      </linearGradient>
-                    </defs>
-                    <g className="iso-car" data-car-slot={bay.slotId}>
-                      {/* 1. Lower body */}
+                    <g
+                      className="iso-car iso-car--box"
+                      data-car-slot={bay.slotId}
+                      data-car-shape="rectangular-box"
+                    >
                       <polygon
-                        className="iso-car-left"
+                        className="iso-car-shadow"
+                        points={pointsToPolygon(carData.top)}
+                        transform="translate(0 0.9)"
+                      />
+                      <polygon
+                        className="iso-car-box-left"
                         points={pointsToPolygon(carData.left)}
                       />
                       <polygon
-                        className="iso-car-right"
+                        className="iso-car-box-right"
                         points={pointsToPolygon(carData.right)}
                       />
                       <polygon
-                        className="iso-car-top"
+                        className="iso-car-box-top"
                         points={pointsToPolygon(carData.top)}
                       />
-
-                      {/* 2. 4 Wheels (Tires & Hubcaps) */}
-                      {/* Front Left Wheel */}
-                      <ellipse
-                        cx={carData.left[0][0] * 0.72 + carData.left[1][0] * 0.28}
-                        cy={carData.left[0][1] * 0.72 + carData.left[1][1] * 0.28 + 0.15}
-                        rx="0.85"
-                        ry="1.0"
-                        fill="#1e293b"
-                        stroke="#94a3b8"
-                        strokeWidth="0.2"
-                      />
-                      {/* Rear Left Wheel */}
-                      <ellipse
-                        cx={carData.left[0][0] * 0.25 + carData.left[1][0] * 0.75}
-                        cy={carData.left[0][1] * 0.25 + carData.left[1][1] * 0.75 + 0.15}
-                        rx="0.85"
-                        ry="1.0"
-                        fill="#1e293b"
-                        stroke="#94a3b8"
-                        strokeWidth="0.2"
-                      />
-                      {/* Front Right Wheel */}
-                      <ellipse
-                        cx={carData.right[1][0] * 0.72 + carData.right[0][0] * 0.28}
-                        cy={carData.right[1][1] * 0.72 + carData.right[0][1] * 0.28 + 0.15}
-                        rx="0.85"
-                        ry="1.0"
-                        fill="#1e293b"
-                        stroke="#94a3b8"
-                        strokeWidth="0.2"
-                      />
-                      {/* Rear Right Wheel */}
-                      <ellipse
-                        cx={carData.right[1][0] * 0.25 + carData.right[0][0] * 0.75}
-                        cy={carData.right[1][1] * 0.25 + carData.right[0][1] * 0.75 + 0.15}
-                        rx="0.85"
-                        ry="1.0"
-                        fill="#1e293b"
-                        stroke="#94a3b8"
-                        strokeWidth="0.2"
-                      />
-
-                      {/* 3. Front LED Headlights */}
-                      <circle
-                        cx={carData.top[2][0] * 0.85 + carData.top[3][0] * 0.15}
-                        cy={carData.top[2][1] * 0.85 + carData.top[3][1] * 0.15}
-                        r="0.45"
-                        fill="#f8fafc"
-                        stroke="#38bdf8"
-                        strokeWidth="0.2"
-                      />
-                      <circle
-                        cx={carData.top[2][0] * 0.85 + carData.top[1][0] * 0.15}
-                        cy={carData.top[2][1] * 0.85 + carData.top[1][1] * 0.15}
-                        r="0.45"
-                        fill="#f8fafc"
-                        stroke="#38bdf8"
-                        strokeWidth="0.2"
-                      />
-
-                      {/* 4. Rear Red Taillights */}
-                      <circle
-                        cx={carData.top[0][0] * 0.85 + carData.top[3][0] * 0.15}
-                        cy={carData.top[0][1] * 0.85 + carData.top[3][1] * 0.15}
-                        r="0.4"
-                        fill="#ef4444"
-                        stroke="#991b1b"
-                        strokeWidth="0.15"
-                      />
-                      <circle
-                        cx={carData.top[0][0] * 0.85 + carData.top[1][0] * 0.15}
-                        cy={carData.top[0][1] * 0.85 + carData.top[1][1] * 0.15}
-                        r="0.4"
-                        fill="#ef4444"
-                        stroke="#991b1b"
-                        strokeWidth="0.15"
-                      />
-
-                      {/* 5. Upper cabin (glass & roof) */}
-                      {carData.cabinLeft && (
-                        <polygon
-                          className="iso-car-cabin-left"
-                          points={pointsToPolygon(carData.cabinLeft)}
-                        />
-                      )}
-                      {carData.cabinRight && (
-                        <polygon
-                          className="iso-car-cabin-right"
-                          points={pointsToPolygon(carData.cabinRight)}
-                        />
-                      )}
-                      {carData.cabinTop && (
-                        <polygon
-                          className="iso-car-cabin-top"
-                          points={pointsToPolygon(carData.cabinTop)}
-                        />
-                      )}
-                      {/* Front Windshield Glare */}
-                      {carData.cabinTop && (
-                        <polygon
-                          className="iso-car-windshield"
-                          points={`${carData.top[2][0] * 0.4 + carData.top[3][0] * 0.6},${carData.top[2][1] * 0.4 + carData.top[3][1] * 0.6} ${carData.top[2][0] * 0.4 + carData.top[1][0] * 0.6},${carData.top[2][1] * 0.4 + carData.top[1][1] * 0.6} ${carData.cabinTop[1][0]},${carData.cabinTop[1][1]} ${carData.cabinTop[3][0]},${carData.cabinTop[3][1]}`}
-                          fill={`url(#car-glare-${bay.slotId})`}
-                          stroke="#475569"
-                          strokeWidth="0.2"
-                        />
-                      )}
                     </g>
                   </svg>
                 )}
@@ -403,8 +300,10 @@ export function IsometricMap({
                   parkedVehicle={parkedVehicleSlotId === slot.id}
                   currentLocation={currentLocationNodeId === slot.id}
                   openReportCount={openReportCountBySlot[slot.id] ?? 0}
+                  pendingObservationCount={pendingObservationCountBySlot[slot.id] ?? 0}
                   onSelect={onSelectSlot}
                   onOpenReportedSlot={onOpenReportedSlot}
+                  onOpenObservedSlot={onOpenObservedSlot}
                 />
               </div>
             );
@@ -509,9 +408,16 @@ export function IsometricMap({
                 )}
                 {prop.ramp && (
                   <g
-                    className="iso-prop iso-prop--ramp"
+                    className={`iso-prop iso-prop--ramp is-${prop.ramp.direction.toLowerCase()}`}
                     data-prop-id={prop.id}
+                    data-ramp-direction={prop.ramp.direction}
                   >
+                    {prop.ramp.opening && (
+                      <polygon
+                        className="iso-ramp-opening"
+                        points={pointsToPolygon(prop.ramp.opening)}
+                      />
+                    )}
                     <polygon
                       className="iso-prop-left"
                       points={pointsToPolygon(prop.ramp.left)}
@@ -526,32 +432,26 @@ export function IsometricMap({
                     />
                     {/* Parapet Safety Striping */}
                     <line
-                      x1={prop.ramp.left[1][0]}
-                      y1={prop.ramp.left[1][1]}
-                      x2={prop.ramp.left[2][0]}
-                      y2={prop.ramp.left[2][1]}
-                      stroke="#fbbf24"
-                      strokeWidth="0.4"
-                      strokeDasharray="1.5 1.0"
+                      className="iso-ramp-edge-line"
+                      x1={prop.ramp.sideLines[0][0][0]}
+                      y1={prop.ramp.sideLines[0][0][1]}
+                      x2={prop.ramp.sideLines[0][1][0]}
+                      y2={prop.ramp.sideLines[0][1][1]}
                     />
                     <line
-                      x1={prop.ramp.right[1][0]}
-                      y1={prop.ramp.right[1][1]}
-                      x2={prop.ramp.right[2][0]}
-                      y2={prop.ramp.right[2][1]}
-                      stroke="#fbbf24"
-                      strokeWidth="0.4"
-                      strokeDasharray="1.5 1.0"
+                      className="iso-ramp-edge-line"
+                      x1={prop.ramp.sideLines[1][0][0]}
+                      y1={prop.ramp.sideLines[1][0][1]}
+                      x2={prop.ramp.sideLines[1][1][0]}
+                      y2={prop.ramp.sideLines[1][1][1]}
                     />
-                    {/* Ramp Centerline */}
+                    {/* Vạch tim chạy dọc theo chiều lên/xuống của dốc. */}
                     <line
-                      x1={(prop.ramp.deck[0][0] + prop.ramp.deck[3][0]) / 2}
-                      y1={(prop.ramp.deck[0][1] + prop.ramp.deck[3][1]) / 2}
-                      x2={(prop.ramp.deck[1][0] + prop.ramp.deck[2][0]) / 2}
-                      y2={(prop.ramp.deck[1][1] + prop.ramp.deck[2][1]) / 2}
-                      stroke="#ffffff"
-                      strokeWidth="0.3"
-                      strokeDasharray="1.5 1.0"
+                      className="iso-ramp-center-line"
+                      x1={prop.ramp.centerLine[0][0]}
+                      y1={prop.ramp.centerLine[0][1]}
+                      x2={prop.ramp.centerLine[1][0]}
+                      y2={prop.ramp.centerLine[1][1]}
                     />
                   </g>
                 )}

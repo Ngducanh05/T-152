@@ -4,7 +4,11 @@ import { useRef, useState } from "react";
 
 import { formatApiErrorForOperator } from "@/lib/api";
 import { formatParkingLocation } from "@/lib/parking-display";
-import type { ParkingSlot, WrongParkingReason } from "@/lib/types";
+import type {
+  ParkingSlot,
+  WrongParkingReason,
+  WrongParkingReport,
+} from "@/lib/types";
 
 export interface WrongParkingReportDraft {
   slotId: string;
@@ -16,8 +20,9 @@ export interface WrongParkingReportDraft {
 interface WrongParkingReportDialogProps {
   slots: ParkingSlot[];
   initialSlotId?: string | null;
+  rewardPoints: number;
   onClose: () => void;
-  onSubmit: (draft: WrongParkingReportDraft) => Promise<void>;
+  onSubmit: (draft: WrongParkingReportDraft) => Promise<WrongParkingReport>;
 }
 
 const STANDARD_REASONS: Array<{
@@ -33,6 +38,7 @@ const STANDARD_REASONS: Array<{
 export function WrongParkingReportDialog({
   slots,
   initialSlotId = null,
+  rewardPoints,
   onClose,
   onSubmit,
 }: WrongParkingReportDialogProps) {
@@ -46,7 +52,8 @@ export function WrongParkingReportDialog({
   const [selectedReason, setSelectedReason] =
     useState<WrongParkingReason | null>(null);
   const [pending, setPending] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [submittedReport, setSubmittedReport] =
+    useState<WrongParkingReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submittingRef = useRef(false);
 
@@ -65,13 +72,13 @@ export function WrongParkingReportDialog({
     setPending(true);
     setErrorMessage(null);
     try {
-      await onSubmit({
+      const report = await onSubmit({
         slotId,
         reasonCode,
         observedPlateNumber: observedPlateNumber.trim().toUpperCase() || null,
         description: normalizedDescription || null,
       });
-      setSubmitted(true);
+      setSubmittedReport(report);
     } catch (error) {
       setErrorMessage(
         formatApiErrorForOperator(error, "Không thể gửi báo cáo lúc này."),
@@ -118,10 +125,16 @@ export function WrongParkingReportDialog({
         <p className="eyebrow green">PHẢN ÁNH TRONG BÃI XE</p>
         <h2 id="wrong-parking-report-title">Báo xe đỗ sai vị trí</h2>
 
-        {submitted ? (
+        {submittedReport ? (
           <div className="report-success" role="status" aria-live="polite">
             <b>Đã gửi báo cáo.</b>
-            <p>Bộ phận vận hành sẽ kiểm tra thông tin bạn cung cấp.</p>
+            {submittedReport.reward_points > 0 ? (
+              <p>+{submittedReport.reward_points} điểm đang chờ xác minh.</p>
+            ) : submittedReport.duplicate_candidate_of_id ? (
+              <p>Một report tương tự đang được xử lý nên report này không có điểm chờ.</p>
+            ) : (
+              <p>Bạn đã đạt giới hạn điểm hôm nay, nhưng report vẫn được bộ phận vận hành kiểm tra.</p>
+            )}
             <button type="button" className="primary-button" onClick={requestClose}>
               Hoàn tất
             </button>
@@ -131,6 +144,9 @@ export function WrongParkingReportDialog({
             <p>
               Chọn ô và lý do. Chạm vào một lý do chuẩn sẽ gửi báo cáo ngay;
               trạng thái ô đỗ không bị thay đổi.
+            </p>
+            <p className="reward-condition">
+              Report hợp lệ sau khi được bộ phận vận hành kiểm tra sẽ nhận +{rewardPoints} điểm ParkSmart.
             </p>
             <label>
               Ô cần phản ánh

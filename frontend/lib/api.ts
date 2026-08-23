@@ -1,6 +1,7 @@
 import type {
   ActiveParkingSession,
   AdjacentSlotObservationRequest,
+  AdminObservationFilters,
   AdminReportFilters,
   AdminEventFilters,
   ApiEnvelope,
@@ -21,6 +22,8 @@ import type {
   ParkingSession,
   ParkingSlot,
   ParkingStatus,
+  ContributionRecord,
+  RejectSlotObservationRequest,
   RecommendationRequest,
   RecommendationResult,
   ReopenWrongParkingReportRequest,
@@ -29,10 +32,15 @@ import type {
   ResolveWrongParkingReportResponse,
   RouteRequest,
   RouteResponse,
+  RewardConfiguration,
+  RewardSummary,
   SimulatorStep,
   SimulatorMutationRequest,
   SlotFilters,
   SpeechTranscriptionResponse,
+  SlotObservation,
+  VerifySlotObservationRequest,
+  UpdateParkingSlotStatusRequest,
   WrongParkingReport,
 } from "./types";
 
@@ -300,7 +308,7 @@ export class ParkSmartApiClient {
     payload: AdjacentSlotObservationRequest,
     signal?: AbortSignal,
   ) {
-    return this.request<ParkingSlot>(
+    return this.request<SlotObservation>(
       `/parking/slots/${encodeURIComponent(slotId)}/observation`,
       {
         method: "POST",
@@ -382,6 +390,83 @@ export class ParkSmartApiClient {
     return this.request<WrongParkingReport[]>(`/admin/reports${query}`, {
       signal,
     });
+  }
+
+  updateAdminSlotStatus(
+    slotId: string,
+    payload: UpdateParkingSlotStatusRequest,
+    signal?: AbortSignal,
+  ) {
+    return this.request<ParkingSlot>(
+      `/admin/parking/slots/${encodeURIComponent(slotId)}/status`,
+      { method: "PATCH", body: JSON.stringify(payload), signal },
+    );
+  }
+
+  getAdminObservations(
+    filters: AdminObservationFilters = {},
+    signal?: AbortSignal,
+  ) {
+    const query = queryString({
+      status: filters.status,
+      floor_id: filters.floorId,
+      slot_id: filters.slotId,
+      user_id: filters.userId,
+      limit: filters.limit ?? 50,
+    });
+    return this.request<SlotObservation[]>(
+      `/admin/slot-observations${query}`,
+      { signal },
+    );
+  }
+
+  getAdminObservation(observationId: string, signal?: AbortSignal) {
+    return this.request<SlotObservation>(
+      `/admin/slot-observations/${encodeURIComponent(observationId)}`,
+      { signal },
+    );
+  }
+
+  verifyAdminObservation(
+    observationId: string,
+    payload: VerifySlotObservationRequest,
+    signal?: AbortSignal,
+  ) {
+    return this.request<SlotObservation>(
+      `/admin/slot-observations/${encodeURIComponent(observationId)}/verify`,
+      { method: "POST", body: JSON.stringify(payload), signal },
+    );
+  }
+
+  rejectAdminObservation(
+    observationId: string,
+    payload: RejectSlotObservationRequest,
+    signal?: AbortSignal,
+  ) {
+    return this.request<SlotObservation>(
+      `/admin/slot-observations/${encodeURIComponent(observationId)}/reject`,
+      { method: "POST", body: JSON.stringify(payload), signal },
+    );
+  }
+
+  getRewardSummary(userId: string, signal?: AbortSignal) {
+    return this.request<RewardSummary>(
+      `/rewards/users/${encodeURIComponent(userId)}/summary`,
+      { signal },
+    );
+  }
+
+  getRewardConfiguration(signal?: AbortSignal) {
+    return this.request<RewardConfiguration>("/rewards/configuration", {
+      signal,
+    });
+  }
+
+  getUserContributions(userId: string, signal?: AbortSignal) {
+    return this.request<ContributionRecord[]>(
+      `/contributions/users/${encodeURIComponent(userId)}`,
+      { signal },
+    );
   }
 
   getAdminReport(reportId: string, signal?: AbortSignal) {

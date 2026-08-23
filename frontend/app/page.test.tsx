@@ -68,7 +68,7 @@ function workflowFixture(): ParkingWorkflow {
     confirmParking: vi.fn(async () => undefined),
     findVehicleAndRoute: vi.fn(async () => undefined),
     completeSession: vi.fn(async () => undefined),
-    updateAdjacentSlotStatus: vi.fn(async () => undefined),
+    updateAdjacentSlotStatus: vi.fn(async () => null),
     resetDemo: vi.fn(async () => undefined),
     sendAgentMessage: vi.fn(async () => null),
     retryAgentMessage: vi.fn(async () => undefined),
@@ -177,7 +177,8 @@ describe("user chat page", () => {
     expect(dock).toContainElement(
       screen.getByRole("article", { name: "Xe đang đỗ trong bãi" }),
     );
-    await user.click(screen.getByRole("button", { name: "Báo F1-D02 đang trống" }));
+    await user.click(screen.getByRole("button", { name: "Giúp kiểm tra ngay" }));
+    await user.click(screen.getByRole("button", { name: "Ô đang trống" }));
     expect(workflow.updateAdjacentSlotStatus).toHaveBeenCalledWith(
       "F1-D02",
       "AVAILABLE",

@@ -18,8 +18,10 @@ export interface ParkingSlotProps {
   parkedVehicle?: boolean;
   currentLocation?: boolean;
   openReportCount?: number;
+  pendingObservationCount?: number;
   onSelect?: (slotId: string) => void;
   onOpenReportedSlot?: (slotId: string) => void;
+  onOpenObservedSlot?: (slotId: string) => void;
 
   /** Vị trí % đã tính sẵn. Bỏ trống thì dùng getDisplayPoint(displayNode) như cũ. */
   position?: MapPoint;
@@ -40,8 +42,10 @@ export function ParkingSlot({
   parkedVehicle = false,
   currentLocation = false,
   openReportCount = 0,
+  pendingObservationCount = 0,
   onSelect,
   onOpenReportedSlot,
+  onOpenObservedSlot,
   position,
   variant = "flat",
   depthIndex,
@@ -56,6 +60,9 @@ export function ParkingSlot({
     parkedVehicle ? "Xe của bạn" : null,
     currentLocation ? "Vị trí hiện tại" : null,
     openReportCount > 0 ? `${openReportCount} báo cáo đang mở` : null,
+    pendingObservationCount > 0
+      ? `${pendingObservationCount} quan sát chờ xác minh`
+      : null,
   ].filter(Boolean);
   const className = [
     "map-slot",
@@ -69,6 +76,7 @@ export function ParkingSlot({
     parkedVehicle ? "is-parked" : "",
     currentLocation ? "is-current-location" : "",
     openReportCount > 0 ? "has-open-reports" : "",
+    pendingObservationCount > 0 ? "has-pending-observations" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -87,11 +95,15 @@ export function ParkingSlot({
   }
 
   function activateSlot() {
+    onSelect?.(slot.id);
     if (openReportCount > 0) {
       onOpenReportedSlot?.(slot.id);
       return;
     }
-    onSelect?.(slot.id);
+    if (pendingObservationCount > 0) {
+      onOpenObservedSlot?.(slot.id);
+      return;
+    }
   }
 
   if (variant === "iso") {
@@ -142,6 +154,12 @@ export function ParkingSlot({
               <b>{openReportCount}</b>
             </span>
           )}
+          {pendingObservationCount > 0 && (
+            <span className="map-slot-observation-warning">
+              <span>?</span>
+              <b>{pendingObservationCount}</b>
+            </span>
+          )}
         </div>
       </div>
     );
@@ -177,6 +195,12 @@ export function ParkingSlot({
         <span className="map-slot-report-warning" aria-hidden="true">
           <span>!</span>
           <b>{openReportCount}</b>
+        </span>
+      )}
+      {pendingObservationCount > 0 && (
+        <span className="map-slot-observation-warning" aria-hidden="true">
+          <span>?</span>
+          <b>{pendingObservationCount}</b>
         </span>
       )}
     </button>

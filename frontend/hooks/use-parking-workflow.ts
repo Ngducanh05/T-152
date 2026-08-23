@@ -22,6 +22,7 @@ import type {
   ParkingPreference,
   RecommendationCandidate,
   RouteResult,
+  SlotObservation,
 } from "@/lib/types";
 
 export type WorkflowAction =
@@ -105,7 +106,7 @@ export interface ParkingWorkflow {
   updateAdjacentSlotStatus: (
     slotId: FloorScopedId,
     status: AdjacentSlotObservedStatus,
-  ) => Promise<void>;
+  ) => Promise<SlotObservation | null>;
   resetDemo: () => Promise<void>;
   sendAgentMessage: (message: string) => Promise<string | null>;
   retryAgentMessage: () => Promise<void>;
@@ -722,28 +723,24 @@ export function useParkingWorkflow(
     slotId: FloorScopedId,
     status: AdjacentSlotObservedStatus,
   ) {
-    if (adjacentObservationInFlightRef.current) return;
+    if (adjacentObservationInFlightRef.current) return null;
     const slot = data.slots.find((candidate) => candidate.id === slotId);
     if (!data.activeSession || !slot) {
       setNotice("Chỉ có thể cập nhật ô bên cạnh sau khi bạn đã xác nhận đỗ xe.");
-      return;
+      return null;
     }
     adjacentObservationInFlightRef.current = true;
     setPending("observe-adjacent-slot");
     setPendingAdjacentSlotId(slot.id);
     setNotice(null);
     try {
-      await api.observeAdjacentSlot(slot.id, {
+      const observation = await api.observeAdjacentSlot(slot.id, {
         user_id: MVP_DEMO_USER_ID,
         observed_status: status,
-        expected_version: slot.version,
+        expected_slot_version: slot.version,
       });
       await data.refresh();
-      setNotice(
-        `Cảm ơn bạn. Đã cập nhật ${slot.id} thành ${
-          status === "AVAILABLE" ? "đang trống" : "có xe đỗ"
-        }.`,
-      );
+      return observation;
     } catch (error) {
       await refreshQuietly();
       setNotice(
@@ -752,6 +749,7 @@ export function useParkingWorkflow(
           "Không thể cập nhật ô bên cạnh. Trạng thái mới nhất đã được tải lại.",
         ),
       );
+      return null;
     } finally {
       adjacentObservationInFlightRef.current = false;
       setPendingAdjacentSlotId(null);
