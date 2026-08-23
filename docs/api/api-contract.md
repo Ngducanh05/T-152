@@ -9,7 +9,7 @@ ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 ## Shared conventions
 
 - JSON field names use snake_case exactly as defined by the Pydantic models. No camelCase aliases are provided.
-- Floor-scoped identifiers start with F1-, for example F1-A01, F1-CP2, and F1-ELEVATOR. The only MVP floor_id is F1.
+- Floor-scoped identifiers start with F1-, F2-, or F3-, for example F2-A01, F3-CP2, and F1-ELEVATOR.
 - User, vehicle, reservation, session, and event identifiers use their domain prefixes, for example USER-001, VEHICLE-001, RESERVATION-001, SESSION-001, and EVENT-001.
 - Timestamps are timezone-aware UTC values serialized as ISO 8601, for example 2026-08-11T08:30:00Z.
 - Distances use metres and the field name distance_m.
@@ -24,10 +24,14 @@ ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 | ReservationStatus | ACTIVE, CONFIRMED, EXPIRED, CANCELLED |
 | ParkingSessionStatus | ACTIVE, COMPLETED, CANCELLED |
 | MapNodeType | ENTRANCE, EXIT, CHECKPOINT, ELEVATOR, AISLE, SLOT |
-| ActorType | USER, SIMULATOR, CAMERA, SYSTEM |
+| ActorType | USER, ADMIN, SIMULATOR, CAMERA, SYSTEM |
 | ParkingEventType | VEHICLE_ENTERED, SLOT_RESERVED, RESERVATION_CANCELLED, RESERVATION_EXPIRED, VEHICLE_PARKED, VEHICLE_LEFT_SLOT, VEHICLE_EXITED |
 | WrongParkingReportStatus | OPEN, RESOLVED |
 | WrongParkingReason | WRONG_SLOT, CROSSED_LINE, BLOCKING_ACCESS, OCCUPYING_CHARGER, OTHER |
+| SlotObservationStatus | PENDING, VERIFIED, REJECTED, EXPIRED |
+| WrongParkingReportVerificationOutcome | PENDING, CONFIRMED, REJECTED, DUPLICATE, UNVERIFIABLE |
+| RewardSourceType | ADJACENT_SLOT_OBSERVATION, WRONG_PARKING_REPORT |
+| RewardTransactionStatus | PENDING, EARNED, CANCELLED |
 | ErrorCode | INVALID_TRANSITION, SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ROUTE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND, SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS, USER_NOT_FOUND, VEHICLE_NOT_FOUND, RESERVATION_NOT_FOUND, ACTIVE_RESERVATION_NOT_FOUND, RESERVATION_EXPIRED, ACTIVE_SESSION_EXISTS, SESSION_NOT_FOUND, LOCATION_NODE_NOT_FOUND, CURRENT_LOCATION_NOT_FOUND, INVALID_LOCATION_NODE_TYPE, REPORT_NOT_FOUND, REPORT_VERSION_CONFLICT, INVALID_REPORT_TRANSITION, AGENT_TOOL_UNAVAILABLE |
 
 ## Data schemas
@@ -245,6 +249,9 @@ All admin endpoints use `require_admin_or_demo`:
 - `POST /api/v1/admin/reports/{report_id}/reopen` requires `expected_version`.
 - `DELETE /api/v1/admin/reports/{report_id}?expected_version=N` permanently removes the
   database row and returns `deleted_report_id` in `SuccessResponse`.
+- `PATCH /api/v1/admin/parking/slots/{slot_id}/status` accepts `status`
+  (`AVAILABLE|OCCUPIED`) and required `expected_version`. It rejects `RESERVED` slots and
+  delegates the transition and event creation to Parking State Service.
 
 Resolve records UTC `resolved_at`, the admin actor, trimmed note, and increments `version`.
 Reopen clears resolution metadata and increments `version`. Re-resolving or re-reopening is
@@ -262,13 +269,37 @@ An actively parked user may optionally report one physically adjacent slot as
 {
   "user_id": "USER-001",
   "observed_status": "OCCUPIED",
-  "expected_version": 3
+  "expected_slot_version": 3
 }
 ```
 
 The backend requires an active parking session and independently derives the left/right
-neighbours within the same five-slot row. Non-adjacent targets, `RESERVED` slots, stale
-versions, active sessions belonging to another vehicle, and attempts to clear verified
-vehicle occupancy are rejected. Successful transitions increment slot version and write a
-`ParkingEvent` with actor `USER` and metadata source `adjacent_user_observation`. The browser
-never mutates slot state optimistically.
+neighbours within the same floor, zone and five-slot row on F1/F2/F3. Non-adjacent targets,
+`RESERVED` slots and stale versions are rejected. Submission creates a `PENDING`
+`SlotObservation` and optional `PENDING` reward, but never changes the slot. Admin verification
+is the only path that may call Parking State Service and write an event with source
+`verified_user_observation`.
+
+## Phase 13 contribution and reward APIs
+
+Mọi response tiếp tục dùng `SuccessResponse`/`ErrorResponse` chuẩn.
+
+- `POST /api/v1/parking/slots/{slot_id}/observation` nhận `user_id`,
+  `observed_status` (`AVAILABLE|OCCUPIED`) và `expected_slot_version`; trả
+  `SlotObservation`, không trả/cập nhật `ParkingSlot`.
+- `GET /api/v1/contributions/users/{user_id}` trả lịch sử contribution hợp nhất;
+  observation record có `observer_session_id` để client không hỏi lại cùng một ô
+  trong cùng phiên đỗ (report trả `null`).
+- `GET /api/v1/rewards/users/{user_id}/summary` trả available/pending/verified và
+  daily totals authoritative. Các path user được tách để sau này chuyển sang `/me`.
+- `GET /api/v1/rewards/configuration` cung cấp copy/UI reward values, tránh hard-code.
+- `GET /api/v1/admin/slot-observations` hỗ trợ `status`, `floor_id`, `slot_id`,
+  `user_id`, `limit`; detail dùng `GET /api/v1/admin/slot-observations/{id}`.
+- `POST /api/v1/admin/slot-observations/{id}/verify` và `/reject` yêu cầu
+  `expected_version`; reject nhận thêm `reason` tùy chọn.
+- Report response thêm `verification_outcome`, `reward_points`, `reward_status`,
+  `duplicate_candidate_of_id`. PATCH resolve bắt buộc `status=RESOLVED`, một outcome
+  khác `PENDING`, `expected_version`, và `resolution_note` tùy chọn.
+
+Reward còn `PENDING` không phải điểm khả dụng. Chỉ outcome `CONFIRMED` hoặc observation
+`VERIFIED` chuyển sang `EARNED`; các outcome âm/không xác minh chuyển `CANCELLED`.

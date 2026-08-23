@@ -13,15 +13,23 @@ from src.core.database import get_db_session
 from src.core.db_models import ParkingEvent as ParkingEventRecord
 from src.core.db_models import ParkingSlot as ParkingSlotRecord
 from src.core.parking_report import ParkingReportError, ParkingReportService
+from src.core.parking_state import ParkingStateError, ParkingStateService
+from src.core.slot_observation import SlotObservationError, SlotObservationService
 from src.models.auth import AppRole, CurrentUser
 from src.models.common import ErrorResponse, SuccessResponse
 from src.models.schemas import (
     ErrorCode,
+    FloorId,
     FloorScopedId,
     ParkingEvent,
     ParkingEventType,
+    ParkingSlot,
+    SlotObservation,
+    SlotObservationStatus,
+    SlotStatus,
     WrongParkingReport,
     WrongParkingReportStatus,
+    WrongParkingReportVerificationOutcome,
     ZoneId,
 )
 
@@ -39,6 +47,12 @@ class ResolveWrongParkingReportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal[WrongParkingReportStatus.RESOLVED]
+    verification_outcome: Literal[
+        WrongParkingReportVerificationOutcome.CONFIRMED,
+        WrongParkingReportVerificationOutcome.REJECTED,
+        WrongParkingReportVerificationOutcome.DUPLICATE,
+        WrongParkingReportVerificationOutcome.UNVERIFIABLE,
+    ]
     resolution_note: str | None = Field(default=None, max_length=500)
     expected_version: int = Field(ge=0)
 
@@ -53,6 +67,33 @@ class ResolveWrongParkingReportRequest(BaseModel):
 class ReopenWrongParkingReportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    expected_version: int = Field(ge=0)
+
+
+class VerifySlotObservationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=0)
+
+
+class RejectSlotObservationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=0)
+    reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
+class UpdateParkingSlotStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal[SlotStatus.AVAILABLE, SlotStatus.OCCUPIED]
     expected_version: int = Field(ge=0)
 
 
@@ -77,7 +118,13 @@ def _event_response(event: ParkingEventRecord) -> ParkingEvent:
 
 
 def _report_response(report: object) -> WrongParkingReport:
-    return WrongParkingReport.model_validate(report, from_attributes=True)
+    values = vars(report)
+    return WrongParkingReport.model_validate(
+        {
+            field_name: values.get(field_name)
+            for field_name in WrongParkingReport.model_fields
+        }
+    )
 
 
 def _report_http_error(error: ParkingReportError) -> HTTPException:
@@ -89,6 +136,34 @@ def _report_http_error(error: ParkingReportError) -> HTTPException:
     return HTTPException(
         status_code=status_code,
         detail={"code": error.code.value, "message": error.message},
+    )
+
+
+def _observation_http_error(error: SlotObservationError) -> HTTPException:
+    status_code = (
+        status.HTTP_404_NOT_FOUND
+        if error.code is ErrorCode.OBSERVATION_NOT_FOUND
+        else status.HTTP_409_CONFLICT
+    )
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": error.code.value, "message": error.message},
+    )
+
+
+def _parking_state_http_error(error: ParkingStateError) -> HTTPException:
+    status_code = (
+        status.HTTP_404_NOT_FOUND
+        if error.code is ErrorCode.SLOT_NOT_FOUND
+        else status.HTTP_409_CONFLICT
+    )
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "code": error.code.value,
+            "message": error.message,
+            "details": error.details,
+        },
     )
 
 
@@ -146,6 +221,140 @@ async def recent_parking_events(
     ).limit(limit)
     events = (await session.scalars(query)).all()
     return SuccessResponse(data=[_event_response(event) for event in events])
+
+
+@router.patch(
+    "/parking/slots/{slot_id}/status",
+    response_model=SuccessResponse[ParkingSlot],
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+async def update_parking_slot_status(
+    slot_id: FloorScopedId,
+    payload: UpdateParkingSlotStatusRequest,
+    session: SessionDependency,
+    admin_user: AdminUserDependency,
+) -> SuccessResponse[ParkingSlot]:
+    try:
+        async with session.begin():
+            slot = await ParkingStateService(session).set_slot_status_by_admin(
+                slot_id,
+                payload.status,
+                admin_id=_admin_actor_id(admin_user),
+                expected_version=payload.expected_version,
+            )
+    except ParkingStateError as error:
+        raise _parking_state_http_error(error) from error
+    return SuccessResponse(
+        data=ParkingSlot.model_validate(slot, from_attributes=True),
+        message="Parking slot status updated.",
+    )
+
+
+@router.get(
+    "/slot-observations",
+    response_model=SuccessResponse[list[SlotObservation]],
+)
+async def recent_slot_observations(
+    session: SessionDependency,
+    observation_status: Annotated[
+        SlotObservationStatus | None, Query(alias="status")
+    ] = None,
+    floor_id: Annotated[FloorId | None, Query()] = None,
+    slot_id: Annotated[FloorScopedId | None, Query()] = None,
+    user_id: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> SuccessResponse[list[SlotObservation]]:
+    async with session.begin():
+        observations = await SlotObservationService(session).list_observations(
+            status=observation_status,
+            floor_id=floor_id,
+            slot_id=slot_id,
+            user_id=user_id,
+            limit=limit,
+        )
+    return SuccessResponse(
+        data=[
+            SlotObservation.model_validate(observation, from_attributes=True)
+            for observation in observations
+        ]
+    )
+
+
+@router.get(
+    "/slot-observations/{observation_id}",
+    response_model=SuccessResponse[SlotObservation],
+)
+async def get_slot_observation(
+    observation_id: str,
+    session: SessionDependency,
+) -> SuccessResponse[SlotObservation]:
+    service = SlotObservationService(session)
+    try:
+        async with session.begin():
+            await service.expire_pending()
+            observation = await service.get_observation(observation_id)
+    except SlotObservationError as error:
+        raise _observation_http_error(error) from error
+    return SuccessResponse(
+        data=SlotObservation.model_validate(observation, from_attributes=True)
+    )
+
+
+@router.post(
+    "/slot-observations/{observation_id}/verify",
+    response_model=SuccessResponse[SlotObservation],
+)
+async def verify_slot_observation(
+    observation_id: str,
+    payload: VerifySlotObservationRequest,
+    session: SessionDependency,
+    admin_user: AdminUserDependency,
+) -> SuccessResponse[SlotObservation]:
+    service = SlotObservationService(session)
+    try:
+        async with session.begin():
+            await service.expire_pending()
+        async with session.begin():
+            observation = await service.verify_observation(
+                observation_id,
+                verified_by=_admin_actor_id(admin_user),
+                expected_version=payload.expected_version,
+            )
+    except SlotObservationError as error:
+        raise _observation_http_error(error) from error
+    return SuccessResponse(
+        data=SlotObservation.model_validate(observation, from_attributes=True),
+        message="Observation verified.",
+    )
+
+
+@router.post(
+    "/slot-observations/{observation_id}/reject",
+    response_model=SuccessResponse[SlotObservation],
+)
+async def reject_slot_observation(
+    observation_id: str,
+    payload: RejectSlotObservationRequest,
+    session: SessionDependency,
+    admin_user: AdminUserDependency,
+) -> SuccessResponse[SlotObservation]:
+    service = SlotObservationService(session)
+    try:
+        async with session.begin():
+            await service.expire_pending()
+        async with session.begin():
+            observation = await service.reject_observation(
+                observation_id,
+                rejected_by=_admin_actor_id(admin_user),
+                reason=payload.reason,
+                expected_version=payload.expected_version,
+            )
+    except SlotObservationError as error:
+        raise _observation_http_error(error) from error
+    return SuccessResponse(
+        data=SlotObservation.model_validate(observation, from_attributes=True),
+        message="Observation rejected.",
+    )
 
 
 @router.get("/reports", response_model=SuccessResponse[list[WrongParkingReport]])
@@ -230,9 +439,11 @@ async def resolve_wrong_parking_report(
             report = await ParkingReportService(session).resolve_wrong_parking_report(
                 report_id,
                 resolved_by=actor_id,
+                verification_outcome=payload.verification_outcome,
                 resolution_note=payload.resolution_note,
                 expected_version=payload.expected_version,
             )
+            response_report = _report_response(report)
     except ParkingReportError as error:
         _log_report_action(
             action="resolve",
@@ -252,7 +463,7 @@ async def resolve_wrong_parking_report(
         actor_id=actor_id,
         outcome="success",
     )
-    return SuccessResponse(data=_report_response(report))
+    return SuccessResponse(data=response_report)
 
 
 @router.post(
@@ -274,6 +485,7 @@ async def reopen_wrong_parking_report(
                 report_id,
                 expected_version=payload.expected_version,
             )
+            response_report = _report_response(report)
     except ParkingReportError as error:
         _log_report_action(
             action="reopen",
@@ -293,7 +505,7 @@ async def reopen_wrong_parking_report(
         actor_id=actor_id,
         outcome="success",
     )
-    return SuccessResponse(data=_report_response(report))
+    return SuccessResponse(data=response_report)
 
 
 @router.delete(

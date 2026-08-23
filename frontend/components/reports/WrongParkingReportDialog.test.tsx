@@ -3,19 +3,41 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { canonicalMap } from "@/test/fixtures";
+import type { WrongParkingReport } from "@/lib/types";
 
 import { WrongParkingReportDialog } from "./WrongParkingReportDialog";
 
 afterEach(cleanup);
 
+const createdReport: WrongParkingReport = {
+  id: "REPORT-001",
+  reporter_user_id: "USER-001",
+  slot_id: "F1-D01",
+  reason_code: "CROSSED_LINE",
+  status: "OPEN",
+  observed_plate_number: null,
+  description: null,
+  created_at: "2026-08-23T10:00:00Z",
+  updated_at: "2026-08-23T10:00:00Z",
+  resolved_at: null,
+  resolved_by: null,
+  resolution_note: null,
+  verification_outcome: "PENDING",
+  reward_points: 20,
+  reward_status: "PENDING",
+  duplicate_candidate_of_id: null,
+  version: 0,
+};
+
 describe("WrongParkingReportDialog", () => {
   it("submits a standard reason immediately with normalized optional fields", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn(async () => undefined);
+    const onSubmit = vi.fn(async () => createdReport);
     render(
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
+        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={onSubmit}
       />,
@@ -44,10 +66,11 @@ describe("WrongParkingReportDialog", () => {
 
   it("does not require typing for a standard reason", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn(async () => undefined);
+    const onSubmit = vi.fn(async () => createdReport);
     render(
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
+        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={onSubmit}
       />,
@@ -65,11 +88,12 @@ describe("WrongParkingReportDialog", () => {
 
   it("requires a five-character description only for OTHER", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn(async () => undefined);
+    const onSubmit = vi.fn(async () => createdReport);
     render(
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
+        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={onSubmit}
       />,
@@ -86,12 +110,13 @@ describe("WrongParkingReportDialog", () => {
 
   it("guards a standard reason against double submission", async () => {
     const user = userEvent.setup();
-    let resolveSubmit!: () => void;
-    const onSubmit = vi.fn(() => new Promise<void>((resolve) => { resolveSubmit = resolve; }));
+    let resolveSubmit!: (report: WrongParkingReport) => void;
+    const onSubmit = vi.fn(() => new Promise<WrongParkingReport>((resolve) => { resolveSubmit = resolve; }));
     render(
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
+        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={onSubmit}
       />,
@@ -101,7 +126,7 @@ describe("WrongParkingReportDialog", () => {
     await user.dblClick(reason);
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(screen.getByRole("status")).toHaveTextContent("đang được gửi");
-    resolveSubmit();
+    resolveSubmit(createdReport);
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Đã gửi báo cáo"));
   });
 });

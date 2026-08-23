@@ -30,6 +30,10 @@ export interface IsoRampFaces {
   deck: MapPoint[];
   left: MapPoint[];
   right: MapPoint[];
+  opening: MapPoint[] | null;
+  centerLine: MapPoint[];
+  sideLines: [MapPoint[], MapPoint[]];
+  direction: "UP" | "DOWN";
 }
 
 /**
@@ -127,13 +131,31 @@ export function buildIsoRamp(
   rise: number,
 ): IsoRampFaces {
   const [p0, p1, p2, p3] = buildIsoRhombus(center, halfW, halfD);
-  const p0Up = lift(p0, rise);
-  const p1Up = lift(p1, rise);
+  const backLeft = lift(p0, rise);
+  const backRight = lift(p1, rise);
+  const frontCenter: MapPoint = [
+    (p3[0] + p2[0]) / 2,
+    (p3[1] + p2[1]) / 2,
+  ];
+  const backCenter: MapPoint = [
+    (backLeft[0] + backRight[0]) / 2,
+    (backLeft[1] + backRight[1]) / 2,
+  ];
 
   return {
-    deck: [p0Up, p1Up, p2, p3],
-    left: [p0, p3, p0Up],
-    right: [p1, p2, p1Up],
+    deck: [backLeft, backRight, p2, p3],
+    left: [p3, p0, backLeft],
+    right: [p1, p2, backRight],
+    // Lối xuống cần một miệng hầm thẳng đứng ở đầu thấp để không trông
+    // giống một tấm sàn bị kéo lệch xuống dưới.
+    opening: rise < 0 ? [p0, p1, backRight, backLeft] : null,
+    // Các vạch chạy dọc theo hướng di chuyển của xe, từ đầu gần đến đầu xa.
+    centerLine: [frontCenter, backCenter],
+    sideLines: [
+      [p3, backLeft],
+      [p2, backRight],
+    ],
+    direction: rise < 0 ? "DOWN" : "UP",
   };
 }
 

@@ -6,6 +6,7 @@ import { AgentComposer } from "@/components/assistant/AgentComposer";
 import { ConversationActionList } from "@/components/assistant/ConversationActionList";
 import { LocationPicker } from "@/components/location/LocationPicker";
 import { AdjacentSlotObservation } from "@/components/parking/AdjacentSlotObservation";
+import { RewardSummaryCard } from "@/components/rewards/RewardSummaryCard";
 import {
   WrongParkingReportDialog,
   type WrongParkingReportDraft,
@@ -63,14 +64,16 @@ export default function Home() {
   }
 
   async function submitWrongParkingReport(draft: WrongParkingReportDraft) {
-    await parkSmartApi.reportWrongParking({
+    const report = await parkSmartApi.reportWrongParking({
       user_id: MVP_DEMO_USER_ID,
       slot_id: draft.slotId,
       reason_code: draft.reasonCode,
       observed_plate_number: draft.observedPlateNumber,
       description: draft.description,
     });
+    await data.refresh();
     notifyWrongParkingReportCreated();
+    return report;
   }
 
   return (
@@ -108,6 +111,12 @@ export default function Home() {
             <p className="conversation-system-status" role="status">
               Đang đồng bộ thông tin của bạn…
             </p>
+          )}
+          {data.rewardSummary && (
+            <RewardSummaryCard
+              summary={data.rewardSummary}
+              contributions={data.contributions}
+            />
           )}
           {hasPriorityContent && (
             <section
@@ -189,8 +198,22 @@ export default function Home() {
               </div>
                   </article>
                   <AdjacentSlotObservation
+                    key={data.activeSession.session_id}
+                    parkingSessionId={data.activeSession.session_id}
                     parkedSlotId={data.activeSession.slot_id}
                     slots={data.slots}
+                    observedSlotIds={(data.contributions ?? [])
+                      .filter(
+                        (contribution) =>
+                          contribution.source_type ===
+                            "ADJACENT_SLOT_OBSERVATION" &&
+                          contribution.observer_session_id ===
+                            data.activeSession?.session_id,
+                      )
+                      .map((contribution) => contribution.slot_id)}
+                    rewardPoints={
+                      data.rewardConfiguration?.adjacent_observation_reward_points ?? 0
+                    }
                     pendingSlotId={workflow.pendingAdjacentSlotId}
                     onObserve={workflow.updateAdjacentSlotStatus}
                   />
@@ -242,10 +265,6 @@ export default function Home() {
                   </li>
                 ))}
               </ol>
-              <p>
-                Hướng rẽ được tính từ hình học tuyến đường do backend trả về,
-                không lấy từ nội dung do AI tự diễn giải.
-              </p>
             </article>
           )}
 
@@ -289,6 +308,9 @@ export default function Home() {
         <WrongParkingReportDialog
           slots={data.slots}
           initialSlotId={initialReportSlotId}
+          rewardPoints={
+            data.rewardConfiguration?.wrong_parking_report_reward_points ?? 0
+          }
           onClose={closeReportDialog}
           onSubmit={submitWrongParkingReport}
         />

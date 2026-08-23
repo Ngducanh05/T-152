@@ -114,11 +114,27 @@ describe("iso-geometry", () => {
     expect(boxDown.right).toHaveLength(4);
   });
 
-  it("buildIsoRamp trả về deck, left, right", () => {
-    const ramp = buildIsoRamp([85, 75], 5, 6, 8);
-    expect(ramp.deck).toHaveLength(4);
-    expect(ramp.left).toHaveLength(3);
-    expect(ramp.right).toHaveLength(3);
+  it("buildIsoRamp tạo vạch dọc và miệng hầm riêng cho lối xuống", () => {
+    const rampUp = buildIsoRamp([85, 75], 5, 6, 8);
+    expect(rampUp.deck).toHaveLength(4);
+    expect(rampUp.left).toHaveLength(3);
+    expect(rampUp.right).toHaveLength(3);
+    expect(rampUp.direction).toBe("UP");
+    expect(rampUp.opening).toBeNull();
+    expect(rampUp.centerLine[0]).toEqual([
+      (rampUp.deck[3][0] + rampUp.deck[2][0]) / 2,
+      (rampUp.deck[3][1] + rampUp.deck[2][1]) / 2,
+    ]);
+    expect(rampUp.centerLine[1]).toEqual([
+      (rampUp.deck[0][0] + rampUp.deck[1][0]) / 2,
+      (rampUp.deck[0][1] + rampUp.deck[1][1]) / 2,
+    ]);
+
+    const rampDown = buildIsoRamp([85, 75], 5, 6, -8);
+    expect(rampDown.direction).toBe("DOWN");
+    expect(rampDown.opening).toHaveLength(4);
+    expect(rampDown.sideLines[0]).toEqual([rampDown.deck[3], rampDown.deck[0]]);
+    expect(rampDown.sideLines[1]).toEqual([rampDown.deck[2], rampDown.deck[1]]);
   });
 
   it("toIsoPercent([100, 62]) trả về [50, 44.286...]", () => {

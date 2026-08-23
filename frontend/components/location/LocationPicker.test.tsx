@@ -42,17 +42,19 @@ describe("LocationPicker", () => {
         (button) => button.querySelector("b")?.textContent,
       ),
     ).toEqual(
-      ["F1-ENTRANCE", "F1-EXIT", "F1-CP1", "F1-CP2", "F1-CP3", "F1-ELEVATOR"].map(
+      ["F1-ENTRANCE", "F1-EXIT", "F1-ELEVATOR"].map(
         formatParkingLocation,
       ),
     );
+    expect(quickChoices).not.toHaveTextContent(/Điểm kiểm tra|F1-CP/);
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Tôi đang cạnh một ô đỗ" }));
+    await user.click(screen.getByRole("button", { name: "Tầng 1" }));
     await user.click(screen.getByRole("button", { name: "Khu D" }));
-    expect(screen.getByRole("group", { name: "Chọn ô khu D" })).toBeVisible();
-    expect(screen.getAllByRole("button", { name: /Chọn ô \d{2} khu D/ })).toHaveLength(10);
+    expect(screen.getByRole("group", { name: "Chọn ô khu D, tầng 1" })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: /Chọn ô \d{2} khu D, tầng 1/ })).toHaveLength(10);
   });
 
   it("shows a backend validation code and request ID inside the open picker", () => {
@@ -89,8 +91,9 @@ describe("LocationPicker", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Tôi đang cạnh một ô đỗ" }));
+    await user.click(screen.getByRole("button", { name: "Tầng 1" }));
     await user.click(screen.getByRole("button", { name: "Khu D" }));
-    const slot = screen.getByRole("button", { name: "Chọn ô 01 khu D" });
+    const slot = screen.getByRole("button", { name: "Chọn ô 01 khu D, tầng 1" });
     await user.dblClick(slot);
 
     expect(onConfirm).toHaveBeenCalledOnce();
@@ -121,15 +124,15 @@ describe("LocationPicker", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Tôi đang cạnh một ô đỗ" }));
+    await user.click(screen.getByRole("button", { name: "Tầng 1" }));
     await user.click(screen.getByRole("button", { name: `Khu ${zone}` }));
-    await user.click(screen.getByRole("button", { name: `Chọn ô ${slot} khu ${zone}` }));
+    await user.click(screen.getByRole("button", { name: `Chọn ô ${slot} khu ${zone}, tầng 1` }));
 
     expect(onConfirm).toHaveBeenCalledOnce();
     expect(onConfirm).toHaveBeenCalledWith(expectedId);
   });
 
-  it("confirms a special location without selecting or confirming a parking slot", async () => {
-    const user = userEvent.setup();
+  it("ẩn checkpoint nội bộ khỏi các lựa chọn vị trí", () => {
     const onConfirm = vi.fn(async () => false);
     render(
       <LocationPicker
@@ -141,9 +144,7 @@ describe("LocationPicker", () => {
       />,
     );
 
-    await user.click(
-      screen.getByRole("button", { name: formatParkingLocation("F1-CP3") }),
-    );
-    expect(onConfirm).toHaveBeenCalledWith("F1-CP3");
+    expect(screen.queryByRole("button", { name: /Điểm kiểm tra|F1-CP/ })).toBeNull();
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 });
