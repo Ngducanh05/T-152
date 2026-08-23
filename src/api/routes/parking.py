@@ -3,11 +3,14 @@
 import logging
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.database import get_db_session
+from src.api.dependencies import (
+    ParkingUserDependency,
+    SessionDependency,
+    resolve_parking_user_id,
+)
 from src.core.parking_map import build_canonical_parking_map
 from src.core.parking_state import ParkingStateError, ParkingStateService
 from src.core.slot_observation import SlotObservationError, SlotObservationService
@@ -24,7 +27,6 @@ from src.models.schemas import (
 )
 
 router = APIRouter(prefix="/parking", tags=["Parking"])
-SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 logger = logging.getLogger(__name__)
 
 
@@ -122,11 +124,13 @@ async def observe_adjacent_parking_slot(
     slot_id: str,
     request: AdjacentSlotObservationRequest,
     session: SessionDependency,
+    current_user: ParkingUserDependency,
 ) -> SuccessResponse[SlotObservation]:
+    user_id = resolve_parking_user_id(request.user_id, current_user)
     try:
         async with session.begin():
             observation = await SlotObservationService(session).create_observation(
-                user_id=request.user_id,
+                user_id=user_id,
                 slot_id=slot_id,
                 observed_status=request.observed_status,
                 expected_slot_version=request.expected_slot_version,
@@ -136,7 +140,7 @@ async def observe_adjacent_parking_slot(
     logger.info(
         "adjacent_slot_observation slot_id=%s actor_id=%s observed_status=%s outcome=success",
         slot_id,
-        request.user_id,
+        user_id,
         request.observed_status.value,
     )
     return SuccessResponse(

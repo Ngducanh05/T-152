@@ -23,7 +23,7 @@ ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 | SlotStatus | AVAILABLE, RESERVED, OCCUPIED |
 | ReservationStatus | ACTIVE, CONFIRMED, EXPIRED, CANCELLED |
 | ParkingSessionStatus | ACTIVE, COMPLETED, CANCELLED |
-| MapNodeType | ENTRANCE, EXIT, CHECKPOINT, ELEVATOR, AISLE, SLOT |
+| MapNodeType | ENTRANCE, EXIT, CHECKPOINT, ELEVATOR, RAMP, AISLE, SLOT |
 | ActorType | USER, ADMIN, SIMULATOR, CAMERA, SYSTEM |
 | ParkingEventType | VEHICLE_ENTERED, SLOT_RESERVED, RESERVATION_CANCELLED, RESERVATION_EXPIRED, VEHICLE_PARKED, VEHICLE_LEFT_SLOT, VEHICLE_EXITED |
 | WrongParkingReportStatus | OPEN, RESOLVED |
@@ -32,7 +32,7 @@ ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 | WrongParkingReportVerificationOutcome | PENDING, CONFIRMED, REJECTED, DUPLICATE, UNVERIFIABLE |
 | RewardSourceType | ADJACENT_SLOT_OBSERVATION, WRONG_PARKING_REPORT |
 | RewardTransactionStatus | PENDING, EARNED, CANCELLED |
-| ErrorCode | INVALID_TRANSITION, SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ROUTE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND, SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS, USER_NOT_FOUND, VEHICLE_NOT_FOUND, RESERVATION_NOT_FOUND, ACTIVE_RESERVATION_NOT_FOUND, RESERVATION_EXPIRED, ACTIVE_SESSION_EXISTS, SESSION_NOT_FOUND, LOCATION_NODE_NOT_FOUND, CURRENT_LOCATION_NOT_FOUND, INVALID_LOCATION_NODE_TYPE, REPORT_NOT_FOUND, REPORT_VERSION_CONFLICT, INVALID_REPORT_TRANSITION, AGENT_TOOL_UNAVAILABLE |
+| ErrorCode | Canonical values live in `src/models/common.py`; contribution/report additions include OBSERVATION_NOT_FOUND, OBSERVATION_ALREADY_EXISTS, OBSERVATION_EXPIRED, INVALID_OBSERVATION_TRANSITION, OBSERVATION_VERSION_CONFLICT, REWARD_ALREADY_SETTLED, REPORT_REWARD_DUPLICATE and CONTRIBUTION_DAILY_LIMIT_REACHED |
 
 ## Data schemas
 
@@ -48,15 +48,19 @@ The canonical Pydantic definitions live in src/models/schemas.py.
 | MapNode | id, floor_id, type, x, y |
 | MapEdge | from_node, to_node, distance_m, bidirectional, enabled |
 | RouteResult | path, distance_m, polyline |
-| RecommendationRequest | user_id, start_node_id, zone_id, charging_required, accessible_required, near_elevator, limit |
+| RecommendationRequest | user_id, start_node_id, floor_id, zone_id, charging_required, accessible_required, near_elevator, limit |
 | RecommendationCandidate | slot_id, score, distance_m, reasons |
 | RecommendationResult | recommendations, parking_state_version |
 | ParkingEvent | id, event_type, slot_id, actor_type, actor_id, old_status, new_status, created_at, metadata |
-| WrongParkingReport | id, user_id, slot_id, reason_code, status, observed_plate_number, description, created_at, updated_at, resolved_at, resolved_by, resolution_note, version |
+| SlotObservation | id, observer_user_id, observer_session_id, slot_id, observed_status, verification_status, reward_points, observed_slot_version, created_at, expires_at, verified_at, verified_by, rejection_reason, version, reward_status |
+| WrongParkingReport | id, reporter_user_id, slot_id, reason_code, status, observed_plate_number, description, evidence_storage_path, evidence_content_type, evidence_size_bytes, created_at, updated_at, resolved_at, resolved_by, resolution_note, verification_outcome, reward_points, reward_status, duplicate_candidate_of_id, version |
+| RewardTransaction | id, user_id, source_type, source_reference, transaction_type, status, points, created_at, settled_at, metadata |
+| RewardSummary | available_points, pending_points, verified_contributions, daily_pending_points, daily_earned_points, daily_limit_points |
 
-Nullable fields are User.current_node_id, ParkingSlot.occupied_by_vehicle_id,
-ParkingSession.completed_at, RecommendationRequest.zone_id, and the event fields that may
-not apply to a particular event:
+Nullable fields include User.current_node_id, ParkingSlot.occupied_by_vehicle_id,
+ParkingSession.completed_at, RecommendationRequest.floor_id, RecommendationRequest.zone_id,
+the optional report evidence/resolution/reward fields, and the event fields that may not
+apply to a particular event:
 slot_id, actor_id, old_status, and new_status. ParkingEvent.metadata defaults to an empty
 object. MapEdge.bidirectional and MapEdge.enabled default to true.
 
@@ -64,10 +68,10 @@ object. MapEdge.bidirectional and MapEdge.enabled default to true.
 
 | Field | Type | Rules |
 |---|---|---|
-| id | string | Required; starts with F1- |
-| floor_id | string | Required; F1 |
+| id | string | Required; starts with F1-, F2-, or F3- |
+| floor_id | string | Required; F1, F2, or F3 |
 | zone_id | string | Required; A, B, C, or D |
-| node_id | string | Required; starts with F1- |
+| node_id | string | Required; starts with the same floor prefix as id |
 | status | SlotStatus | Required |
 | has_charger | boolean | Required |
 | is_accessible | boolean | Required |
@@ -193,6 +197,10 @@ The backend derives these actions deterministically from validated runtime/tool 
 prose is never parsed into buttons, URLs or tool names, and the final business mutation is
 still validated by its Core API.
 
+For recommendations, the workflow forwards the selected/current floor as `floor_id`.
+`recommend_parking_slot` treats it as a hard candidate filter, while `zone_id` remains
+optional; asking for “tầng 1” therefore does not require a follow-up question about zone.
+
 Thread checkpoints use the internal namespace `user_id:thread_id`. A public `thread_id` can
 belong to only one user while its checkpoint is retained; reuse by another user returns HTTP
 409 with `INVALID_TRANSITION`. Idle threads expire after `AGENT_THREAD_TTL_SECONDS` (one hour
@@ -237,6 +245,12 @@ null for the four standard reasons; `OTHER` requires at least five trimmed chara
 `observed_plate_number` is optional and normalized to uppercase. Creating a report never
 changes `ParkingSlot.status`.
 
+The endpoint accepts either JSON (no image) or `multipart/form-data`. Multipart uses the
+same fields plus optional `evidence`. Evidence is never required; when supplied it must be
+JPEG, PNG, WebP, HEIC or HEIF and must not exceed `REPORT_EVIDENCE_MAX_BYTES`. The backend
+chooses the private Storage path. The response includes nullable `evidence_storage_path`,
+`evidence_content_type` and `evidence_size_bytes`; it never exposes the service-role key.
+
 ### Admin lifecycle endpoints
 
 All admin endpoints use `require_admin_or_demo`:
@@ -244,8 +258,11 @@ All admin endpoints use `require_admin_or_demo`:
 - `GET /api/v1/admin/reports?status=OPEN&slot_id=F1-D01&limit=20` lists reports,
   newest first. `status` and `slot_id` are optional; `limit` is 1–100.
 - `GET /api/v1/admin/reports/{report_id}` returns one report.
-- `PATCH /api/v1/admin/reports/{report_id}` accepts `status=RESOLVED`, optional
-  `resolution_note`, and required `expected_version`.
+- `GET /api/v1/admin/reports/{report_id}/evidence-url` returns a five-minute signed URL
+  when the optional evidence exists.
+- `PATCH /api/v1/admin/reports/{report_id}` accepts `status=RESOLVED`, required
+  non-`PENDING` `verification_outcome`, optional `resolution_note`, and required
+  `expected_version`.
 - `POST /api/v1/admin/reports/{report_id}/reopen` requires `expected_version`.
 - `DELETE /api/v1/admin/reports/{report_id}?expected_version=N` permanently removes the
   database row and returns `deleted_report_id` in `SuccessResponse`.
@@ -303,3 +320,17 @@ Mọi response tiếp tục dùng `SuccessResponse`/`ErrorResponse` chuẩn.
 
 Reward còn `PENDING` không phải điểm khả dụng. Chỉ outcome `CONFIRMED` hoặc observation
 `VERIFIED` chuyển sang `EARNED`; các outcome âm/không xác minh chuyển `CANCELLED`.
+
+## Supabase authentication
+
+- `GET /api/v1/auth/me` maps a verified Supabase bearer token to the backend-owned profile.
+- `POST /api/v1/auth/onboarding` idempotently creates a regular user profile and linked
+  `ParkingUser`; token metadata cannot grant admin role.
+- `POST /api/v1/auth/vehicles` adds a vehicle owned by the authenticated parking user and
+  assigns it as the default when no default exists.
+
+Outside demo mode, user-scoped APIs require a bearer token and reject a `user_id` or
+`vehicle_id` not owned by that identity. Admin APIs require `profiles.app_role=admin`.
+The browser client stores the Supabase session in `sessionStorage` with the ParkSmart
+storage key, so separate tabs may hold independent user and admin sessions. Duplicating a
+tab may still copy its initial session because that is browser behavior.

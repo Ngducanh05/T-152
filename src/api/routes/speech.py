@@ -2,17 +2,24 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from src.api.dependencies import require_authenticated_or_demo
 from src.core.config import Settings
 from src.models.common import ErrorResponse, SuccessResponse
 from src.models.schemas import ErrorCode, SpeechTranscriptionResponse
 from src.services.speech import SpeechTranscriptionError, transcribe_audio
 
-router = APIRouter(prefix="/speech", tags=["Speech"])
+router = APIRouter(
+    prefix="/speech",
+    tags=["Speech"],
+    dependencies=[Depends(require_authenticated_or_demo)],
+)
 logger = logging.getLogger(__name__)
 
-_ALLOWED_MEDIA_TYPES = frozenset({"audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm"})
+_ALLOWED_MEDIA_TYPES = frozenset(
+    {"audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm"}
+)
 
 
 def _speech_error(status_code: int, code: ErrorCode, message: str) -> HTTPException:
@@ -27,6 +34,7 @@ def _speech_error(status_code: int, code: ErrorCode, message: str) -> HTTPExcept
     response_model=SuccessResponse[SpeechTranscriptionResponse],
     responses={
         400: {"model": ErrorResponse},
+        401: {"model": ErrorResponse},
         413: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
         503: {"model": ErrorResponse},

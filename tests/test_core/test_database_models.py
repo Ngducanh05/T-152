@@ -62,8 +62,10 @@ def test_parking_migration_follows_profiles_revision():
     wrong_parking_report_revision = scripts.get_revision("20260815_0005")
     report_lifecycle_revision = scripts.get_revision("20260819_0006")
     contribution_revision = scripts.get_revision("0008")
+    auth_report_merge_revision = scripts.get_revision("20260822_0009")
+    integration_merge_revision = scripts.get_revision("20260824_0010")
 
-    assert scripts.get_current_head() == "0008"
+    assert scripts.get_current_head() == "20260824_0010"
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
     assert location_cleanup_revision is not None
@@ -76,16 +78,23 @@ def test_parking_migration_follows_profiles_revision():
     assert report_lifecycle_revision.down_revision == "20260815_0005"
     assert contribution_revision is not None
     assert contribution_revision.down_revision == "0007"
+    assert auth_report_merge_revision is not None
+    assert set(auth_report_merge_revision.down_revision) == {"0007", "20260821_0008"}
+    assert integration_merge_revision is not None
+    assert set(integration_merge_revision.down_revision) == {"0008", "20260822_0009"}
 
 
-def test_cold_start_sql_creates_profile_enum_once():
+def test_cold_start_sql_replaces_legacy_profile_enum_once():
     output = StringIO()
     config = Config("alembic.ini", output_buffer=output)
     config.attributes["configure_logger"] = False
 
     command.upgrade(config, "head", sql=True)
 
-    assert output.getvalue().count("CREATE TYPE app_role_enum") == 1
+    migration_sql = output.getvalue()
+    assert migration_sql.count("CREATE TYPE app_role_enum") == 2
+    assert migration_sql.count("ALTER TYPE app_role_enum RENAME TO app_role_enum_legacy") == 1
+    assert migration_sql.count("DROP TYPE app_role_enum_legacy") == 1
 
 
 def test_report_lifecycle_migration_backfills_before_required_constraints():

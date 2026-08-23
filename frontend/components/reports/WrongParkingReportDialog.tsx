@@ -15,6 +15,7 @@ export interface WrongParkingReportDraft {
   reasonCode: WrongParkingReason;
   observedPlateNumber: string | null;
   description: string | null;
+  evidence: File | null;
 }
 
 interface WrongParkingReportDialogProps {
@@ -35,6 +36,8 @@ const STANDARD_REASONS: Array<{
   { code: "OCCUPYING_CHARGER", label: "Xe chiếm chỗ sạc" },
 ];
 
+const MAX_IMAGE_BYTES = 5_000_000;
+
 export function WrongParkingReportDialog({
   slots,
   initialSlotId = null,
@@ -48,7 +51,7 @@ export function WrongParkingReportDialog({
   const [slotId, setSlotId] = useState(defaultSlotId);
   const [observedPlateNumber, setObservedPlateNumber] = useState("");
   const [description, setDescription] = useState("");
-  const [showMore, setShowMore] = useState(false);
+  const [evidence, setEvidence] = useState<File | null>(null);
   const [selectedReason, setSelectedReason] =
     useState<WrongParkingReason | null>(null);
   const [pending, setPending] = useState(false);
@@ -57,26 +60,27 @@ export function WrongParkingReportDialog({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submittingRef = useRef(false);
 
-  async function submitReason(reasonCode: WrongParkingReason) {
+  async function submitReport() {
     const normalizedDescription = description.trim();
     if (
       submittingRef.current ||
       !slotId ||
-      (reasonCode === "OTHER" && normalizedDescription.length < 5)
+      !selectedReason ||
+      (selectedReason === "OTHER" && normalizedDescription.length < 5)
     ) {
       return;
     }
 
     submittingRef.current = true;
-    setSelectedReason(reasonCode);
     setPending(true);
     setErrorMessage(null);
     try {
       const report = await onSubmit({
         slotId,
-        reasonCode,
+        reasonCode: selectedReason,
         observedPlateNumber: observedPlateNumber.trim().toUpperCase() || null,
         description: normalizedDescription || null,
+        evidence,
       });
       setSubmittedReport(report);
     } catch (error) {
@@ -87,11 +91,6 @@ export function WrongParkingReportDialog({
       submittingRef.current = false;
       setPending(false);
     }
-  }
-
-  function chooseOtherReason() {
-    setSelectedReason("OTHER");
-    setShowMore(true);
   }
 
   function requestClose() {
@@ -142,8 +141,8 @@ export function WrongParkingReportDialog({
         ) : (
           <div className="wrong-parking-report-form">
             <p>
-              Chọn ô và lý do. Chạm vào một lý do chuẩn sẽ gửi báo cáo ngay;
-              trạng thái ô đỗ không bị thay đổi.
+              Chọn ô và lý do, sau đó bổ sung biển số, mô tả hoặc ảnh nếu có.
+              Bạn luôn được xem lại thông tin trước khi gửi.
             </p>
             <p className="reward-condition">
               Report hợp lệ sau khi được bộ phận vận hành kiểm tra sẽ nhận +{rewardPoints} điểm ParkSmart.
@@ -165,74 +164,103 @@ export function WrongParkingReportDialog({
             </label>
 
             <fieldset className="report-reasons" disabled={pending || !slotId}>
-              <legend>Chọn lý do để gửi</legend>
+              <legend>1. Chọn lý do</legend>
               {STANDARD_REASONS.map((reason) => (
                 <button
                   key={reason.code}
                   type="button"
-                  onClick={() => void submitReason(reason.code)}
+                  className={selectedReason === reason.code ? "is-selected" : ""}
+                  aria-pressed={selectedReason === reason.code}
+                  onClick={() => setSelectedReason(reason.code)}
                 >
-                  {pending && selectedReason === reason.code
-                    ? "Đang gửi…"
-                    : `Gửi: ${reason.label}`}
+                  {reason.label}
                 </button>
               ))}
               <button
                 type="button"
-                aria-expanded={showMore && selectedReason === "OTHER"}
-                onClick={chooseOtherReason}
+                className={selectedReason === "OTHER" ? "is-selected" : ""}
+                aria-pressed={selectedReason === "OTHER"}
+                onClick={() => setSelectedReason("OTHER")}
               >
                 Lý do khác
               </button>
             </fieldset>
 
-            <button
-              type="button"
-              className="report-more-toggle"
-              aria-expanded={showMore}
-              onClick={() => setShowMore((current) => !current)}
-              disabled={pending}
-            >
-              {showMore ? "Ẩn thông tin thêm" : "Thêm thông tin"}
-            </button>
-
-            {showMore && (
-              <div className="report-extra-fields">
-                <label>
-                  Biển số quan sát được (không bắt buộc)
-                  <input
-                    value={observedPlateNumber}
-                    onChange={(event) =>
-                      setObservedPlateNumber(event.target.value.toUpperCase())
-                    }
-                    maxLength={32}
-                    placeholder="Ví dụ: 51A-123.45"
-                    disabled={pending}
-                  />
-                </label>
-                <label>
-                  Mô tả {selectedReason === "OTHER" ? "(bắt buộc)" : "(không bắt buộc)"}
-                  <textarea
-                    value={description}
-                    onChange={(event) => setDescription(event.target.value)}
-                    minLength={selectedReason === "OTHER" ? 5 : undefined}
-                    maxLength={500}
-                    placeholder="Thêm chi tiết giúp bộ phận vận hành kiểm tra."
-                    disabled={pending}
-                  />
-                  <small>{description.length}/500 ký tự</small>
-                </label>
-                {selectedReason === "OTHER" && (
+            {selectedReason && (
+              <>
+                <div className="report-extra-fields">
+                  <h3>2. Bổ sung thông tin xác minh</h3>
+                  <p>Thông tin dưới đây không bắt buộc, nhưng sẽ giúp admin kiểm tra nhanh hơn.</p>
+                  <label>
+                    Biển số quan sát được (không bắt buộc)
+                    <input
+                      value={observedPlateNumber}
+                      onChange={(event) =>
+                        setObservedPlateNumber(event.target.value.toUpperCase())
+                      }
+                      maxLength={32}
+                      placeholder="Ví dụ: 51A-123.45"
+                      disabled={pending}
+                    />
+                  </label>
+                  <label>
+                    Mô tả {selectedReason === "OTHER" ? "(bắt buộc)" : "(không bắt buộc)"}
+                    <textarea
+                      value={description}
+                      onChange={(event) => setDescription(event.target.value)}
+                      minLength={selectedReason === "OTHER" ? 5 : undefined}
+                      maxLength={500}
+                      placeholder="Thêm chi tiết giúp bộ phận vận hành kiểm tra."
+                      disabled={pending}
+                    />
+                    <small>{description.length}/500 ký tự</small>
+                  </label>
+                  <label>
+                    Ảnh hiện trường (không bắt buộc)
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                      capture="environment"
+                      disabled={pending}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] ?? null;
+                        if (
+                          file &&
+                          (!file.type.startsWith("image/") ||
+                            file.size <= 0 ||
+                            file.size > MAX_IMAGE_BYTES)
+                        ) {
+                          setEvidence(null);
+                          setErrorMessage(
+                            "Ảnh phải đúng định dạng hình ảnh và có dung lượng tối đa 5 MB.",
+                          );
+                          return;
+                        }
+                        setEvidence(file);
+                        setErrorMessage(null);
+                      }}
+                    />
+                    <small>
+                      {evidence
+                        ? `Đã chọn: ${evidence.name}`
+                        : "Thêm ảnh giúp bộ phận vận hành xác minh nhanh hơn."}
+                    </small>
+                  </label>
+                </div>
+                <div className="report-submit-dock">
                   <button
                     type="button"
                     className="primary-button"
-                    disabled={pending || description.trim().length < 5}
-                    onClick={() => void submitReason("OTHER")}
+                    disabled={
+                      pending ||
+                      (selectedReason === "OTHER" && description.trim().length < 5)
+                    }
+                    onClick={() => void submitReport()}
                   >
-                    {pending ? "Đang gửi…" : "Gửi báo cáo lý do khác"}
+                    {pending ? "Đang gửi báo cáo…" : "3. Gửi báo cáo"}
                   </button>
-                )}
-              </div>
+                </div>
+              </>
             )}
 
             {errorMessage && <p className="report-error" role="alert">{errorMessage}</p>}
