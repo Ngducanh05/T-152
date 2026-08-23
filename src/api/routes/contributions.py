@@ -1,13 +1,14 @@
 """User contribution history and authoritative ParkSmart Points summaries."""
 
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies import (
+    ParkingUserDependency,
+    SessionDependency,
+    resolve_parking_user_id,
+)
 from src.core.config import get_settings
-from src.core.database import get_db_session
 from src.core.db_models import SlotObservation, WrongParkingReport
 from src.core.reward import RewardError, RewardService
 from src.core.slot_observation import SlotObservationService
@@ -20,7 +21,6 @@ from src.models.schemas import (
 )
 
 router = APIRouter(tags=["Contributions", "Rewards"])
-SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 def _reward_error(error: RewardError) -> HTTPException:
@@ -37,7 +37,9 @@ def _reward_error(error: RewardError) -> HTTPException:
 async def user_contributions(
     user_id: str,
     session: SessionDependency,
+    current_user: ParkingUserDependency,
 ) -> SuccessResponse[list[ContributionRecord]]:
+    user_id = resolve_parking_user_id(user_id, current_user)
     async with session.begin():
         await SlotObservationService(session).expire_pending()
     rewards = RewardService(session)
@@ -119,7 +121,9 @@ async def user_contributions(
 async def user_reward_summary(
     user_id: str,
     session: SessionDependency,
+    current_user: ParkingUserDependency,
 ) -> SuccessResponse[RewardSummary]:
+    user_id = resolve_parking_user_id(user_id, current_user)
     async with session.begin():
         await SlotObservationService(session).expire_pending()
     try:

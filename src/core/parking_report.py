@@ -115,6 +115,10 @@ class ParkingReportService:
         reason_code: WrongParkingReason,
         description: str | None,
         observed_plate_number: str | None,
+        evidence_storage_path: str | None = None,
+        evidence_content_type: str | None = None,
+        evidence_size_bytes: int | None = None,
+        report_id: str | None = None,
     ) -> WrongParkingReport:
         normalized_description = self._normalize_description(reason_code, description)
         normalized_plate = self._normalize_plate(observed_plate_number)
@@ -148,13 +152,16 @@ class ParkingReportService:
             .limit(1)
         )
         report = WrongParkingReport(
-            id=f"REPORT-{uuid4()}",
+            id=report_id or f"REPORT-{uuid4()}",
             reporter_user_id=reporter_user_id,
             slot_id=slot_id,
             reason_code=reason_code,
             status=WrongParkingReportStatus.OPEN,
             observed_plate_number=normalized_plate,
             description=normalized_description,
+            evidence_storage_path=evidence_storage_path,
+            evidence_content_type=evidence_content_type,
+            evidence_size_bytes=evidence_size_bytes,
             created_at=now,
             updated_at=now,
             resolved_at=None,

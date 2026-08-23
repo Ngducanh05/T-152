@@ -47,12 +47,16 @@ flowchart TB
     end
 
     subgraph External["External providers"]
+        Auth["Supabase Auth"]
+        Storage["Supabase private Storage"]
         LLM["LLM API"]
         STT["Speech-to-Text API"]
     end
 
     UserUI --> Shared
     AdminUI --> Shared
+    UserUI --> Auth
+    AdminUI --> Auth
     WebSpeech --> UserUI
     Shared --> PublicAPI
     UserUI --> AgentAPI
@@ -68,6 +72,8 @@ flowchart TB
     AdminAPI --> Simulator
     Simulator --> Core
     SpeechAPI --> STT
+    PublicAPI --> Storage
+    AdminAPI --> Storage
 
     Core --> DB
     Core --> Map
@@ -171,12 +177,14 @@ biểu đồ lịch sử hoặc dự đoán giả.
 
 ```mermaid
 flowchart LR
-    User["User selects canonical slot + reason"] --> ReportAPI["POST /api/v1/reports/wrong-parking"]
+    User["User selects canonical slot + reason + optional photo"] --> ReportAPI["POST /api/v1/reports/wrong-parking"]
     ReportAPI --> Validate["Validate user, slot and reason"]
-    Validate --> DB[("OPEN report v0")]
+    Validate --> DB[("OPEN/PENDING report + PENDING reward if eligible")]
+    ReportAPI -. "optional image" .-> Storage["Private Supabase Storage"]
     DB --> AdminAPI["Admin report APIs"]
     AdminAPI --> AdminUI["Map warning + detail drawer"]
-    AdminUI --> Resolve["Resolve or reopen with expected_version"]
+    Storage -. "short-lived signed URL" .-> AdminUI
+    AdminUI --> Resolve["Resolve with explicit outcome or reopen"]
     AdminUI --> Delete["Confirmed hard delete"]
     Resolve --> DB
     Delete --> DB

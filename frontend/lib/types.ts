@@ -348,6 +348,9 @@ export interface WrongParkingReport {
   status: WrongParkingReportStatus;
   observed_plate_number: string | null;
   description: string | null;
+  evidence_storage_path: string | null;
+  evidence_content_type: string | null;
+  evidence_size_bytes: number | null;
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
@@ -380,6 +383,7 @@ export interface CreateWrongParkingReportRequest {
   reason_code: WrongParkingReason;
   observed_plate_number?: string | null;
   description?: string | null;
+  evidence?: File;
 }
 
 export interface AdminReportFilters {
@@ -422,6 +426,16 @@ export interface ReopenWrongParkingReportRequest {
   expected_version: number;
 }
 export type ReopenWrongParkingReportResponse = WrongParkingReport;
+
+export interface ReportEvidenceUrlResponse {
+  signed_url: string;
+  expires_in: number;
+}
+
+export interface AddVehicleRequest {
+  plate_number: string;
+  requires_charging: boolean;
+}
 
 export interface DeleteWrongParkingReportRequest {
   expected_version: number;

@@ -84,8 +84,11 @@ export function AdminDashboard() {
   const [drawerError, setDrawerError] = useState<string | null>(null);
   const [pendingReportMutation, setPendingReportMutation] =
     useState<PendingReportMutation | null>(null);
+  const [newReportNotice, setNewReportNotice] =
+    useState<WrongParkingReport | null>(null);
   const mutationLockRef = useRef(false);
   const reportMutationLockRef = useRef(false);
+  const observedReportIdsRef = useRef<Set<string> | null>(null);
 
   const loadObservations = useCallback(async (
     signal?: AbortSignal,
@@ -153,6 +156,19 @@ export function AdminDashboard() {
         visibleRequest,
       ]);
       if (!signal?.aborted) {
+        const nextIds = new Set(openResult.map((report) => report.id));
+        if (observedReportIdsRef.current === null) {
+          observedReportIdsRef.current = nextIds;
+        } else {
+          const newReport = openResult.find(
+            (report) => !observedReportIdsRef.current?.has(report.id),
+          );
+          observedReportIdsRef.current = new Set([
+            ...observedReportIdsRef.current,
+            ...nextIds,
+          ]);
+          if (newReport) setNewReportNotice(newReport);
+        }
         setOpenReports(openResult);
         setReports(visibleResult);
         setReportsLastUpdatedAt(new Date());
@@ -531,6 +547,18 @@ export function AdminDashboard() {
     );
   }
 
+  async function loadReportEvidence(report: WrongParkingReport) {
+    try {
+      const result = await parkSmartApi.getAdminReportEvidenceUrl(report.id);
+      return result.signed_url;
+    } catch (error) {
+      setDrawerError(
+        formatApiErrorForOperator(error, "Khong the tai anh bang chung."),
+      );
+      return null;
+    }
+  }
+
   async function runMutation(
     name: MutationName,
     action: () => Promise<unknown>,
@@ -624,6 +652,19 @@ export function AdminDashboard() {
         <div className="admin-operation-notice" role="status" aria-live="polite">
           {operationNotice}
         </div>
+      )}
+
+      {newReportNotice && (
+        <button
+          type="button"
+          className="admin-operation-notice"
+          onClick={() => {
+            openReportedSlot(newReportNotice.slot_id);
+            setNewReportNotice(null);
+          }}
+        >
+          New report at {formatParkingLocation(newReportNotice.slot_id)}
+        </button>
       )}
 
       {data.loading && (
@@ -1005,6 +1046,7 @@ export function AdminDashboard() {
           onResolve={resolveReport}
           onReopen={reopenReport}
           onDelete={deleteReport}
+          onLoadEvidence={loadReportEvidence}
         />
       )}
     </main>

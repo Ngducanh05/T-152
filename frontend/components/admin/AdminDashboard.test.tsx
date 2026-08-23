@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   parkSimulatedVehicle: vi.fn(),
   leaveSimulatedVehicle: vi.fn(),
   updateAdminSlotStatus: vi.fn(),
+  getAdminReportEvidenceUrl: vi.fn(async () => ({ signed_url: "https://example.test/evidence.jpg" })),
 }));
 
 vi.mock("@/hooks/use-parksmart-data", () => ({
@@ -49,6 +50,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       parkSimulatedVehicle: mocks.parkSimulatedVehicle,
       leaveSimulatedVehicle: mocks.leaveSimulatedVehicle,
       updateAdminSlotStatus: mocks.updateAdminSlotStatus,
+      getAdminReportEvidenceUrl: mocks.getAdminReportEvidenceUrl,
     },
   };
 });
@@ -65,6 +67,9 @@ function report(id: string, createdAt: string): WrongParkingReport {
     status: "OPEN",
     observed_plate_number: null,
     description: null,
+    evidence_storage_path: null,
+    evidence_content_type: null,
+    evidence_size_bytes: null,
     created_at: createdAt,
     updated_at: createdAt,
     resolved_at: null,

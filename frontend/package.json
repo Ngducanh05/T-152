@@ -10,9 +10,12 @@
     "test": "vitest run",
     "test:ci": "vitest run --reporter=default",
     "test:e2e": "node e2e/run-e2e.mjs",
+    "test:e2e:auth": "node e2e/run-auth-e2e.mjs",
     "test:e2e:live-agent": "node e2e/run-e2e.mjs --grep @live-agent"
   },
   "dependencies": {
+    "@supabase/ssr": "0.12.4",
+    "@supabase/supabase-js": "2.112.1",
     "next": "16.3.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"

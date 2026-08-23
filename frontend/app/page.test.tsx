@@ -22,6 +22,29 @@ vi.mock("@/hooks/use-parking-workflow", async (importOriginal) => {
 vi.mock("@/components/assistant/AgentComposer", () => ({
   AgentComposer: () => <div data-testid="agent-composer" />,
 }));
+vi.mock("@/components/auth/AuthProvider", () => ({
+  useAuth: () => ({
+    profile: {
+      id: "auth-user-001",
+      email: "user@example.com",
+      full_name: "Test User",
+      role: "user",
+      parking_user_id: "USER-001",
+      default_vehicle_id: "VEHICLE-001",
+    },
+    refreshProfile: vi.fn(async () => null),
+  }),
+  parkingIdentityFromProfile: () => ({
+    userId: "USER-001",
+    vehicleId: "VEHICLE-001",
+  }),
+}));
+vi.mock("@/components/auth/ProtectedRoute", () => ({
+  ProtectedRoute: ({ children }: { children: React.ReactNode }) => children,
+}));
+vi.mock("@/components/auth/LogoutButton", () => ({
+  LogoutButton: () => <button type="button">Đăng xuất</button>,
+}));
 
 afterEach(() => {
   cleanup();

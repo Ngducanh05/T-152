@@ -237,6 +237,12 @@ null for the four standard reasons; `OTHER` requires at least five trimmed chara
 `observed_plate_number` is optional and normalized to uppercase. Creating a report never
 changes `ParkingSlot.status`.
 
+The endpoint accepts either JSON (no image) or `multipart/form-data`. Multipart uses the
+same fields plus optional `evidence`. Evidence is never required; when supplied it must be
+JPEG, PNG, WebP, HEIC or HEIF and must not exceed `REPORT_EVIDENCE_MAX_BYTES`. The backend
+chooses the private Storage path. The response includes nullable `evidence_storage_path`,
+`evidence_content_type` and `evidence_size_bytes`; it never exposes the service-role key.
+
 ### Admin lifecycle endpoints
 
 All admin endpoints use `require_admin_or_demo`:
@@ -244,6 +250,8 @@ All admin endpoints use `require_admin_or_demo`:
 - `GET /api/v1/admin/reports?status=OPEN&slot_id=F1-D01&limit=20` lists reports,
   newest first. `status` and `slot_id` are optional; `limit` is 1–100.
 - `GET /api/v1/admin/reports/{report_id}` returns one report.
+- `GET /api/v1/admin/reports/{report_id}/evidence-url` returns a five-minute signed URL
+  when the optional evidence exists.
 - `PATCH /api/v1/admin/reports/{report_id}` accepts `status=RESOLVED`, optional
   `resolution_note`, and required `expected_version`.
 - `POST /api/v1/admin/reports/{report_id}/reopen` requires `expected_version`.
@@ -303,3 +311,14 @@ Mọi response tiếp tục dùng `SuccessResponse`/`ErrorResponse` chuẩn.
 
 Reward còn `PENDING` không phải điểm khả dụng. Chỉ outcome `CONFIRMED` hoặc observation
 `VERIFIED` chuyển sang `EARNED`; các outcome âm/không xác minh chuyển `CANCELLED`.
+
+## Supabase authentication
+
+- `GET /api/v1/auth/me` maps a verified Supabase bearer token to the backend-owned profile.
+- `POST /api/v1/auth/onboarding` idempotently creates a regular user profile and linked
+  `ParkingUser`; token metadata cannot grant admin role.
+- `POST /api/v1/auth/vehicles` adds a vehicle owned by the authenticated parking user and
+  assigns it as the default when no default exists.
+
+Outside demo mode, user-scoped APIs require a bearer token and reject a `user_id` or
+`vehicle_id` not owned by that identity. Admin APIs require `profiles.app_role=admin`.

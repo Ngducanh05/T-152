@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_anon_key: str | None = None
     supabase_service_role_key: str | None = None
+    supabase_report_evidence_bucket: str = "wrong-parking-evidence"
+    report_evidence_max_bytes: int = Field(default=5_000_000, gt=0, le=15_000_000)
 
     llm_api_key: str | None = Field(
         default=None,
@@ -84,6 +86,38 @@ class Settings(BaseSettings):
         if not value.startswith("postgresql+asyncpg://"):
             raise ValueError("DATABASE_URL must use postgresql+asyncpg://")
         return value
+
+    @model_validator(mode="after")
+    def production_configuration_must_fail_fast(self) -> "Settings":
+        if self.app_env.strip().lower() not in {"production", "prod"}:
+            return self
+
+        failures: list[str] = []
+        if self.debug:
+            failures.append("DEBUG must be false")
+        if self.demo_mode:
+            failures.append("DEMO_MODE must be false")
+        if (
+            self.database_url
+            == "postgresql+asyncpg://parksmart:parksmart@localhost:5432/parksmart"
+        ):
+            failures.append("DATABASE_URL must not use the built-in local fallback")
+        if not self.supabase_url:
+            failures.append("SUPABASE_URL is required")
+        if not self.supabase_anon_key:
+            failures.append("SUPABASE_ANON_KEY is required")
+        if not self.supabase_service_role_key:
+            failures.append("SUPABASE_SERVICE_ROLE_KEY is required")
+        if not self.supabase_report_evidence_bucket:
+            failures.append("SUPABASE_REPORT_EVIDENCE_BUCKET is required")
+        if not self.llm_api_key:
+            failures.append("LLM_API_KEY is required")
+
+        if failures:
+            raise ValueError(
+                f"Unsafe production configuration: {'; '.join(failures)}"
+            )
+        return self
 
     @property
     def environment(self) -> str:

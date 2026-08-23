@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies import ParkingUserDependency, resolve_parking_user_id
 from src.core.database import get_db_session
 from src.core.parking_state import ParkingStateService
 from src.core.recommendation import RecommendationError, RecommendationService
@@ -33,6 +34,8 @@ def _domain_error(error: RecommendationError) -> HTTPException:
     response_model=SuccessResponse[RecommendationResult],
     responses={
         400: {"model": ErrorResponse},
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
     },
@@ -40,14 +43,17 @@ def _domain_error(error: RecommendationError) -> HTTPException:
 async def recommend_parking(
     request: RecommendationRequest,
     session: SessionDependency,
+    current_user: ParkingUserDependency,
 ) -> SuccessResponse[RecommendationResult]:
+    user_id = resolve_parking_user_id(request.user_id, current_user)
+    trusted_request = request.model_copy(update={"user_id": user_id})
     try:
         async with session.begin():
             result = await RecommendationService(
                 session,
                 ParkingStateService(session),
                 RoutingService(session),
-            ).recommend(request)
+            ).recommend(trusted_request)
     except RecommendationError as error:
         raise _domain_error(error) from error
     return SuccessResponse(data=result)

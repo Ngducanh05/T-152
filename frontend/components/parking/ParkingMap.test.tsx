@@ -403,5 +403,3 @@ describe("ParkingMap", () => {
     expect(isoF2Points?.startsWith("0,50")).toBe(false);
   });
 });
-
-

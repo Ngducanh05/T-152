@@ -1,10 +1,14 @@
 # ParkSmart AI
 
-ParkSmart AI là hệ thống demo quản lý và dẫn đường trong bãi xe tầng F1. FastAPI
-và PostgreSQL giữ trạng thái authoritative cho bản đồ, ô đỗ, reservation, phiên
+ParkSmart AI là hệ thống quản lý và dẫn đường trong bãi xe nhiều tầng F1/F2/F3. FastAPI
+và PostgreSQL trên Supabase giữ trạng thái authoritative cho bản đồ, ô đỗ, reservation, phiên
 đỗ xe, vị trí người dùng, parking events và báo cáo xe đỗ sai. Next.js cung cấp
 hai giao diện: `/` cho người dùng và `/admin` cho vận hành. LangGraph Agent chỉ
 gọi các Core Service có cùng quy tắc nghiệp vụ với REST API.
+
+Supabase Auth cung cấp đăng nhập/đăng ký; backend tự tạo ParkSmart profile và parking
+identity cho tài khoản người dùng mới. Role và quyền admin luôn lấy từ `profiles` do
+backend quản lý, không tin role trong token metadata.
 
 Demo mặc định dùng `USER-001` và `VEHICLE-001`. Khi bật `DEMO_MODE` và
 `SIMULATOR_ENABLED`, operator có thể đưa demo về baseline: 40 ô, 39 AVAILABLE,
@@ -71,6 +75,11 @@ cấu hình; giá trị rỗng nghĩa là tính năng tương ứng chưa đư�
 | `SUPABASE_URL` | Khi bật auth Supabase | Rỗng | Supabase project URL |
 | `SUPABASE_ANON_KEY` | Khi bật auth Supabase | Rỗng | Public Supabase client key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Chỉ backend khi cần | Rỗng | Secret service-role key; không đưa ra frontend |
+| `SUPABASE_REPORT_EVIDENCE_BUCKET` | Khi dùng ảnh report | `wrong-parking-evidence` | Private bucket do backend quản lý |
+| `REPORT_EVIDENCE_MAX_BYTES` | Không | `5000000` | Kích thước ảnh report tối đa |
+| `NEXT_PUBLIC_SUPABASE_URL` | Khi bật auth | Rỗng | Supabase project URL công khai cho frontend |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Khi bật auth | Rỗng | Publishable/anon key cho frontend; không phải service-role |
+| `NEXT_PUBLIC_DEMO_MODE` | Không | `false` | Bật identity demo ở frontend khi phát triển offline |
 | `LLM_API_KEY` | Có khi chạy Agent thật | Rỗng | API key của LLM provider |
 | `LLM_MODEL` | Không | `gpt-4o-mini` | Model dùng cho LangGraph Agent |
 | `LLM_TEMPERATURE` | Không | `0` | Temperature cho Agent |
@@ -154,6 +163,10 @@ Mở:
 
 Backend và PostgreSQL phải đang chạy. `/admin` hoạt động không bearer token chỉ
 khi `DEMO_MODE=true`; ngoài demo mode, backend yêu cầu role `admin`.
+
+Để kiểm thử đăng nhập thật, đặt `DEMO_MODE=false` và `NEXT_PUBLIC_DEMO_MODE=false`.
+Không để hai giá trị này lệch nhau. Người dùng mới có thể thêm xe đầu tiên sau khi
+đăng ký; admin phải được operator đổi `profiles.app_role` thành `admin`.
 
 ## 7. Reset demo một bước
 
@@ -258,10 +271,12 @@ có cấu trúc.
 
 ## 12. Demo report lifecycle
 
-1. Tại `/`, chạm **Báo xe đỗ sai**, chọn ô rồi chạm một reason chuẩn để gửi; không cần nhập
-   mô tả và report không làm thay đổi trạng thái ô.
-2. Tại `/admin`, tìm viền đỏ và badge OPEN trên map, click ô để mở drawer.
-3. Resolve report với version hiện tại. Cảnh báo chỉ biến mất khi ô không còn report OPEN;
+1. Tại `/`, chạm **Báo xe đỗ sai**, chọn ô và reason. Ảnh hiện trường là tùy chọn để admin
+   xác minh nhanh hơn. Với reason chuẩn không cần nhập mô tả; report không làm thay đổi
+   trạng thái ô.
+2. Tại `/admin`, tìm viền đỏ và badge OPEN trên map, click ô để mở drawer; ảnh được mở qua
+   signed URL ngắn hạn và bucket không public.
+3. Resolve report với version hiện tại và outcome bắt buộc. Cảnh báo chỉ biến mất khi ô không còn report OPEN;
    reopen làm cảnh báo xuất hiện lại.
 4. **Xóa vĩnh viễn** khác resolve: admin phải xác nhận, row bị xóa khỏi database và
    `GET /api/v1/admin/reports/{id}` sau đó trả `404 REPORT_NOT_FOUND`.

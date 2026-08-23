@@ -26,6 +26,9 @@ const createdReport: WrongParkingReport = {
   reward_points: 20,
   reward_status: "PENDING",
   duplicate_candidate_of_id: null,
+  evidence_storage_path: null,
+  evidence_content_type: null,
+  evidence_size_bytes: null,
   version: 0,
 };
 
@@ -60,6 +63,7 @@ describe("WrongParkingReportDialog", () => {
       reasonCode: "CROSSED_LINE",
       observedPlateNumber: "51A-123.45",
       description: "Xe đỗ chéo sang ô bên cạnh.",
+      evidence: null,
     });
     expect(screen.getByRole("status")).toHaveTextContent("Đã gửi báo cáo");
   });
@@ -83,7 +87,36 @@ describe("WrongParkingReportDialog", () => {
       reasonCode: "BLOCKING_ACCESS",
       observedPlateNumber: null,
       description: null,
+      evidence: null,
     });
+  });
+
+  it("passes an optional evidence image without making it required", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async () => createdReport);
+    const evidence = new File(["image-bytes"], "scene.jpg", {
+      type: "image/jpeg",
+    });
+    render(
+      <WrongParkingReportDialog
+        slots={canonicalMap.slots}
+        initialSlotId="F1-D01"
+        rewardPoints={20}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Thêm thông tin" }));
+    await user.upload(
+      screen.getByLabelText(/^Ảnh hiện trường \(không bắt buộc\)/),
+      evidence,
+    );
+    await user.click(screen.getByRole("button", { name: "Gửi: Xe đỗ chéo vạch" }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ evidence }),
+    );
   });
 
   it("requires a five-character description only for OTHER", async () => {

@@ -15,6 +15,7 @@ export interface WrongParkingReportDraft {
   reasonCode: WrongParkingReason;
   observedPlateNumber: string | null;
   description: string | null;
+  evidence: File | null;
 }
 
 interface WrongParkingReportDialogProps {
@@ -35,6 +36,8 @@ const STANDARD_REASONS: Array<{
   { code: "OCCUPYING_CHARGER", label: "Xe chiếm chỗ sạc" },
 ];
 
+const MAX_IMAGE_BYTES = 5_000_000;
+
 export function WrongParkingReportDialog({
   slots,
   initialSlotId = null,
@@ -48,6 +51,7 @@ export function WrongParkingReportDialog({
   const [slotId, setSlotId] = useState(defaultSlotId);
   const [observedPlateNumber, setObservedPlateNumber] = useState("");
   const [description, setDescription] = useState("");
+  const [evidence, setEvidence] = useState<File | null>(null);
   const [showMore, setShowMore] = useState(false);
   const [selectedReason, setSelectedReason] =
     useState<WrongParkingReason | null>(null);
@@ -77,6 +81,7 @@ export function WrongParkingReportDialog({
         reasonCode,
         observedPlateNumber: observedPlateNumber.trim().toUpperCase() || null,
         description: normalizedDescription || null,
+        evidence,
       });
       setSubmittedReport(report);
     } catch (error) {
@@ -221,6 +226,37 @@ export function WrongParkingReportDialog({
                     disabled={pending}
                   />
                   <small>{description.length}/500 ký tự</small>
+                </label>
+                <label>
+                  Ảnh hiện trường (không bắt buộc)
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                    capture="environment"
+                    disabled={pending}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null;
+                      if (
+                        file &&
+                        (!file.type.startsWith("image/") ||
+                          file.size <= 0 ||
+                          file.size > MAX_IMAGE_BYTES)
+                      ) {
+                        setEvidence(null);
+                        setErrorMessage(
+                          "Ảnh phải đúng định dạng hình ảnh và có dung lượng tối đa 5 MB.",
+                        );
+                        return;
+                      }
+                      setEvidence(file);
+                      setErrorMessage(null);
+                    }}
+                  />
+                  <small>
+                    {evidence
+                      ? `Đã chọn: ${evidence.name}`
+                      : "Thêm ảnh giúp bộ phận vận hành xác minh nhanh hơn."}
+                  </small>
                 </label>
                 {selectedReason === "OTHER" && (
                   <button

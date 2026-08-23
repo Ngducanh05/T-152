@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import require_admin_or_demo
+from src.api.dependencies import SettingsDependency, require_admin_or_demo
 from src.core.database import get_db_session
 from src.core.db_models import ParkingEvent as ParkingEventRecord
 from src.core.db_models import ParkingSlot as ParkingSlotRecord
@@ -32,6 +32,7 @@ from src.models.schemas import (
     WrongParkingReportVerificationOutcome,
     ZoneId,
 )
+from src.services.report_evidence import ReportEvidenceStorage
 
 router = APIRouter(
     prefix="/admin",
@@ -101,6 +102,13 @@ class DeletedWrongParkingReportResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     deleted_report_id: str
+
+
+class ReportEvidenceUrlResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signed_url: str
+    expires_in: int
 
 
 def _event_response(event: ParkingEventRecord) -> ParkingEvent:
@@ -421,6 +429,38 @@ async def get_wrong_parking_report(
     return SuccessResponse(data=_report_response(report))
 
 
+@router.get(
+    "/reports/{report_id}/evidence-url",
+    response_model=SuccessResponse[ReportEvidenceUrlResponse],
+    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+)
+async def get_wrong_parking_report_evidence_url(
+    report_id: str,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> SuccessResponse[ReportEvidenceUrlResponse]:
+    try:
+        report = await ParkingReportService(session).get_wrong_parking_report(report_id)
+    except ParkingReportError as error:
+        raise _report_http_error(error) from error
+    if not report.evidence_storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "REPORT_EVIDENCE_NOT_FOUND",
+                "message": "Report evidence was not found.",
+            },
+        )
+    expires_in = 300
+    signed_url = await ReportEvidenceStorage(settings).create_signed_url(
+        report.evidence_storage_path,
+        expires_in=expires_in,
+    )
+    return SuccessResponse(
+        data=ReportEvidenceUrlResponse(signed_url=signed_url, expires_in=expires_in)
+    )
+
+
 @router.patch(
     "/reports/{report_id}",
     response_model=SuccessResponse[WrongParkingReport],
@@ -518,6 +558,7 @@ async def delete_wrong_parking_report(
     session: SessionDependency,
     request: Request,
     admin_user: AdminUserDependency,
+    settings: SettingsDependency,
     expected_version: Annotated[int, Query(ge=0)],
 ) -> SuccessResponse[DeletedWrongParkingReportResponse]:
     actor_id = _admin_actor_id(admin_user)
@@ -546,6 +587,19 @@ async def delete_wrong_parking_report(
         actor_id=actor_id,
         outcome="success",
     )
+    cleanup_succeeded = False
+    try:
+        cleanup_succeeded = await ReportEvidenceStorage(settings).delete(
+            report.evidence_storage_path
+        )
+    except Exception:  # noqa: BLE001 - cleanup is best effort after DB deletion
+        cleanup_succeeded = False
+    if not cleanup_succeeded:
+        logger.warning(
+            "wrong_parking_report_evidence_cleanup report_id=%s outcome=failure request_id=%s",
+            report.id,
+            getattr(request.state, "request_id", "unknown"),
+        )
     return SuccessResponse(
         data=DeletedWrongParkingReportResponse(deleted_report_id=report.id)
     )

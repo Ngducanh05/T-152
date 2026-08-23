@@ -6,12 +6,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies import require_authenticated_or_demo
 from src.core.database import get_db_session
 from src.core.routing import RoutingError, RoutingService
 from src.models.common import ErrorResponse, SuccessResponse
 from src.models.schemas import ErrorCode, FloorScopedId, RouteMode, RouteResult
 
-router = APIRouter(prefix="/routes", tags=["Routing"])
+router = APIRouter(
+    prefix="/routes",
+    tags=["Routing"],
+    dependencies=[Depends(require_authenticated_or_demo)],
+)
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 
 
@@ -43,6 +48,7 @@ def _domain_error(error: RoutingError) -> HTTPException:
     "",
     response_model=SuccessResponse[RouteResponse],
     responses={
+        401: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
     },

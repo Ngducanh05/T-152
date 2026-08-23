@@ -1,5 +1,7 @@
+import type { AuthenticatedProfile } from "./auth";
 import type {
   ActiveParkingSession,
+  AddVehicleRequest,
   AdjacentSlotObservationRequest,
   AdminObservationFilters,
   AdminReportFilters,
@@ -28,6 +30,7 @@ import type {
   RecommendationResult,
   ReopenWrongParkingReportRequest,
   ReopenWrongParkingReportResponse,
+  ReportEvidenceUrlResponse,
   ResolveWrongParkingReportRequest,
   ResolveWrongParkingReportResponse,
   RouteRequest,
@@ -45,6 +48,12 @@ import type {
 } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
+
+export interface ApiAuthProvider {
+  getAccessToken: () => Promise<string | null>;
+  refreshAccessToken: () => Promise<string | null>;
+  onAuthenticationFailure?: () => Promise<void> | void;
+}
 
 export class ApiError extends Error {
   readonly code: string;
@@ -149,23 +158,68 @@ function queryString(values: Record<string, string | number | boolean | undefine
 export class ParkSmartApiClient {
   private readonly baseUrl: string;
   private readonly fetcher: typeof fetch;
+  private authProvider: ApiAuthProvider | null;
 
-  constructor(options: { baseUrl?: string; fetcher?: typeof fetch } = {}) {
+  constructor(
+    options: {
+      baseUrl?: string;
+      fetcher?: typeof fetch;
+      authProvider?: ApiAuthProvider | null;
+    } = {},
+  ) {
     this.baseUrl = (options.baseUrl ?? DEFAULT_API_BASE_URL).replace(/\/$/, "");
-    this.fetcher = options.fetcher ?? fetch;
+    if (options.fetcher) {
+      this.fetcher = options.fetcher;
+    } else if (typeof window !== "undefined") {
+      this.fetcher = (input, init) => window.fetch(input, init);
+    } else {
+      this.fetcher = (input, init) => globalThis.fetch(input, init);
+    }
+    this.authProvider = options.authProvider ?? null;
+  }
+
+  setAuthProvider(provider: ApiAuthProvider | null) {
+    this.authProvider = provider;
+  }
+
+  private async fetchOnce(
+    path: string,
+    options: RequestInit,
+    accessToken: string | null,
+  ) {
+    const headers = new Headers(options.headers);
+    if (
+      options.body !== undefined &&
+      !(typeof FormData !== "undefined" && options.body instanceof FormData) &&
+      !headers.has("Content-Type")
+    ) {
+      headers.set("Content-Type", "application/json");
+    }
+    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+    return this.fetcher(`${this.baseUrl}${path}`, { ...options, headers });
+  }
+
+  private async authenticatedFetch(path: string, options: RequestInit = {}) {
+    const provider = this.authProvider;
+    const accessToken = provider ? await provider.getAccessToken() : null;
+    let response = await this.fetchOnce(path, options, accessToken);
+    if (response.status !== 401 || !provider) return response;
+
+    const refreshedToken = await provider.refreshAccessToken();
+    if (!refreshedToken) {
+      await provider.onAuthenticationFailure?.();
+      return response;
+    }
+    response = await this.fetchOnce(path, options, refreshedToken);
+    if (response.status === 401) await provider.onAuthenticationFailure?.();
+    return response;
   }
 
   private async request<T>(
     path: string,
     options: RequestInit = {},
   ): Promise<T> {
-    const headers = new Headers(options.headers);
-    if (options.body !== undefined) headers.set("Content-Type", "application/json");
-    const fetcher = this.fetcher;
-    const response = await fetcher(`${this.baseUrl}${path}`, {
-      ...options,
-      headers,
-    });
+    const response = await this.authenticatedFetch(path, options);
     return parseApiResponse<T>(response);
   }
 
@@ -176,6 +230,26 @@ export class ParkSmartApiClient {
       if (error instanceof ApiError && error.status === 404) return null;
       throw error;
     }
+  }
+
+  getCurrentUser(signal?: AbortSignal) {
+    return this.request<AuthenticatedProfile>("/auth/me", { signal });
+  }
+
+  onboardCurrentUser(signal?: AbortSignal) {
+    return this.request<AuthenticatedProfile>("/auth/onboarding", {
+      method: "POST",
+      body: JSON.stringify({}),
+      signal,
+    });
+  }
+
+  addVehicle(payload: AddVehicleRequest, signal?: AbortSignal) {
+    return this.request<AuthenticatedProfile>("/auth/vehicles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
   }
 
   getMap(signal?: AbortSignal) {
@@ -319,7 +393,7 @@ export class ParkSmartApiClient {
   }
 
   async transcribeSpeech(audio: Blob, signal?: AbortSignal) {
-    const response = await this.fetcher(`${this.baseUrl}/speech/transcriptions`, {
+    const response = await this.authenticatedFetch("/speech/transcriptions", {
       method: "POST",
       body: audio,
       headers: { "Content-Type": audio.type || "audio/webm" },
@@ -374,6 +448,22 @@ export class ParkSmartApiClient {
     payload: CreateWrongParkingReportRequest,
     signal?: AbortSignal,
   ) {
+    if (payload.evidence) {
+      const form = new FormData();
+      form.set("user_id", payload.user_id);
+      form.set("slot_id", payload.slot_id);
+      form.set("reason_code", payload.reason_code);
+      if (payload.observed_plate_number) {
+        form.set("observed_plate_number", payload.observed_plate_number);
+      }
+      if (payload.description) form.set("description", payload.description);
+      form.set("evidence", payload.evidence);
+      return this.request<WrongParkingReport>("/reports/wrong-parking", {
+        method: "POST",
+        body: form,
+        signal,
+      });
+    }
     return this.request<WrongParkingReport>("/reports/wrong-parking", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -495,6 +585,13 @@ export class ParkSmartApiClient {
     return this.request<ReopenWrongParkingReportResponse>(
       `/admin/reports/${encodeURIComponent(reportId)}/reopen`,
       { method: "POST", body: JSON.stringify(payload), signal },
+    );
+  }
+
+  getAdminReportEvidenceUrl(reportId: string, signal?: AbortSignal) {
+    return this.request<ReportEvidenceUrlResponse>(
+      `/admin/reports/${encodeURIComponent(reportId)}/evidence-url`,
+      { signal },
     );
   }
 

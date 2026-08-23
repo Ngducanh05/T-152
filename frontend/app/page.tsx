@@ -4,6 +4,12 @@ import { useState } from "react";
 
 import { AgentComposer } from "@/components/assistant/AgentComposer";
 import { ConversationActionList } from "@/components/assistant/ConversationActionList";
+import {
+  parkingIdentityFromProfile,
+  useAuth,
+} from "@/components/auth/AuthProvider";
+import { LogoutButton } from "@/components/auth/LogoutButton";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { LocationPicker } from "@/components/location/LocationPicker";
 import { AdjacentSlotObservation } from "@/components/parking/AdjacentSlotObservation";
 import { RewardSummaryCard } from "@/components/rewards/RewardSummaryCard";
@@ -14,16 +20,34 @@ import {
 import { useParkSmartData } from "@/hooks/use-parksmart-data";
 import { useParkingWorkflow } from "@/hooks/use-parking-workflow";
 import { formatApiErrorForOperator, parkSmartApi } from "@/lib/api";
-import { MVP_DEMO_USER_ID } from "@/lib/demo";
+import type { ParkingIdentity } from "@/lib/auth";
 import { formatParkingLocation } from "@/lib/parking-display";
 import { notifyWrongParkingReportCreated } from "@/lib/report-updates";
 import { buildRouteInstructions } from "@/lib/route-instructions";
+import type { ChatUiAction } from "@/lib/types";
 
 export default function Home() {
-  const data = useParkSmartData();
-  const workflow = useParkingWorkflow(data);
+  return (
+    <ProtectedRoute requiredRole="user">
+      <AuthenticatedHome />
+    </ProtectedRoute>
+  );
+}
+
+function AuthenticatedHome() {
+  const { profile } = useAuth();
+  const identity = profile ? parkingIdentityFromProfile(profile) : null;
+  if (!identity) return null;
+  return <ParkSmartUserApp identity={identity} />;
+}
+
+function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
+  const { refreshProfile } = useAuth();
+  const data = useParkSmartData(parkSmartApi, identity.userId);
+  const workflow = useParkingWorkflow(data, parkSmartApi, identity);
   const [manualLocationPicker, setManualLocationPicker] = useState(false);
   const [manualReportDialog, setManualReportDialog] = useState(false);
+  const [firstVehicleDialogOpen, setFirstVehicleDialogOpen] = useState(false);
 
   const showLocationPicker =
     manualLocationPicker || workflow.requestedPanel?.kind === "location";
@@ -65,15 +89,38 @@ export default function Home() {
 
   async function submitWrongParkingReport(draft: WrongParkingReportDraft) {
     const report = await parkSmartApi.reportWrongParking({
-      user_id: MVP_DEMO_USER_ID,
+      user_id: identity.userId,
       slot_id: draft.slotId,
       reason_code: draft.reasonCode,
       observed_plate_number: draft.observedPlateNumber,
       description: draft.description,
+      evidence: draft.evidence ?? undefined,
     });
     await data.refresh();
     notifyWrongParkingReportCreated();
     return report;
+  }
+
+  function requireVehicle(action: () => void) {
+    if (!identity.vehicleId) {
+      setFirstVehicleDialogOpen(true);
+      return;
+    }
+    action();
+  }
+
+  async function handleUiAction(messageId: string, action: ChatUiAction) {
+    const requiresVehicle = [
+      "FIND_VEHICLE",
+      "RESERVE_AND_ROUTE",
+      "CONFIRM_PARKING",
+      "COMPLETE_SESSION",
+    ].includes(action.type);
+    if (requiresVehicle) {
+      requireVehicle(() => void workflow.executeUiAction(messageId, action));
+      return;
+    }
+    await workflow.executeUiAction(messageId, action);
   }
 
   return (
@@ -83,6 +130,7 @@ export default function Home() {
           <span className="brand-mark" aria-hidden="true">P</span>
           <strong>ParkSmart<span>AI</span></strong>
         </div>
+        <LogoutButton />
         <button
           type="button"
           className="chat-location-button"
@@ -111,6 +159,21 @@ export default function Home() {
             <p className="conversation-system-status" role="status">
               Đang đồng bộ thông tin của bạn…
             </p>
+          )}
+          {!identity.vehicleId && (
+            <section className="conversation-priority-dock" aria-label="Thiết lập xe">
+              <article className="conversation-state-card reservation-state-card">
+                <span className="state-card-icon" aria-hidden="true">+</span>
+                <div>
+                  <small>THIẾT LẬP TÀI KHOẢN</small>
+                  <h2>Thêm xe đầu tiên</h2>
+                  <p>Thêm biển số để giữ chỗ, xác nhận đỗ và tìm đường về xe.</p>
+                </div>
+                <button type="button" onClick={() => setFirstVehicleDialogOpen(true)}>
+                  Thêm xe
+                </button>
+              </article>
+            </section>
           )}
           {data.rewardSummary && (
             <RewardSummaryCard
@@ -149,7 +212,7 @@ export default function Home() {
               {reservationLocationMatches ? (
                 <button
                   type="button"
-                  onClick={() => void workflow.confirmParking()}
+                  onClick={() => requireVehicle(() => void workflow.confirmParking())}
                   disabled={workflow.pending === "confirm-parking"}
                 >
                   {workflow.pending === "confirm-parking"
@@ -159,7 +222,7 @@ export default function Home() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => void workflow.confirmParking()}
+                  onClick={() => requireVehicle(() => void workflow.confirmParking())}
                   disabled={workflow.pending === "confirm-parking"}
                 >
                   {workflow.pending === "confirm-parking"
@@ -182,7 +245,7 @@ export default function Home() {
               <div className="state-card-actions">
                 <button
                   type="button"
-                  onClick={() => void workflow.findVehicleAndRoute()}
+                  onClick={() => requireVehicle(() => void workflow.findVehicleAndRoute())}
                   disabled={workflow.pending === "find-car"}
                 >
                   Chỉ đường tới xe
@@ -190,7 +253,7 @@ export default function Home() {
                 <button
                   type="button"
                   className="danger-text-button"
-                  onClick={() => void workflow.completeSession()}
+                  onClick={() => requireVehicle(() => void workflow.completeSession())}
                   disabled={workflow.pending === "complete-session"}
                 >
                   Kết thúc phiên
@@ -232,7 +295,7 @@ export default function Home() {
                 <ConversationActionList
                   message={message}
                   pending={workflow.pending !== null}
-                  onAction={workflow.executeUiAction}
+                  onAction={handleUiAction}
                 />
               )}
             </article>
@@ -315,6 +378,95 @@ export default function Home() {
           onSubmit={submitWrongParkingReport}
         />
       )}
+      {firstVehicleDialogOpen && (
+        <FirstVehicleDialog
+          onClose={() => setFirstVehicleDialogOpen(false)}
+          onCreated={async () => {
+            setFirstVehicleDialogOpen(false);
+            await refreshProfile();
+          }}
+        />
+      )}
     </main>
+  );
+}
+
+function FirstVehicleDialog({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => Promise<void>;
+}) {
+  const [plateNumber, setPlateNumber] = useState("");
+  const [requiresCharging, setRequiresCharging] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (pending || plateNumber.trim().length < 2) return;
+    setPending(true);
+    setError(null);
+    try {
+      await parkSmartApi.addVehicle({
+        plate_number: plateNumber.trim().toUpperCase(),
+        requires_charging: requiresCharging,
+      });
+      await onCreated();
+    } catch (submitError) {
+      setError(formatApiErrorForOperator(submitError, "Không thể thêm xe."));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={() => !pending && onClose()}>
+      <section
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="first-vehicle-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="modal-close"
+          onClick={onClose}
+          disabled={pending}
+          aria-label="Đóng"
+        >
+          ×
+        </button>
+        <h2 id="first-vehicle-title">Thêm xe đầu tiên</h2>
+        <label>
+          Biển số
+          <input
+            value={plateNumber}
+            onChange={(event) => setPlateNumber(event.target.value.toUpperCase())}
+            maxLength={32}
+            autoComplete="off"
+            disabled={pending}
+          />
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={requiresCharging}
+            onChange={(event) => setRequiresCharging(event.target.checked)}
+            disabled={pending}
+          />
+          Xe cần sạc điện
+        </label>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={pending || plateNumber.trim().length < 2}
+        >
+          {pending ? "Đang thêm…" : "Lưu xe"}
+        </button>
+      </section>
+    </div>
   );
 }

@@ -17,6 +17,12 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.agents.context import AgentRuntimeContext
 from src.agents.tools import PARKING_TOOLS
+from src.api.dependencies import (
+    ParkingUserDependency,
+    SessionDependency,
+    resolve_parking_user_id,
+    resolve_vehicle_id,
+)
 from src.api.ui_actions import derive_chat_ui_actions
 from src.core.database import get_session_factory
 from src.core.route_guidance import vietnamese_route_guidance
@@ -158,6 +164,8 @@ async def _thread_invocation(
             request.app.state.agent_thread_last_access[thread_id] = monotonic()
             if entry.users == 0:
                 request.app.state.agent_thread_locks.pop(namespaced_thread_id, None)
+
+
 def _messages_after_current_input(result: dict[str, Any], message_id: str) -> list[Any]:
     messages = result.get("messages", [])
     for index in range(len(messages) - 1, -1, -1):
@@ -264,17 +272,32 @@ def _recommendation_fallback(slot_ids: list[str]) -> str:
 @router.post(
     "/chat",
     response_model=SuccessResponse[ChatResponse],
-    responses={409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
 )
 async def chat(
     payload: ChatRequest,
     request: Request,
+    session: SessionDependency,
+    current_user: ParkingUserDependency,
 ) -> SuccessResponse[ChatResponse]:
+    user_id = resolve_parking_user_id(payload.user_id, current_user)
+    async with session.begin():
+        vehicle_id = await resolve_vehicle_id(
+            payload.vehicle_id,
+            current_user,
+            session,
+        )
+
     request_id = _request_id(request)
     message_id = f"request:{request_id}"
     runtime_context = AgentRuntimeContext(
-        user_id=payload.user_id,
-        vehicle_id=payload.vehicle_id,
+        user_id=user_id,
+        vehicle_id=vehicle_id,
         request_id=request_id,
         session_factory=get_session_factory(),
         current_location=payload.current_location,
@@ -282,12 +305,12 @@ async def chat(
     logger.info(
         "agent_chat_started request_id=%s user_id=%s thread_id=%s",
         request_id,
-        payload.user_id,
+        user_id,
         payload.thread_id,
     )
     try:
         async with _thread_invocation(
-            request, payload.thread_id, payload.user_id
+            request, payload.thread_id, user_id
         ) as namespaced_thread_id:
             config = {"configurable": {"thread_id": namespaced_thread_id}}
             async with asyncio.timeout(request.app.state.agent_chat_timeout_seconds):
@@ -304,7 +327,7 @@ async def chat(
         logger.warning(
             "agent_chat_timeout request_id=%s user_id=%s thread_id=%s",
             request_id,
-            payload.user_id,
+            user_id,
             payload.thread_id,
         )
         raise _service_unavailable("Agent request timed out. Please try again.") from error
@@ -314,7 +337,7 @@ async def chat(
         logger.exception(
             "agent_chat_failed request_id=%s user_id=%s thread_id=%s exception_type=%s",
             request_id,
-            payload.user_id,
+            user_id,
             payload.thread_id,
             type(error).__name__,
         )
@@ -337,7 +360,7 @@ async def chat(
             logger.warning(
                 "agent_chat_unavailable request_id=%s user_id=%s thread_id=%s",
                 request_id,
-                payload.user_id,
+                user_id,
                 payload.thread_id,
             )
             raise _service_unavailable(
@@ -347,7 +370,7 @@ async def chat(
             "agent_chat_recovered_recommendation request_id=%s user_id=%s "
             "thread_id=%s recommendation_count=%s",
             request_id,
-            payload.user_id,
+            user_id,
             payload.thread_id,
             len(recommendation_ids),
         )
@@ -388,7 +411,7 @@ async def chat(
     logger.info(
         "agent_chat_completed request_id=%s user_id=%s thread_id=%s tool_count=%s",
         request_id,
-        payload.user_id,
+        user_id,
         payload.thread_id,
         len(response.tool_names),
     )
