@@ -95,7 +95,7 @@ describe("IsometricMap", () => {
   });
 
   // AC-23
-  it("AC-23: Ở chế độ iso ô có báo cáo mở gọi onOpenReportedSlot, không gọi onSelectSlot", () => {
+  it("AC-23: ô có report vừa được chọn vừa mở chi tiết report", () => {
     const f1Nodes = canonicalMap.nodes.filter((n) => n.floor_id === "F1");
     const f1Slots = canonicalMap.slots.filter((s) => s.floor_id === "F1");
     const onSelectSlot = vi.fn();
@@ -116,7 +116,67 @@ describe("IsometricMap", () => {
     const reportedSlot = screen.getByRole("button", { name: /Ô đỗ F1-A01, Khu A/ });
     fireEvent.click(reportedSlot);
     expect(onOpenReportedSlot).toHaveBeenCalledWith("F1-A01");
-    expect(onSelectSlot).not.toHaveBeenCalled();
+    expect(onSelectSlot).toHaveBeenCalledWith("F1-A01");
+  });
+
+  it("không hiển thị hoặc kích hoạt điều khiển xoay phối cảnh", () => {
+    const f1Nodes = canonicalMap.nodes.filter((n) => n.floor_id === "F1");
+    const f1Slots = canonicalMap.slots.filter((s) => s.floor_id === "F1");
+    const { container } = render(
+      <IsometricMap
+        floorId="F1"
+        nodes={f1Nodes}
+        edges={canonicalMap.edges}
+        slots={f1Slots}
+      />,
+    );
+    const viewport = container.querySelector(".map-viewport--iso") as HTMLElement;
+
+    expect(viewport).not.toHaveClass("is-rotatable");
+    expect(container.querySelector(".iso-rotation-stage")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Xoay/ })).toBeNull();
+  });
+
+  it("hiển thị lối xuống với miệng hầm và vạch trắng chạy dọc", () => {
+    const f2Nodes: MapNode[] = [
+      { id: "F2-RAMP", floor_id: "F2", type: "RAMP", x: 85, y: 75 },
+    ];
+    const { container } = render(
+      <IsometricMap
+        floorId="F2"
+        nodes={f2Nodes}
+        edges={[]}
+        slots={[]}
+      />,
+    );
+
+    const downRamp = container.querySelector('[data-ramp-direction="DOWN"]');
+    expect(downRamp).not.toBeNull();
+    expect(downRamp?.querySelector(".iso-ramp-opening")).not.toBeNull();
+    expect(downRamp?.querySelector(".iso-ramp-center-line")).not.toBeNull();
+    expect(downRamp?.querySelectorAll(".iso-ramp-edge-line")).toHaveLength(2);
+  });
+
+  it("hiển thị xe đang đỗ bằng một khối hộp chữ nhật isometric", () => {
+    const f1Nodes = canonicalMap.nodes.filter((n) => n.floor_id === "F1");
+    const f1Slots = canonicalMap.slots.filter((s) => s.floor_id === "F1");
+    const { container } = render(
+      <IsometricMap
+        floorId="F1"
+        nodes={f1Nodes}
+        edges={canonicalMap.edges}
+        slots={f1Slots}
+      />,
+    );
+
+    expect(container.querySelectorAll(".iso-car").length).toBeGreaterThan(0);
+    const car = container.querySelector(".iso-car--box");
+    expect(car).toHaveAttribute("data-car-shape", "rectangular-box");
+    expect(car?.querySelector(".iso-car-box-top")).not.toBeNull();
+    expect(car?.querySelector(".iso-car-box-left")).not.toBeNull();
+    expect(car?.querySelector(".iso-car-box-right")).not.toBeNull();
+    expect(car?.querySelectorAll("polygon")).toHaveLength(4);
+    expect(container.querySelector(".iso-car-wheel")).toBeNull();
   });
 
   it("bỏ qua slot thiếu MapNode, không render nút ở toạ độ giả (0,0)", () => {

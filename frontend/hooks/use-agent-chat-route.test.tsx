@@ -28,6 +28,20 @@ describe("Agent structured UI effects", () => {
       currentLocation,
       activeReservation: null,
       activeSession: null,
+      rewardSummary: {
+        available_points: 0,
+        pending_points: 0,
+        verified_contributions: 0,
+        daily_pending_points: 0,
+        daily_earned_points: 0,
+        daily_limit_points: 100,
+      },
+      rewardConfiguration: {
+        adjacent_observation_reward_points: 10,
+        wrong_parking_report_reward_points: 20,
+        contribution_daily_points_limit: 100,
+      },
+      contributions: [],
     };
     const api = {
       confirmLocation: vi.fn(),

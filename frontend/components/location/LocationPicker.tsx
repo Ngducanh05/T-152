@@ -3,19 +3,17 @@
 import { useMemo, useRef, useState } from "react";
 
 import { formatParkingLocation } from "@/lib/parking-display";
-import type { FloorScopedId, MapNode, ParkingMap, ZoneId } from "@/lib/types";
+import type { FloorId, FloorScopedId, MapNode, ParkingMap, ZoneId } from "@/lib/types";
 
 const SPECIAL_TYPES = new Set<MapNode["type"]>([
   "ENTRANCE",
   "EXIT",
-  "CHECKPOINT",
   "ELEVATOR",
 ]);
 const SPECIAL_TYPE_ORDER: Record<string, number> = {
   ENTRANCE: 0,
   EXIT: 1,
-  CHECKPOINT: 2,
-  ELEVATOR: 3,
+  ELEVATOR: 2,
 };
 const ZONES: ZoneId[] = ["A", "B", "C", "D"];
 
@@ -37,6 +35,7 @@ export function LocationPicker({
   onConfirm,
 }: LocationPickerProps) {
   const [showSlotChoices, setShowSlotChoices] = useState(false);
+  const [selectedFloor, setSelectedFloor] = useState<FloorId | null>(null);
   const [selectedZone, setSelectedZone] = useState<ZoneId | null>(null);
   const [submittingTarget, setSubmittingTarget] =
     useState<FloorScopedId | null>(null);
@@ -56,11 +55,19 @@ export function LocationPicker({
   const zoneSlots = useMemo(
     () =>
       (map?.slots ?? [])
-        .filter((slot) => slot.zone_id === selectedZone)
+        .filter(
+          (slot) =>
+            slot.floor_id === selectedFloor && slot.zone_id === selectedZone,
+        )
         .toSorted((left, right) =>
           left.id.localeCompare(right.id, undefined, { numeric: true }),
         ),
-    [map, selectedZone],
+    [map, selectedFloor, selectedZone],
+  );
+  const floors = useMemo(
+    () =>
+      Array.from(new Set((map?.slots ?? []).map((slot) => slot.floor_id))).toSorted(),
+    [map],
   );
   const busy = pending || submittingTarget !== null;
 
@@ -141,7 +148,24 @@ export function LocationPicker({
 
         {showSlotChoices && (
           <div className="slot-tap-picker">
-            <p>Bước 1 · Chọn khu</p>
+            <p>Bước 1 · Chọn tầng</p>
+            <div className="floor-tap-grid" role="group" aria-label="Chọn tầng đỗ xe">
+              {floors.map((floor) => (
+                <button
+                  key={floor}
+                  type="button"
+                  aria-pressed={selectedFloor === floor}
+                  onClick={() => {
+                    setSelectedFloor(floor);
+                    setSelectedZone(null);
+                  }}
+                  disabled={busy}
+                >
+                  Tầng {floor.slice(1)}
+                </button>
+              ))}
+            </div>
+            <p>Bước 2 · Chọn khu</p>
             <div className="zone-tap-grid" role="group" aria-label="Chọn khu đỗ xe">
               {ZONES.map((zone) => (
                 <button
@@ -149,7 +173,7 @@ export function LocationPicker({
                   type="button"
                   aria-pressed={selectedZone === zone}
                   onClick={() => setSelectedZone(zone)}
-                  disabled={busy}
+                  disabled={busy || selectedFloor === null}
                 >
                   Khu {zone}
                 </button>
@@ -157,13 +181,13 @@ export function LocationPicker({
             </div>
             {selectedZone && (
               <>
-                <p>Bước 2 · Chọn số ô</p>
-                <div className="slot-number-grid" role="group" aria-label={`Chọn ô khu ${selectedZone}`}>
+                <p>Bước 3 · Chọn số ô</p>
+                <div className="slot-number-grid" role="group" aria-label={`Chọn ô khu ${selectedZone}, tầng ${selectedFloor?.slice(1)}`}>
                   {zoneSlots.map((slot) => (
                     <button
                       key={slot.id}
                       type="button"
-                      aria-label={`Chọn ô ${slot.id.slice(-2)} khu ${selectedZone}`}
+                      aria-label={`Chọn ô ${slot.id.slice(-2)} khu ${selectedZone}, tầng ${selectedFloor?.slice(1)}`}
                       aria-pressed={currentLocationId === slot.id}
                       onClick={() => void submitLocation(slot.id)}
                       disabled={busy}

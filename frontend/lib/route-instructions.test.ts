@@ -22,7 +22,10 @@ describe("buildRouteInstructions", () => {
       "ARRIVE",
     ]);
     expect(instructions[1]).toMatchObject({ icon: "↱", label: "Rẽ phải" });
-    expect(instructions[1].description).toContain("Điểm kiểm tra số 1");
+    expect(instructions[1].description).toBe("Ở ngã tư phía trước, rẽ phải.");
+    expect(instructions.map((instruction) => instruction.description).join(" ")).not.toMatch(
+      /checkpoint|điểm kiểm tra|F1-CP|F1-C-W/i,
+    );
     expect(instructions.at(-1)?.description).toContain("Ô C01");
   });
 
@@ -38,6 +41,7 @@ describe("buildRouteInstructions", () => {
 
     expect(instructions[1].kind).toBe("LEFT");
     expect(instructions[1].icon).toBe("↰");
+    expect(instructions[1].description).toBe("Ở ngã tư phía trước, rẽ trái.");
   });
 
   it("uses a safe continue instruction when geometry is unavailable", () => {

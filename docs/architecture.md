@@ -251,7 +251,9 @@ không tự tạo parking session.
 Turn-by-turn presentation không thay đổi Routing Service. UI lấy ba điểm liên tiếp trong
 `route.polyline` (fallback sang tọa độ canonical map), tính tích có hướng để phân loại đi
 thẳng/rẽ trái/rẽ phải/quay lại và hiển thị icon. Nếu thiếu hình học, UI chỉ nói “Tiếp tục”;
-LLM không được phát minh hướng rẽ.
+LLM không được phát minh hướng rẽ. Checkpoint vẫn là node định tuyến nội bộ nhưng bị loại
+khỏi LocationPicker, nhãn vị trí, marker bản đồ và nội dung hướng dẫn. UI mô tả điểm rẽ bằng
+ngôn ngữ đời thường như “Ở ngã tư phía trước, rẽ phải”.
 
 Reservation/session card, mutation notice và lỗi quan trọng nằm trong priority dock sticky
 ngay dưới header. Message history tiếp tục cuộn phía sau; các thao tác “Tôi đã đến nơi”, tìm
@@ -321,3 +323,34 @@ PostgreSQL + canonical parking graph
 
 Frontend quyết định cách trình bày. Agent quyết định tool nào cần gọi. Chỉ Core
 Services quyết định nghiệp vụ và chỉ PostgreSQL lưu trạng thái authoritative.
+## Verified community contributions and ParkSmart Points
+
+```mermaid
+flowchart LR
+    User[User contribution] --> Pending[Pending observation/report]
+    Pending --> Reserve[PENDING reward if within shared cap]
+    Pending --> Admin[Admin verification]
+    Admin -->|verified observation, if status differs| State[Parking State Service]
+    Admin -->|explicit report outcome| Outcome[CONFIRMED or negative outcome]
+    State --> Ledger[Reward ledger]
+    Outcome --> Ledger
+    Ledger -->|valid| Earned[EARNED]
+    Ledger -->|reject, duplicate, unverifiable, expire| Cancelled[CANCELLED]
+```
+
+`RewardService` là nơi duy nhất reserve/settle/cancel điểm. Nó khóa `ParkingUser` trước
+khi tính tổng `PENDING + EARNED` trong ngày, nên observation và report đồng thời không thể
+vượt cap chung. `RewardSummary` luôn được tính từ ledger; frontend chỉ refetch dữ liệu có
+thẩm quyền. Observation hết hạn được lazy-expire trước list/get/verify, không cần worker.
+
+Map vận hành không có renderer mới: contribution chọn floor F1/F2/F3 trên `ParkingMap`
+và overlay icon/outline lên `IsometricMap` hiện hữu mà không đổi màu status của slot.
+Nếu payload map chỉ có hình học F1, frontend tái sử dụng cùng hình học chuẩn với ID theo tầng
+để vẫn render đủ ô F2/F3 trong cả 2D và isometric. Admin có thể chọn trực tiếp slot, mở
+report/observation gắn với slot và yêu cầu đổi trạng thái. Phối cảnh giữ góc isometric cố
+định; hình học ramp phân biệt lối lên/lối xuống, đặt vạch trắng dọc hướng chạy và thêm miệng
+hầm cùng tường chắn cho đầu thấp. Ramp dùng cùng bảng màu với road surface và được đặt
+ngoài mép làn; xe đang đỗ là khối hộp chữ nhật isometric ba mặt;
+API vẫn đưa thay đổi qua Parking State Service, optimistic version và parking event ledger.
+User UI polling cả reward summary/contribution ledger cùng parking state nên settlement của
+admin xuất hiện tự động mà không cần reload và không optimistic cộng điểm.

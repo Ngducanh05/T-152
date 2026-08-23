@@ -60,6 +60,11 @@ cấu hình; giá trị rỗng nghĩa là tính năng tương ứng chưa đư�
 | `CORS_ORIGINS` | Có khi frontend khác origin | `http://localhost:3000` | Danh sách origin được phép gọi API |
 | `NEXT_PUBLIC_API_BASE_URL` | Có | `http://localhost:8000/api/v1` | Base URL mà frontend dùng để gọi FastAPI |
 | `DATABASE_URL` | Có | PostgreSQL local | Async SQLAlchemy connection string |
+| `ADJACENT_OBSERVATION_REWARD_POINTS` | Không | `10` | Điểm giữ ở trạng thái chờ cho observation hợp lệ |
+| `WRONG_PARKING_REPORT_REWARD_POINTS` | Không | `20` | Điểm giữ ở trạng thái chờ cho report không trùng |
+| `CONTRIBUTION_DAILY_POINTS_LIMIT` | Không | `100` | Cap chung PENDING + EARNED mỗi ngày |
+| `OBSERVATION_VERIFICATION_TTL_SECONDS` | Không | `1800` | Thời hạn admin xác minh observation |
+| `REPORT_REWARD_COOLDOWN_SECONDS` | Không | `3600` | Cửa sổ phát hiện report tương tự |
 | `RESERVATION_TTL_SECONDS` | Không | `300` | Thời gian giữ ô trước khi hết hạn |
 | `SIMULATOR_ENABLED` | Không | `true` | Cho phép Simulator Service hoạt động |
 | `DEMO_MODE` | Không | `true` | Cho phép reset/scenario và Admin Demo không bearer token |
@@ -141,8 +146,9 @@ Mở:
 
 - `http://localhost:3000` cho web app chat mobile-first của người dùng. Trang này không hiển
   thị bản đồ hay mật độ vận hành; route được trình bày bằng điểm đến, khoảng cách và danh
-  sách chỉ dẫn có icon đi thẳng/rẽ trái/rẽ phải. Hướng rẽ được tính deterministic từ
-  `route.polyline`, không được suy diễn từ LLM prose.
+  sách chỉ dẫn đời thường như “Ở ngã tư phía trước, rẽ trái/phải”. Checkpoint chỉ tồn tại
+  nội bộ, không xuất hiện trong bộ chọn vị trí, tên vị trí hoặc marker. Hướng rẽ được tính
+  deterministic từ `route.polyline`, không được suy diễn từ LLM prose.
 - `http://localhost:3000/admin` cho dashboard vận hành có map. Ô có report `OPEN` giữ màu
   trạng thái và có viền/icon/badge đỏ; click ô để resolve, reopen hoặc hard-delete report.
 
@@ -260,8 +266,31 @@ có cấu trúc.
 4. **Xóa vĩnh viễn** khác resolve: admin phải xác nhận, row bị xóa khỏi database và
    `GET /api/v1/admin/reports/{id}` sau đó trả `404 REPORT_NOT_FOUND`.
 
+## 13. ParkSmart Points và đóng góp đã xác minh
+
+Observation ô bên cạnh và report xe đỗ sai dùng chung một reward ledger và daily cap.
+Khi user submit, contribution cùng reward (nếu còn quota) chỉ ở trạng thái `PENDING`;
+frontend không tự cộng điểm và observation không cập nhật `parking_slots`. Admin phải xác minh:
+
+- observation `VERIFIED` mới đi qua Parking State Service rồi reward thành `EARNED`;
+- observation `REJECTED`/`EXPIRED` hủy reward và không đổi slot;
+- report chỉ `CONFIRMED` mới earn; `REJECTED`, `DUPLICATE`, `UNVERIFIABLE` cancel;
+- reopen không tạo hoặc settle reward lần nữa; hard-delete giữ ledger, đồng thời cancel reward còn pending.
+
+Dashboard admin tiếp tục dùng `ParkingMap`/`IsometricMap`, floor tabs và polling hiện có.
+Observation pending thêm viền/icon cam, report mở giữ cảnh báo đỏ, còn outline xanh biểu thị
+target đang chọn; màu `AVAILABLE`/`RESERVED`/`OCCUPIED` không bị thay thế.
+
 Backend là nguồn sự thật. Polling và refetch sau mutation quyết định UI; browser broadcast
 chỉ là tín hiệu làm mới.
+
+Admin có thể click trực tiếp ô trên bản đồ để xem trạng thái, report hoặc observation đang
+chờ; thao tác đổi `AVAILABLE`/`OCCUPIED` dùng endpoint admin và Parking State Service, không
+được ghi đè `RESERVED`. Phối cảnh hầm giữ góc nhìn isometric cố định; lối lên/xuống cùng
+tông màu mặt đường, nằm ngoài mép làn xe, dùng vạch dọc theo hướng dốc và lối xuống có
+miệng hầm cùng tường chắn riêng. Xe đang đỗ dùng khối hộp chữ nhật isometric. F2/F3 dùng lại
+renderer và hình học chuẩn hiện tại. Reward summary phía user được polling cùng
+parking state nên điểm đã xác minh hiện ra mà không cần tải lại trang.
 
 Các shortcut đọc/chọn như tìm ô, chọn vị trí, chọn slot, tìm xe và mở report có thể dùng lại
 nhiều lần; guard in-flight vẫn chặn double-click gọi API song song. Với reservation đang

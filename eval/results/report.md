@@ -307,7 +307,9 @@ bốn report flows nêu trên, đã chạy trên production frontend và API/dat
 - “Tôi đã đến nơi” gọi location confirmation cho reserved slot trước, refetch version, rồi
   confirm parking; Playwright quan sát cả hai response HTTP 200 và session card xuất hiện.
 - Turn-by-turn labels/icons được suy ra deterministic từ route geometry. Unit tests bao phủ
-  rẽ trái, rẽ phải, đi thẳng, đến nơi và fallback “Tiếp tục” khi thiếu tọa độ.
+  rẽ trái, rẽ phải, đi thẳng, đến nơi và fallback “Tiếp tục” khi thiếu tọa độ. Checkpoint
+  được giữ nội bộ cho routing nhưng không còn xuất hiện trong LocationPicker, nhãn/marker
+  vị trí hay chỉ dẫn; câu rẽ dùng dạng đời thường “Ở ngã tư phía trước…”.
 - Important reservation/session state and its actions remain in a sticky priority dock below
   the header, so a long conversation cannot push confirm/complete controls out of reach.
 - After parking is confirmed, the user may optionally mark the two same-row adjacent slots
@@ -317,3 +319,28 @@ bốn report flows nêu trên, đã chạy trên production frontend và API/dat
   verified vehicle/session occupancy remains protected.
 - Verification: `npm test` 95 passed; lint/build passed; `npm run test:e2e` 10 passed,
   1 conditional live-Agent test skipped.
+## 9. Phase 13 P13-01 — verified contributions and ParkSmart Points
+
+- Migration `0008` nối `0007`, tạo `slot_observations`, `reward_transactions`, các enum,
+  index/constraint và backfill report cũ không thưởng hồi tố.
+- Observation API đã được chứng minh giữ slot nguyên trạng khi submit, tạo reward pending,
+  rồi chỉ admin verify mới gọi Parking State Service và earn; reject/expire cancel.
+- Report tests bao phủ CONFIRMED earn, ba outcome còn lại cancel, duplicate không reward,
+  reopen không settle lần hai và hard-delete giữ ledger không có plate/description.
+- Concurrency test khóa cùng `ParkingUser` và chứng minh hai source chạy đồng thời không vượt
+  daily cap dùng chung.
+- Frontend dùng progressive invitation, một slot mỗi bước, copy pending/cap authoritative,
+  RewardSummary từ API, outcome bắt buộc trên admin drawer và overlay accessibility trên
+  renderer isometric hiện hữu cho F1/F2/F3.
+- Verification ngày 2026-08-23: Alembic ở `0008 (head)` và round-trip trên database trống
+  `upgrade 0008 → downgrade 0007 → upgrade 0008` PASS; backend `313 passed, 1 skipped`;
+  frontend unit `145 passed`; lint và production build PASS; real-stack E2E `18 passed,
+  1 conditional live-Agent test skipped`, gồm contribution F2/F3 trên IsometricMap.
+- Hai lỗi Ruff ngoài issue đã được người dùng cho phép sửa: import order trong migration
+  `0007` và f-string không placeholder trong `src/core/route_guidance.py`; Ruff toàn repo PASS.
+- Follow-up UI: bỏ route disclaimer; seed idempotent bổ sung đủ 80 slot F2/F3 còn thiếu;
+  xe đang đỗ dùng khối hộp chữ nhật isometric ba mặt; bỏ điều khiển xoay, sửa ramp với vạch
+  trắng chạy dọc, cùng tông màu mặt đường, nằm ngoài mép làn và có miệng hầm cho lối xuống;
+  admin click slot để mở report/observation và đổi trạng thái qua
+  Parking State Service. Reward
+  summary/contribution ledger được polling nên settlement hiện ra mà không reload.

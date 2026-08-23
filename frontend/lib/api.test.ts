@@ -93,7 +93,7 @@ describe("adjacent slot observations", () => {
     await api.observeAdjacentSlot("F1-D02", {
       user_id: "USER-001",
       observed_status: "OCCUPIED",
-      expected_version: 7,
+      expected_slot_version: 7,
     });
 
     expect(String(fetcher.mock.calls[0]?.[0])).toBe(
@@ -104,7 +104,7 @@ describe("adjacent slot observations", () => {
       body: JSON.stringify({
         user_id: "USER-001",
         observed_status: "OCCUPIED",
-        expected_version: 7,
+        expected_slot_version: 7,
       }),
     });
   });
@@ -163,6 +163,29 @@ describe("admin operations client", () => {
     );
   });
 
+  it("updates a selected slot through the guarded admin status endpoint", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope({ id: "F2-D03", status: "OCCUPIED" })),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+    });
+
+    await api.updateAdminSlotStatus("F2-D03", {
+      status: "OCCUPIED",
+      expected_version: 4,
+    });
+
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      "http://api.test/api/v1/admin/parking/slots/F2-D03/status",
+    );
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ status: "OCCUPIED", expected_version: 4 }),
+    });
+  });
+
   it("submits and reads wrong-parking reports through typed endpoints", async () => {
     const fetcher = vi.fn<typeof fetch>(async () =>
       jsonResponse(successEnvelope([])),
@@ -183,6 +206,7 @@ describe("admin operations client", () => {
     await api.getAdminReport("REPORT-001");
     await api.resolveAdminReport("REPORT-001", {
       status: "RESOLVED",
+      verification_outcome: "CONFIRMED",
       resolution_note: "Đã xử lý.",
       expected_version: 0,
     });

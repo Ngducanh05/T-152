@@ -61,6 +61,7 @@ class RouteMode(StrEnum):
 
 class ActorType(StrEnum):
     USER = "USER"
+    ADMIN = "ADMIN"
     SIMULATOR = "SIMULATOR"
     CAMERA = "CAMERA"
     SYSTEM = "SYSTEM"
@@ -79,6 +80,38 @@ class ParkingEventType(StrEnum):
 class WrongParkingReportStatus(StrEnum):
     OPEN = "OPEN"
     RESOLVED = "RESOLVED"
+
+
+class SlotObservationStatus(StrEnum):
+    PENDING = "PENDING"
+    VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+
+
+class WrongParkingReportVerificationOutcome(StrEnum):
+    PENDING = "PENDING"
+    CONFIRMED = "CONFIRMED"
+    REJECTED = "REJECTED"
+    DUPLICATE = "DUPLICATE"
+    UNVERIFIABLE = "UNVERIFIABLE"
+
+
+class RewardSourceType(StrEnum):
+    ADJACENT_SLOT_OBSERVATION = "ADJACENT_SLOT_OBSERVATION"
+    WRONG_PARKING_REPORT = "WRONG_PARKING_REPORT"
+
+
+class RewardTransactionType(StrEnum):
+    CONTRIBUTION_REWARD = "CONTRIBUTION_REWARD"
+    REWARD_REVERSAL = "REWARD_REVERSAL"
+    ADMIN_ADJUSTMENT = "ADMIN_ADJUSTMENT"
+
+
+class RewardTransactionStatus(StrEnum):
+    PENDING = "PENDING"
+    EARNED = "EARNED"
+    CANCELLED = "CANCELLED"
 
 
 class WrongParkingReason(StrEnum):
@@ -128,6 +161,14 @@ class ErrorCode(StrEnum):
     REPORT_NOT_FOUND = "REPORT_NOT_FOUND"
     REPORT_VERSION_CONFLICT = "REPORT_VERSION_CONFLICT"
     INVALID_REPORT_TRANSITION = "INVALID_REPORT_TRANSITION"
+    OBSERVATION_NOT_FOUND = "OBSERVATION_NOT_FOUND"
+    OBSERVATION_ALREADY_EXISTS = "OBSERVATION_ALREADY_EXISTS"
+    OBSERVATION_EXPIRED = "OBSERVATION_EXPIRED"
+    INVALID_OBSERVATION_TRANSITION = "INVALID_OBSERVATION_TRANSITION"
+    OBSERVATION_VERSION_CONFLICT = "OBSERVATION_VERSION_CONFLICT"
+    REWARD_ALREADY_SETTLED = "REWARD_ALREADY_SETTLED"
+    CONTRIBUTION_DAILY_LIMIT_REACHED = "CONTRIBUTION_DAILY_LIMIT_REACHED"
+    REPORT_REWARD_DUPLICATE = "REPORT_REWARD_DUPLICATE"
     AGENT_TOOL_UNAVAILABLE = "AGENT_TOOL_UNAVAILABLE"
     SPEECH_AUDIO_INVALID = "SPEECH_AUDIO_INVALID"
     SPEECH_AUDIO_TOO_LARGE = "SPEECH_AUDIO_TOO_LARGE"
@@ -262,6 +303,24 @@ class ParkingEvent(ContractModel):
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
+class SlotObservation(ContractModel):
+    id: EntityId
+    observer_user_id: EntityId
+    observer_session_id: EntityId
+    slot_id: FloorScopedId
+    observed_status: Literal[SlotStatus.AVAILABLE, SlotStatus.OCCUPIED]
+    verification_status: SlotObservationStatus
+    reward_points: int = Field(ge=0)
+    observed_slot_version: int = Field(ge=0)
+    created_at: AwareDatetime
+    expires_at: AwareDatetime
+    verified_at: AwareDatetime | None = None
+    verified_by: EntityId | None = None
+    rejection_reason: str | None = Field(default=None, max_length=500)
+    version: int = Field(ge=0)
+    reward_status: RewardTransactionStatus | None = None
+
+
 class WrongParkingReport(ContractModel):
     id: EntityId
     reporter_user_id: EntityId
@@ -275,7 +334,54 @@ class WrongParkingReport(ContractModel):
     resolved_at: AwareDatetime | None = None
     resolved_by: EntityId | None = None
     resolution_note: str | None = None
+    verification_outcome: WrongParkingReportVerificationOutcome = (
+        WrongParkingReportVerificationOutcome.PENDING
+    )
+    reward_points: int = Field(default=0, ge=0)
+    reward_status: RewardTransactionStatus | None = None
+    duplicate_candidate_of_id: EntityId | None = None
     version: int = Field(ge=0)
+
+
+class RewardTransaction(ContractModel):
+    id: EntityId
+    user_id: EntityId
+    source_type: RewardSourceType
+    source_reference: EntityId
+    transaction_type: RewardTransactionType
+    status: RewardTransactionStatus
+    points: int = Field(ge=0)
+    created_at: AwareDatetime
+    settled_at: AwareDatetime | None = None
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class RewardSummary(ContractModel):
+    available_points: int = Field(ge=0)
+    pending_points: int = Field(ge=0)
+    verified_contributions: int = Field(ge=0)
+    daily_pending_points: int = Field(ge=0)
+    daily_earned_points: int = Field(ge=0)
+    daily_limit_points: int = Field(ge=0)
+
+
+class RewardConfiguration(ContractModel):
+    adjacent_observation_reward_points: int = Field(ge=0)
+    wrong_parking_report_reward_points: int = Field(ge=0)
+    contribution_daily_points_limit: int = Field(ge=0)
+
+
+class ContributionRecord(ContractModel):
+    id: EntityId
+    source_type: RewardSourceType
+    source_reference: EntityId
+    observer_session_id: EntityId | None = None
+    floor_id: FloorId
+    slot_id: FloorScopedId
+    points: int = Field(ge=0)
+    status: RewardTransactionStatus | None = None
+    created_at: AwareDatetime
+    settled_at: AwareDatetime | None = None
 
 
 class ChatRequest(BaseModel):

@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
 import { MVP_AGENT_THREAD_STORAGE_KEY } from "@/lib/demo";
-import type { ChatResponse, ChatUiAction, SlotStatus } from "@/lib/types";
+import type {
+  ChatResponse,
+  ChatUiAction,
+  SlotObservation,
+  SlotStatus,
+} from "@/lib/types";
 import { activeReservation } from "@/test/fixtures";
 import type { ParkSmartSnapshot } from "./use-parksmart-data";
 
@@ -60,6 +65,20 @@ function fixture() {
     currentLocation: { user_id: "USER-001", node_id: "F1-ENTRANCE" },
     activeReservation: null,
     activeSession: null,
+    rewardSummary: {
+      available_points: 0,
+      pending_points: 0,
+      verified_contributions: 0,
+      daily_pending_points: 0,
+      daily_earned_points: 0,
+      daily_limit_points: 100,
+    },
+    rewardConfiguration: {
+      adjacent_observation_reward_points: 10,
+      wrong_parking_report_reward_points: 20,
+      contribution_daily_points_limit: 100,
+    },
+    contributions: [],
   };
   const refresh = vi.fn(async () => snapshot);
   const data: WorkflowData = {
@@ -327,13 +346,13 @@ describe("useParkingWorkflow", () => {
       slot_id: "F1-D03",
       destination_node_id: "F1-D03",
     };
-    let finishObservation!: () => void;
+    let finishObservation!: (value: SlotObservation) => void;
     api.observeAdjacentSlot.mockImplementation(
-      () => new Promise<void>((resolve) => { finishObservation = resolve; }),
+      () => new Promise<SlotObservation>((resolve) => { finishObservation = resolve; }),
     );
     const { result } = renderHook(() => useParkingWorkflow(data, api));
 
-    let firstRequest!: Promise<void>;
+    let firstRequest!: Promise<SlotObservation | null>;
     act(() => {
       firstRequest = result.current.updateAdjacentSlotStatus(slot.id, "OCCUPIED");
       void result.current.updateAdjacentSlotStatus(slot.id, "OCCUPIED");
@@ -343,19 +362,35 @@ describe("useParkingWorkflow", () => {
     expect(api.observeAdjacentSlot).toHaveBeenCalledWith(slot.id, {
       user_id: "USER-001",
       observed_status: "OCCUPIED",
-      expected_version: slot.version,
+      expected_slot_version: slot.version,
     });
     expect(refresh).not.toHaveBeenCalled();
     expect(slot.status).toBe("AVAILABLE");
     expect(result.current.pendingAdjacentSlotId).toBe(slot.id);
 
     await act(async () => {
-      finishObservation();
+      finishObservation({
+        id: "OBSERVATION-001",
+        observer_user_id: "USER-001",
+        observer_session_id: "SESSION-001",
+        slot_id: slot.id,
+        observed_status: "OCCUPIED",
+        verification_status: "PENDING",
+        reward_points: 10,
+        reward_status: "PENDING",
+        observed_slot_version: slot.version,
+        created_at: "2026-08-23T10:00:00Z",
+        expires_at: "2026-08-23T10:30:00Z",
+        verified_at: null,
+        verified_by: null,
+        rejection_reason: null,
+        version: 0,
+      });
       await firstRequest;
     });
     expect(refresh).toHaveBeenCalledOnce();
     expect(result.current.pendingAdjacentSlotId).toBeNull();
-    expect(result.current.notice).toContain("có xe đỗ");
+    expect(result.current.notice).toBeNull();
   });
 
   it("waits for reservation success before refreshing authoritative UI state", async () => {

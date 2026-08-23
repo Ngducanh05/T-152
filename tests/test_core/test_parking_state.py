@@ -119,6 +119,55 @@ async def test_read_interfaces_return_deterministic_current_state(state_db: Stat
 
 
 @pytest.mark.asyncio
+async def test_admin_manual_slot_status_uses_guarded_state_transitions(
+    state_db: StateDatabase,
+):
+    service = ParkingStateService(state_db.session)
+
+    occupied = await service.set_slot_status_by_admin(
+        "F2-A01",
+        SlotStatus.OCCUPIED,
+        admin_id="DEMO-ADMIN",
+        expected_version=0,
+    )
+    assert occupied.status is SlotStatus.OCCUPIED
+    assert occupied.occupied_by_vehicle_id is None
+    assert occupied.version == 1
+
+    available = await service.set_slot_status_by_admin(
+        "F2-A01",
+        SlotStatus.AVAILABLE,
+        admin_id="DEMO-ADMIN",
+        expected_version=1,
+    )
+    assert available.status is SlotStatus.AVAILABLE
+    assert available.version == 2
+
+    events = list(
+        await state_db.session.scalars(
+            select(ParkingEvent)
+            .where(ParkingEvent.slot_id == "F2-A01")
+            .order_by(ParkingEvent.created_at)
+        )
+    )
+    assert [event.actor_type for event in events] == [ActorType.ADMIN, ActorType.ADMIN]
+    assert all(
+        event.event_metadata == {"source": "admin_manual_status_update"}
+        for event in events
+    )
+
+    reserved = await _reserve(service, "F2-A02", "RESERVATION-ADMIN-GUARD")
+    with pytest.raises(ParkingStateError) as error:
+        await service.set_slot_status_by_admin(
+            reserved.id,
+            SlotStatus.OCCUPIED,
+            admin_id="DEMO-ADMIN",
+            expected_version=reserved.version,
+        )
+    assert error.value.code is ErrorCode.INVALID_TRANSITION
+
+
+@pytest.mark.asyncio
 async def test_reserve_available_slot_increments_version_and_creates_event(
     state_db: StateDatabase,
 ):

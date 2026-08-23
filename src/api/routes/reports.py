@@ -4,7 +4,13 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db_session
@@ -21,6 +27,16 @@ from src.models.schemas import (
 router = APIRouter(prefix="/reports", tags=["Reports"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 logger = logging.getLogger(__name__)
+
+
+def _report_response(report: object) -> WrongParkingReport:
+    values = vars(report)
+    return WrongParkingReport.model_validate(
+        {
+            field_name: values.get(field_name)
+            for field_name in WrongParkingReport.model_fields
+        }
+    )
 
 
 class WrongParkingReportRequest(BaseModel):
@@ -76,6 +92,7 @@ async def create_wrong_parking_report(
                 description=request.description,
                 observed_plate_number=request.observed_plate_number,
             )
+            response_report = _report_response(report)
     except ParkingReportError as error:
         logger.warning(
             "wrong_parking_report_action action=create report_id=%s slot_id=%s "
@@ -104,7 +121,7 @@ async def create_wrong_parking_report(
         getattr(http_request.state, "request_id", "unknown"),
     )
     return SuccessResponse(
-        data=WrongParkingReport.model_validate(report, from_attributes=True),
+        data=response_report,
         message="Wrong-parking report submitted.",
     )
 

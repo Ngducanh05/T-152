@@ -26,6 +26,7 @@ from src.core.db_models import (
     ParkingSession,
     ParkingSlot,
     ParkingUser,
+    SlotObservation,
     Vehicle,
 )
 from src.core.seed import seed_if_missing
@@ -219,7 +220,7 @@ async def test_parked_user_can_observe_only_adjacent_slots(phase4_api: Phase4Api
         json={
             "user_id": "USER-001",
             "observed_status": "OCCUPIED",
-            "expected_version": 0,
+            "expected_slot_version": 0,
         },
     )
     non_adjacent = await phase4_api.client.post(
@@ -227,25 +228,28 @@ async def test_parked_user_can_observe_only_adjacent_slots(phase4_api: Phase4Api
         json={
             "user_id": "USER-001",
             "observed_status": "OCCUPIED",
-            "expected_version": 0,
+            "expected_slot_version": 0,
         },
     )
 
     assert observed.status_code == 200
-    assert observed.json()["data"]["status"] == "OCCUPIED"
-    assert observed.json()["data"]["version"] == 1
+    assert observed.json()["data"]["verification_status"] == "PENDING"
+    assert observed.json()["data"]["reward_status"] == "PENDING"
+    assert observed.json()["data"]["reward_points"] == 10
     assert non_adjacent.status_code == 409
-    assert non_adjacent.json()["error"]["code"] == "INVALID_TRANSITION"
+    assert (
+        non_adjacent.json()["error"]["code"]
+        == "INVALID_OBSERVATION_TRANSITION"
+    )
     async with phase4_api.session_factory() as session:
         event = await session.scalar(
             select(ParkingEvent).where(ParkingEvent.slot_id == "F1-D02")
         )
-    assert event is not None
-    assert event.actor_type.value == "USER"
-    assert event.event_metadata == {
-        "source": "adjacent_user_observation",
-        "observer_session_id": "SESSION-OBSERVE",
-    }
+        slot = await session.get(ParkingSlot, "F1-D02")
+    assert event is None
+    assert slot is not None
+    assert slot.status is SlotStatus.AVAILABLE
+    assert slot.version == 0
 
 
 @pytest.mark.asyncio
@@ -255,12 +259,152 @@ async def test_adjacent_observation_requires_active_session(phase4_api: Phase4Ap
         json={
             "user_id": "USER-001",
             "observed_status": "OCCUPIED",
-            "expected_version": 0,
+            "expected_slot_version": 0,
         },
     )
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "ACTIVE_SESSION_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_observation_changes_slot_and_earns_only_after_admin_verification(
+    phase4_api: Phase4Api,
+):
+    timestamp = datetime.now(UTC)
+    async with phase4_api.session_factory() as session, session.begin():
+        own_slot = await session.get(ParkingSlot, "F2-D03")
+        assert own_slot is not None
+        own_slot.status = SlotStatus.OCCUPIED
+        own_slot.occupied_by_vehicle_id = "VEHICLE-001"
+        session.add(
+            ParkingSession(
+                id="SESSION-OBSERVE-F2",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F2-D03",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=timestamp,
+                completed_at=None,
+            )
+        )
+
+    created = await phase4_api.client.post(
+        "/api/v1/parking/slots/F2-D02/observation",
+        json={
+            "user_id": "USER-001",
+            "observed_status": "OCCUPIED",
+            "expected_slot_version": 0,
+        },
+    )
+    assert created.status_code == 200
+    observation = created.json()["data"]
+    before = await phase4_api.client.get("/api/v1/parking/slots/F2-D02")
+    summary_before = await phase4_api.client.get(
+        "/api/v1/rewards/users/USER-001/summary"
+    )
+    assert before.json()["data"]["status"] == "AVAILABLE"
+    assert summary_before.json()["data"]["available_points"] == 0
+    assert summary_before.json()["data"]["pending_points"] == 10
+    contributions = await phase4_api.client.get(
+        "/api/v1/contributions/users/USER-001"
+    )
+    observation_contribution = next(
+        item
+        for item in contributions.json()["data"]
+        if item["source_reference"] == observation["id"]
+    )
+    assert observation_contribution["observer_session_id"] == "SESSION-OBSERVE-F2"
+
+    verified = await phase4_api.client.post(
+        f"/api/v1/admin/slot-observations/{observation['id']}/verify",
+        json={"expected_version": observation["version"]},
+    )
+    assert verified.status_code == 200
+    assert verified.json()["data"]["verification_status"] == "VERIFIED"
+    assert verified.json()["data"]["reward_status"] == "EARNED"
+    after = await phase4_api.client.get("/api/v1/parking/slots/F2-D02")
+    summary_after = await phase4_api.client.get(
+        "/api/v1/rewards/users/USER-001/summary"
+    )
+    assert after.json()["data"]["status"] == "OCCUPIED"
+    assert summary_after.json()["data"]["available_points"] == 10
+    assert summary_after.json()["data"]["pending_points"] == 0
+
+    repeated = await phase4_api.client.post(
+        f"/api/v1/admin/slot-observations/{observation['id']}/verify",
+        json={"expected_version": verified.json()["data"]["version"]},
+    )
+    assert repeated.status_code == 409
+    assert repeated.json()["error"]["code"] == "INVALID_OBSERVATION_TRANSITION"
+
+
+@pytest.mark.asyncio
+async def test_rejected_and_expired_observations_cancel_reward_without_slot_change(
+    phase4_api: Phase4Api,
+):
+    timestamp = datetime.now(UTC)
+    async with phase4_api.session_factory() as session, session.begin():
+        own_slot = await session.get(ParkingSlot, "F3-D03")
+        assert own_slot is not None
+        own_slot.status = SlotStatus.OCCUPIED
+        own_slot.occupied_by_vehicle_id = "VEHICLE-001"
+        session.add(
+            ParkingSession(
+                id="SESSION-OBSERVE-F3",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F3-D03",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=timestamp,
+                completed_at=None,
+            )
+        )
+
+    first = await phase4_api.client.post(
+        "/api/v1/parking/slots/F3-D02/observation",
+        json={
+            "user_id": "USER-001",
+            "observed_status": "OCCUPIED",
+            "expected_slot_version": 0,
+        },
+    )
+    rejected = await phase4_api.client.post(
+        f"/api/v1/admin/slot-observations/{first.json()['data']['id']}/reject",
+        json={"expected_version": 0, "reason": "Không khớp kiểm tra hiện trường"},
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["data"]["verification_status"] == "REJECTED"
+    assert rejected.json()["data"]["reward_status"] == "CANCELLED"
+    unchanged = await phase4_api.client.get("/api/v1/parking/slots/F3-D02")
+    assert unchanged.json()["data"]["status"] == "AVAILABLE"
+
+    second = await phase4_api.client.post(
+        "/api/v1/parking/slots/F3-D04/observation",
+        json={
+            "user_id": "USER-001",
+            "observed_status": "OCCUPIED",
+            "expected_slot_version": 0,
+        },
+    )
+    second_data = second.json()["data"]
+    async with phase4_api.session_factory() as session, session.begin():
+        observation = await session.get(SlotObservation, second_data["id"])
+        assert observation is not None
+        observation.created_at = datetime.now(UTC) - timedelta(hours=2)
+        observation.expires_at = datetime.now(UTC) - timedelta(hours=1)
+
+    expired = await phase4_api.client.post(
+        f"/api/v1/admin/slot-observations/{second_data['id']}/verify",
+        json={"expected_version": second_data["version"]},
+    )
+    assert expired.status_code == 409
+    assert expired.json()["error"]["code"] == "OBSERVATION_EXPIRED"
+    detail = await phase4_api.client.get(
+        f"/api/v1/admin/slot-observations/{second_data['id']}"
+    )
+    assert detail.json()["data"]["verification_status"] == "EXPIRED"
+    assert detail.json()["data"]["reward_status"] == "CANCELLED"
 
 
 @pytest.mark.asyncio

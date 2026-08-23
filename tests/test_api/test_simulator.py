@@ -21,6 +21,7 @@ from src.core.db_models import (
     ParkingReservation,
     ParkingSession,
     ParkingUser,
+    RewardTransaction,
     Vehicle,
 )
 from src.core.db_models import WrongParkingReport as WrongParkingReportRow
@@ -532,6 +533,10 @@ async def test_user_can_report_wrong_parking_and_admin_can_read_it(
     assert report["resolved_at"] is None
     assert report["resolved_by"] is None
     assert report["resolution_note"] is None
+    assert report["verification_outcome"] == "PENDING"
+    assert report["reward_points"] == 20
+    assert report["reward_status"] == "PENDING"
+    assert report["duplicate_candidate_of_id"] is None
     assert report["version"] == 0
 
     admin_response = await simulator_api.client.get(
@@ -670,10 +675,18 @@ async def test_admin_report_lifecycle_filters_conflicts_reopens_and_hard_deletes
     assert detail.json()["data"] == report
     assert open_reports.json()["data"] == [report]
 
+    missing_outcome = await simulator_api.client.patch(
+        f"/api/v1/admin/reports/{report_id}",
+        json={"status": "RESOLVED", "expected_version": 0},
+    )
+    assert missing_outcome.status_code == 422
+    assert missing_outcome.json()["error"]["code"] == "VALIDATION_ERROR"
+
     resolved_response = await simulator_api.client.patch(
         f"/api/v1/admin/reports/{report_id}",
         json={
             "status": "RESOLVED",
+            "verification_outcome": "CONFIRMED",
             "resolution_note": "  Đã kiểm tra hiện trường.  ",
             "expected_version": 0,
         },
@@ -688,11 +701,19 @@ async def test_admin_report_lifecycle_filters_conflicts_reopens_and_hard_deletes
 
     stale_resolve = await simulator_api.client.patch(
         f"/api/v1/admin/reports/{report_id}",
-        json={"status": "RESOLVED", "expected_version": 0},
+        json={
+            "status": "RESOLVED",
+            "verification_outcome": "CONFIRMED",
+            "expected_version": 0,
+        },
     )
     repeated_resolve = await simulator_api.client.patch(
         f"/api/v1/admin/reports/{report_id}",
-        json={"status": "RESOLVED", "expected_version": 1},
+        json={
+            "status": "RESOLVED",
+            "verification_outcome": "CONFIRMED",
+            "expected_version": 1,
+        },
     )
     invalid_patch_reopen = await simulator_api.client.patch(
         f"/api/v1/admin/reports/{report_id}",
@@ -711,9 +732,11 @@ async def test_admin_report_lifecycle_filters_conflicts_reopens_and_hard_deletes
     assert reopened_response.status_code == 200
     reopened = reopened_response.json()["data"]
     assert reopened["status"] == "OPEN"
-    assert reopened["resolved_at"] is None
-    assert reopened["resolved_by"] is None
-    assert reopened["resolution_note"] is None
+    assert reopened["resolved_at"] == resolved["resolved_at"]
+    assert reopened["resolved_by"] == resolved["resolved_by"]
+    assert reopened["resolution_note"] == resolved["resolution_note"]
+    assert reopened["verification_outcome"] == "CONFIRMED"
+    assert reopened["reward_status"] == "EARNED"
     assert reopened["version"] == 2
 
     repeated_reopen = await simulator_api.client.post(
@@ -768,7 +791,11 @@ async def test_non_admin_cannot_resolve_reopen_or_delete_reports_outside_demo(
     responses = [
         await simulator_api.client.patch(
             f"/api/v1/admin/reports/{report_id}",
-            json={"status": "RESOLVED", "expected_version": 0},
+            json={
+                "status": "RESOLVED",
+                "verification_outcome": "CONFIRMED",
+                "expected_version": 0,
+            },
         ),
         await simulator_api.client.post(
             f"/api/v1/admin/reports/{report_id}/reopen",
@@ -810,7 +837,13 @@ async def test_admin_reports_validate_limit_bounds(
         (
             "PATCH",
             "",
-            {"json": {"status": "RESOLVED", "expected_version": 0}},
+            {
+                "json": {
+                    "status": "RESOLVED",
+                    "verification_outcome": "CONFIRMED",
+                    "expected_version": 0,
+                }
+            },
         ),
         ("POST", "/reopen", {"json": {"expected_version": 0}}),
         ("DELETE", "", {"params": {"expected_version": 0}}),
@@ -850,7 +883,11 @@ async def test_report_resolution_uses_authenticated_admin_id_in_demo(
     simulator_api.application.dependency_overrides[get_optional_current_user] = admin_user
     response = await simulator_api.client.patch(
         f"/api/v1/admin/reports/{report['id']}",
-        json={"status": "RESOLVED", "expected_version": 0},
+        json={
+            "status": "RESOLVED",
+            "verification_outcome": "CONFIRMED",
+            "expected_version": 0,
+        },
     )
 
     assert response.status_code == 200
@@ -878,6 +915,7 @@ async def test_report_logs_identifiers_without_sensitive_report_text(
         f"/api/v1/admin/reports/{report_id}",
         json={
             "status": "RESOLVED",
+            "verification_outcome": "CONFIRMED",
             "resolution_note": "SECRET-RESOLUTION-NOTE",
             "expected_version": 0,
         },
@@ -891,6 +929,102 @@ async def test_report_logs_identifiers_without_sensitive_report_text(
     assert "SECRET-PLATE" not in caplog.text
     assert "SECRET-DESCRIPTION" not in caplog.text
     assert "SECRET-RESOLUTION-NOTE" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("outcome", "expected_reward_status", "expected_available"),
+    [
+        ("CONFIRMED", "EARNED", 20),
+        ("REJECTED", "CANCELLED", 0),
+        ("DUPLICATE", "CANCELLED", 0),
+        ("UNVERIFIABLE", "CANCELLED", 0),
+    ],
+)
+async def test_report_verification_outcome_controls_reward_settlement(
+    simulator_api: SimulatorApi,
+    outcome: str,
+    expected_reward_status: str,
+    expected_available: int,
+):
+    report = await _create_lifecycle_report(simulator_api, slot_id="F3-A01")
+    assert report["reward_points"] == 20
+    assert report["reward_status"] == "PENDING"
+
+    before = await simulator_api.client.get(
+        "/api/v1/rewards/users/USER-001/summary"
+    )
+    assert before.json()["data"]["available_points"] == 0
+    assert before.json()["data"]["pending_points"] == 20
+
+    resolved = await simulator_api.client.patch(
+        f"/api/v1/admin/reports/{report['id']}",
+        json={
+            "status": "RESOLVED",
+            "verification_outcome": outcome,
+            "expected_version": 0,
+        },
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()["data"]["verification_outcome"] == outcome
+    assert resolved.json()["data"]["reward_status"] == expected_reward_status
+
+    after = await simulator_api.client.get(
+        "/api/v1/rewards/users/USER-001/summary"
+    )
+    assert after.json()["data"]["available_points"] == expected_available
+    assert after.json()["data"]["pending_points"] == 0
+
+
+@pytest.mark.asyncio
+async def test_duplicate_report_has_no_reward_and_references_candidate(
+    simulator_api: SimulatorApi,
+):
+    first = await _create_lifecycle_report(simulator_api, slot_id="F2-B04")
+    second = await _create_lifecycle_report(simulator_api, slot_id="F2-B04")
+
+    assert first["reward_points"] == 20
+    assert first["reward_status"] == "PENDING"
+    assert second["reward_points"] == 0
+    assert second["reward_status"] is None
+    assert second["duplicate_candidate_of_id"] == first["id"]
+    summary = await simulator_api.client.get(
+        "/api/v1/rewards/users/USER-001/summary"
+    )
+    assert summary.json()["data"]["pending_points"] == 20
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_cancels_pending_reward_but_keeps_safe_ledger(
+    simulator_api: SimulatorApi,
+):
+    report = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        json={
+            "user_id": "USER-001",
+            "slot_id": "F2-C02",
+            "reason_code": "OTHER",
+            "observed_plate_number": "SECRET-PLATE",
+            "description": "SECRET-DESCRIPTION",
+        },
+    )
+    report_data = report.json()["data"]
+    deleted = await simulator_api.client.delete(
+        f"/api/v1/admin/reports/{report_data['id']}",
+        params={"expected_version": 0},
+    )
+    assert deleted.status_code == 200
+
+    async with simulator_api.session_factory() as session:
+        ledger = await session.scalar(
+            select(RewardTransaction).where(
+                RewardTransaction.source_reference == report_data["id"]
+            )
+        )
+    assert ledger is not None
+    assert ledger.status.value == "CANCELLED"
+    assert "SECRET-PLATE" not in str(ledger.transaction_metadata)
+    assert "SECRET-DESCRIPTION" not in str(ledger.transaction_metadata)
 
 
 def test_admin_report_lifecycle_is_exposed_in_openapi():
