@@ -182,15 +182,22 @@ function speechUnavailableOnServer() {
 
 export function useWebSpeech(
   onTranscript: (finalTranscript: string) => void,
+  enabled = true,
 ): UseWebSpeechResult {
+  const recognitionSnapshot = enabled
+    ? recognitionAvailable
+    : speechUnavailableOnServer;
+  const synthesisSnapshot = enabled
+    ? synthesisAvailable
+    : speechUnavailableOnServer;
   const recognitionSupported = useSyncExternalStore(
     subscribeToSpeechAvailability,
-    recognitionAvailable,
+    recognitionSnapshot,
     speechUnavailableOnServer,
   );
   const synthesisSupported = useSyncExternalStore(
     subscribeToSpeechAvailability,
-    synthesisAvailable,
+    synthesisSnapshot,
     speechUnavailableOnServer,
   );
   const [status, setStatus] = useState<WebSpeechStatus>("idle");
@@ -219,6 +226,11 @@ export function useWebSpeech(
 
   useEffect(() => {
     mountedRef.current = true;
+    if (!enabled) {
+      return () => {
+        mountedRef.current = false;
+      };
+    }
     const speechWindow = window as SpeechWindow;
     const Recognition =
       speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
@@ -325,9 +337,10 @@ export function useWebSpeech(
         recognition.abort();
       }
     };
-  }, []);
+  }, [enabled]);
 
   const startServerRecording = useCallback(async (attempt: number) => {
+    if (!enabled) return false;
     if (!mediaRecordingAvailable()) return false;
 
     setStatus("preparing");
@@ -427,9 +440,10 @@ export function useWebSpeech(
       setStatus("error");
       return true;
     }
-  }, []);
+  }, [enabled]);
 
   const startListening = useCallback(() => {
+    if (!enabled) return;
     const recognition = recognitionRef.current;
     if (!recognition && !mediaRecordingAvailable()) {
       setStatus("unsupported");
@@ -492,7 +506,7 @@ export function useWebSpeech(
       }
       startRecognition();
     })();
-  }, [startServerRecording]);
+  }, [enabled, startServerRecording]);
 
   const stopListening = useCallback(() => {
     const recorder = mediaRecorderRef.current;
@@ -519,6 +533,7 @@ export function useWebSpeech(
   }, []);
 
   const speak = useCallback((text: string) => {
+    if (!enabled) return;
     const trimmed = text.trim();
     if (!trimmed) return;
     const synthesis = synthesisRef.current;
@@ -556,7 +571,7 @@ export function useWebSpeech(
     };
     currentUtteranceRef.current = utterance;
     synthesis.speak(utterance);
-  }, []);
+  }, [enabled]);
 
   const stopSpeaking = useCallback(() => {
     currentUtteranceRef.current = null;

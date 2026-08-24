@@ -44,7 +44,7 @@ Giữ backend URL trong `frontend/.env.local` ở dạng:
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
 ```
 
-Điền `LLM_API_KEY` trong `.env` nếu dùng Agent thật. Không commit `.env`,
+Điền `LLM_API_KEY` trong `.env` nếu bật Agent hoặc Speech. Không commit `.env`,
 `frontend/.env.local`, API key hoặc database password.
 
 ### Các biến môi trường
@@ -77,10 +77,18 @@ cấu hình; giá trị rỗng nghĩa là tính năng tương ứng chưa đư�
 | `SUPABASE_SERVICE_ROLE_KEY` | Chỉ backend khi cần | Rỗng | Secret service-role key; không đưa ra frontend |
 | `SUPABASE_REPORT_EVIDENCE_BUCKET` | Khi dùng ảnh report | `wrong-parking-evidence` | Private bucket do backend quản lý |
 | `REPORT_EVIDENCE_MAX_BYTES` | Không | `5000000` | Kích thước ảnh report tối đa |
+| `WRONG_PARKING_REPORT_DAILY_LIMIT` | Không | `0` | Số report tối đa mỗi user/ngày UTC; `0` không giới hạn |
 | `NEXT_PUBLIC_SUPABASE_URL` | Khi bật auth | Rỗng | Supabase project URL công khai cho frontend |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Khi bật auth | Rỗng | Publishable/anon key cho frontend; không phải service-role |
 | `NEXT_PUBLIC_DEMO_MODE` | Không | `false` | Bật identity demo ở frontend khi phát triển offline |
-| `LLM_API_KEY` | Có khi chạy Agent thật | Rỗng | API key của LLM provider |
+| `NEXT_PUBLIC_AGENT_ENABLED` | Không | `true` | Render Agent composer và cho phép frontend gọi Agent chat |
+| `NEXT_PUBLIC_SPEECH_ENABLED` | Không | `true` (`false` trong public beta example) | Hiển thị và khởi tạo Voice STT/TTS |
+| `NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL` | Trước public beta | Rỗng | Email công khai, có người theo dõi để tiếp nhận yêu cầu xóa dữ liệu |
+| `AGENT_ENABLED` | Không | `true` | Khởi tạo LangGraph và phục vụ Agent chat |
+| `AGENT_DAILY_REQUEST_LIMIT` | Không | `0` | Số request Agent tối đa mỗi user/ngày UTC; `0` tắt quota |
+| `AGENT_MAX_STEPS` | Không | `8` | Step budget cho một Agent request, từ 1 đến 8 |
+| `SPEECH_ENABLED` | Không | `true` | Cho phép backend transcription endpoint |
+| `LLM_API_KEY` | Khi Agent hoặc Speech backend bật trong production | Rỗng | API key dùng chung cho LLM/STT provider |
 | `LLM_MODEL` | Không | `gpt-4o-mini` | Model dùng cho LangGraph Agent |
 | `LLM_TEMPERATURE` | Không | `0` | Temperature cho Agent |
 | `SPEECH_TRANSCRIPTION_MODEL` | Khi dùng backend STT fallback | `gpt-4o-mini-transcribe` | Model chuyển audio thành text |
@@ -98,6 +106,27 @@ cấu hình; giá trị rỗng nghĩa là tính năng tương ứng chưa đư�
 
 Không đưa biến không có tiền tố `NEXT_PUBLIC_` vào client bundle. Đặc biệt,
 `LLM_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` và `AI_LOG_API_KEY` chỉ thuộc backend.
+Public beta dùng `NEXT_PUBLIC_AGENT_ENABLED=true` và
+`NEXT_PUBLIC_SPEECH_ENABLED=false`. Giá trị `NEXT_PUBLIC_` được đóng vào bundle lúc
+`next build`; cần build lại frontend sau khi đổi cờ. Backend production chỉ được thiếu
+`LLM_API_KEY` khi cả `AGENT_ENABLED=false` và `SPEECH_ENABLED=false`; các validation
+production khác vẫn giữ nguyên.
+
+Trước khi mở public beta, bắt buộc cấu hình
+`NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL` bằng một email thật đang được theo dõi. Trang
+`/privacy` chỉ tạo liên kết `mailto:` khi giá trị hợp lệ; nếu thiếu hoặc sai định dạng,
+trang sẽ thông báo kênh liên hệ đang được cấu hình. Đây là biến build-time của Next.js,
+vì vậy phải build và redeploy frontend sau khi thay đổi.
+
+Public beta production dùng `AGENT_DAILY_REQUEST_LIMIT=5` và
+`AGENT_MAX_STEPS=4`. Quota được lưu trong PostgreSQL theo trusted parking user và ngày UTC;
+request đã qua validation được tính ngay trước khi gọi graph, kể cả khi provider hoặc tool
+lỗi sau đó.
+
+Public beta production dùng `WRONG_PARKING_REPORT_DAILY_LIMIT=5`. Quota report được lưu
+trong PostgreSQL theo trusted parking user và ngày UTC; local development mặc định `0`
+(unlimited). Evidence giữ giới hạn 5.000.000 byte và chỉ chấp nhận JPEG, PNG, WebP,
+HEIC hoặc HEIF có MIME khớp signature thực tế.
 
 ## 2. Khởi động PostgreSQL
 
@@ -173,6 +202,16 @@ Không để hai giá trị này lệch nhau. Người dùng mới có thể th�
 Browser lưu Supabase session trong `sessionStorage` với storage key riêng cho từng tab,
 cho phép mở user và admin đồng thời mà không thay session của nhau. Đóng tab kết thúc
 session của tab đó; không duplicate một tab đã đăng nhập nếu cần hai identity độc lập.
+
+Với public beta production, không cấp admin bằng thao tác development thủ công hoặc
+token metadata. Dùng runbook [Admin Provisioning](docs/ADMIN_PROVISIONING.md); tài liệu
+này bổ sung, không thay thế flow development/demo hiện tại. Release gate yêu cầu:
+
+- email Supabase của dedicated admin đã confirmed;
+- `profiles.app_role=admin`, còn `parking_user_id` và `default_vehicle_id` đều null;
+- user thường gọi admin API nhận `403 ADMIN_REQUIRED`;
+- request anonymous gọi admin API nhận `401 AUTH_REQUIRED`;
+- production đặt `DEMO_MODE=false` và `SIMULATOR_ENABLED=false`.
 
 ## 7. Reset demo một bước
 

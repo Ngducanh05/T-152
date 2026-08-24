@@ -118,4 +118,26 @@ describe("LoginForm", () => {
     expect(screen.getByLabelText("Xác nhận mật khẩu")).toBeVisible();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
+
+  it.each([
+    ["login" as const, "Đăng nhập ParkSmart"],
+    ["register" as const, "Đăng ký ParkSmart"],
+  ])("shows the privacy link in %s mode", (initialMode, heading) => {
+    mocks.useAuth.mockReturnValue({
+      status: "guest",
+      profile: null,
+      initializationError: null,
+      signIn: vi.fn(),
+      signUp: vi.fn(),
+      signOut: vi.fn(),
+    });
+
+    render(<LoginForm initialMode={initialMode} />);
+
+    expect(screen.getByRole("heading", { name: heading })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Quyền riêng tư" })).toHaveAttribute(
+      "href",
+      "/privacy",
+    );
+  });
 });

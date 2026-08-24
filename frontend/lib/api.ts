@@ -49,6 +49,10 @@ import type {
 
 const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
 
+export interface DatabaseHealth {
+  database: string;
+}
+
 export interface ApiAuthProvider {
   getAccessToken: () => Promise<string | null>;
   refreshAccessToken: () => Promise<string | null>;
@@ -230,6 +234,11 @@ export class ParkSmartApiClient {
       if (error instanceof ApiError && error.status === 404) return null;
       throw error;
     }
+  }
+
+  async checkDatabaseHealth(signal?: AbortSignal): Promise<DatabaseHealth> {
+    const response = await this.fetchOnce("/health/database", { signal }, null);
+    return parseApiResponse<DatabaseHealth>(response);
   }
 
   getCurrentUser(signal?: AbortSignal) {

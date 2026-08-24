@@ -35,7 +35,10 @@ beforeEach(() => {
   speechMock.stopSpeaking.mockReset();
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllEnvs();
+});
 
 function renderComposer(
   onSend = vi.fn<(message: string) => Promise<string | null>>(),
@@ -51,6 +54,35 @@ function renderComposer(
 }
 
 describe("AgentComposer", () => {
+  it("hides all Voice controls and statuses when Speech is disabled", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SPEECH_ENABLED", "false");
+    speechMock.errorMessage = "Quyền truy cập microphone đã bị từ chối.";
+    const onSend = vi.fn(async () => "Phản hồi từ Agent");
+    const user = userEvent.setup();
+    renderComposer(onSend);
+
+    expect(
+      screen.queryByRole("button", { name: "Bắt đầu nhập bằng giọng nói" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(speechMock.errorMessage)).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox"), "Tìm chỗ đỗ");
+    await user.click(screen.getByRole("button", { name: "Gửi tin nhắn" }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Tìm chỗ đỗ"));
+    expect(speechMock.startListening).not.toHaveBeenCalled();
+    expect(speechMock.speak).not.toHaveBeenCalled();
+  });
+
+  it("shows the microphone when Speech is enabled", () => {
+    vi.stubEnv("NEXT_PUBLIC_SPEECH_ENABLED", "true");
+    renderComposer();
+
+    expect(
+      screen.getByRole("button", { name: "Bắt đầu nhập bằng giọng nói" }),
+    ).toBeVisible();
+  });
+
   it("submits keyboard text without speaking the response", async () => {
     const onSend = vi.fn(async () => "Phản hồi từ Agent");
     const user = userEvent.setup();

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import Settings, get_settings
 from src.core.db_models import ParkingSlot, ParkingUser, RewardTransaction, WrongParkingReport
+from src.core.report_quota import ReportSubmissionQuotaService
 from src.core.reward import RewardError, RewardService
 from src.models.schemas import (
     ErrorCode,
@@ -43,12 +44,16 @@ class ParkingReportService:
         *,
         settings: Settings | None = None,
         reward_service: RewardService | None = None,
+        quota_service: ReportSubmissionQuotaService | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.session = session
         self.settings = settings or get_settings()
         self.clock = clock or (lambda: datetime.now(UTC))
         self.rewards = reward_service or RewardService(
+            session, settings=self.settings, clock=self.clock
+        )
+        self.quota = quota_service or ReportSubmissionQuotaService(
             session, settings=self.settings, clock=self.clock
         )
 
@@ -151,6 +156,7 @@ class ParkingReportService:
             .order_by(WrongParkingReport.created_at.desc(), WrongParkingReport.id.desc())
             .limit(1)
         )
+        await self.quota.consume(reporter_user_id)
         report = WrongParkingReport(
             id=report_id or f"REPORT-{uuid4()}",
             reporter_user_id=reporter_user_id,
@@ -192,6 +198,26 @@ class ParkingReportService:
         await self.session.refresh(report)
         report.reward_status = reward.status if reward is not None else None
         return report
+
+    async def preflight_wrong_parking_report(
+        self,
+        *,
+        reporter_user_id: str,
+        slot_id: str,
+    ) -> None:
+        if await self.session.get(ParkingUser, reporter_user_id) is None:
+            raise ParkingReportError(
+                ErrorCode.USER_NOT_FOUND,
+                f"Parking user {reporter_user_id} was not found",
+                slot_id=slot_id,
+            )
+        if await self.session.get(ParkingSlot, slot_id) is None:
+            raise ParkingReportError(
+                ErrorCode.SLOT_NOT_FOUND,
+                f"Parking slot {slot_id} was not found",
+                slot_id=slot_id,
+            )
+        await self.quota.preflight(reporter_user_id)
 
     async def list_wrong_parking_reports(
         self,

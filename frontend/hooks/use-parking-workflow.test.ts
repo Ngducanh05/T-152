@@ -18,6 +18,7 @@ afterEach(() => {
   cleanup();
   sessionStorage.clear();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 function chatResponse(overrides: Partial<ChatResponse> = {}): ChatResponse {
@@ -489,6 +490,19 @@ describe("useParkingWorkflow", () => {
     });
   });
 
+  it("does not call Agent chat when the public Agent flag is disabled", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AGENT_ENABLED", "false");
+    const { api, data } = fixture();
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      expect(await result.current.sendAgentMessage("Tìm chỗ đỗ")).toBeNull();
+    });
+
+    expect(api.chat).not.toHaveBeenCalled();
+    expect(result.current.pending).toBeNull();
+  });
+
   it("returns the Agent response message after preserving structured UI effects", async () => {
     sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-response");
     const { api, data, refresh } = fixture();
@@ -609,6 +623,47 @@ describe("useParkingWorkflow", () => {
     expect(result.current.recommendedSlotIds).toEqual([]);
     expect(result.current.selectedSlotId).toBeNull();
     expect(result.current.activeRoute).toBeNull();
+  });
+
+  it("shows the daily quota notice without retrying or clearing parking state", async () => {
+    sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-quota");
+    const { api, data } = fixture();
+    api.chat.mockRejectedValue(
+      new ApiError({
+        code: "AGENT_DAILY_LIMIT_REACHED",
+        message: "Daily limit reached.",
+        status: 429,
+      }),
+    );
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    await waitFor(() => expect(result.current.threadId).toBe("thread-quota"));
+
+    await act(async () => {
+      await result.current.requestRecommendations({
+        chargingRequired: true,
+        accessibleRequired: false,
+        nearElevator: false,
+      });
+    });
+    act(() => result.current.selectCandidate("F1-D01"));
+
+    await act(async () => {
+      await result.current.sendAgentMessage("Hỏi Agent");
+      await result.current.retryAgentMessage();
+    });
+
+    expect(result.current.notice).toBe(
+      "Bạn đã dùng hết lượt trợ lý AI hôm nay. Bạn vẫn có thể tìm chỗ, giữ chỗ và báo sự cố bằng các thao tác có sẵn. Vui lòng thử lại vào ngày mai.",
+    );
+    expect(result.current.retryMessage).toBeNull();
+    expect(api.chat).toHaveBeenCalledOnce();
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: "user",
+      text: "Hỏi Agent",
+    });
+    expect(result.current.recommendedSlotIds).toEqual([]);
+    expect(result.current.selectedSlotId).toBe("F1-D01");
+    expect(result.current.currentLocationId).toBe("F1-ENTRANCE");
   });
 
   it("creates and persists a new Agent thread when resetting the demo", async () => {

@@ -6,15 +6,22 @@
 APP_ENV=production
 DEBUG=false
 DEMO_MODE=false
+SIMULATOR_ENABLED=false
 DATABASE_URL=<postgresql+asyncpg production URL>
 
 SUPABASE_URL=<server-side Supabase project URL>
 SUPABASE_ANON_KEY=<server-side auth verification public/anon key>
 SUPABASE_SERVICE_ROLE_KEY=<SERVER ONLY>
 SUPABASE_REPORT_EVIDENCE_BUCKET=wrong-parking-evidence
+REPORT_EVIDENCE_MAX_BYTES=5000000
+WRONG_PARKING_REPORT_DAILY_LIMIT=5
 
 LLM_API_KEY=<server only>
 LLM_MODEL=<configured model>
+AGENT_ENABLED=true
+AGENT_DAILY_REQUEST_LIMIT=5
+AGENT_MAX_STEPS=4
+SPEECH_ENABLED=false
 
 CORS_ORIGINS=<actual deployed frontend origin>
 
@@ -31,7 +38,44 @@ NEXT_PUBLIC_API_BASE_URL=<deployed backend>/api/v1
 NEXT_PUBLIC_SUPABASE_URL=<Supabase project URL>
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<public browser key>
 NEXT_PUBLIC_DEMO_MODE=false
+NEXT_PUBLIC_AGENT_ENABLED=true
+NEXT_PUBLIC_SPEECH_ENABLED=false
+NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL=<real monitored email>
 ```
+
+`AGENT_ENABLED` and `SPEECH_ENABLED` default to `true`. In production,
+`LLM_API_KEY` is required when either backend feature is enabled; the backend may start
+without that key only when both flags are `false`. All other production safety validation
+remains required. Keep the backend and `NEXT_PUBLIC_` flags aligned. Public environment
+variables are frozen into the browser bundle during `next build`, so rebuild the frontend
+after changing them.
+
+`NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL` is also a Next.js build-time variable. A real,
+monitored contact email is a release blocker before opening the public beta. After changing
+it, rebuild and redeploy the frontend. Before launch, open `/privacy`, verify that the
+`mailto:` link targets the monitored inbox, and send a test deletion request. Complete an
+admin hard-delete smoke test as well: confirm that it removes both the database report row
+and its private Storage object.
+
+## Production Admin RBAC Release Gate
+
+Use [ADMIN_PROVISIONING.md](ADMIN_PROVISIONING.md) for public beta production admin
+promotion and emergency revoke. It supplements, and does not replace, the existing
+development/demo runbook.
+
+Do not release until all checks pass:
+
+- The dedicated admin account has a confirmed Supabase email.
+- Its `profiles.app_role` is `admin`.
+- Its `profiles.parking_user_id` and `profiles.default_vehicle_id` are null.
+- `GET /api/v1/auth/me` returns the backend-owned admin profile without a parking identity.
+- A regular user calling representative admin APIs receives `403 ADMIN_REQUIRED`.
+- An anonymous request to an admin API receives `401 AUTH_REQUIRED`.
+- Production has `DEMO_MODE=false`.
+- Production has `SIMULATOR_ENABLED=false`.
+
+Never provision a production admin through frontend metadata, an anon key, browser console,
+or by enabling demo/simulator behavior.
 
 If using the existing Next.js rewrite:
 
@@ -52,7 +96,7 @@ alembic heads
 Expected target:
 
 ```text
-20260824_0010
+20260824_0012
 ```
 
 Run migrations once as a pre-deploy or release step. Do not run migrations
@@ -85,6 +129,19 @@ GET /api/v1/health/database
 
 Use the database health endpoint as the deployment readiness check when the
 platform supports it.
+
+When the frontend opens, `BackendReadinessGate` calls
+`GET /api/v1/health/database` before mounting `AuthProvider` or any application
+route. It shows the Render free-instance cold-start notice after about three
+seconds, retries failed checks sequentially, and gives the user a manual retry
+action after a readiness deadline of about 75 seconds. Each attempt has a
+10-second timeout, followed by a four-second retry delay; requests never overlap.
+After readiness succeeds, the gate stops checking and renders the application.
+
+This is a startup readiness gate, not a keep-alive mechanism. Do not add periodic
+pings after the application becomes ready. Keeping `AuthProvider` behind the gate
+also prevents session initialization and `/auth/me` calls from treating a backend
+cold start as an authentication failure.
 
 ## Supabase Storage Checklist
 

@@ -475,6 +475,10 @@ body .admin-event-list span, body .admin-event-list small, body .admin-event-lis
 
 .report-reasons { padding: 0; display: grid; gap: 8px; border: 0; }.report-reasons legend { margin-bottom: 7px; font-size: 12px; font-weight: 800; }.report-reasons button { min-height: 44px; padding: 9px 12px; border: 1px solid #cbdad2; border-radius: 10px; color: #244638; background: #f8fbf9; font-size: 12px; font-weight: 750; text-align: left; cursor: pointer; }.report-reasons button::after { content: "Chọn"; float: right; color: #587568; font-size: 11px; }.report-reasons button.is-selected { border-color: #23845d; box-shadow: 0 0 0 2px rgb(35 132 93 / 14%); background: #e9f7f0; }.report-reasons button.is-selected::after { content: "✓ Đã chọn"; color: #176b49; font-weight: 800; }.report-reasons:disabled button { opacity: .5; cursor: not-allowed; }.report-extra-fields { padding: 14px; display: grid; gap: 12px; border: 1px solid #dbe8e1; border-radius: 12px; background: #f5f8f6; }.report-extra-fields h3 { margin: 0; color: var(--ink); font-size: 13px; }.report-extra-fields > p { margin: -4px 0 2px; color: var(--muted); font-size: 11px; line-height: 1.5; }.report-submit-status { min-height: 18px; color: var(--muted); font-size: 11px; }
 
+.report-extra-fields > .report-privacy-notice { margin: 0; padding: 10px; border-radius: 9px; color: #52685e; background: #eaf4ef; font-size: 10px; line-height: 1.55; }
+.report-privacy-notice a { color: #176b49; font-weight: 800; }
+.report-privacy-notice a:focus-visible { border-radius: 3px; outline: 3px solid #1d78d0; outline-offset: 2px; }
+
 /* Floor selector tabs */
 .floor-tabs { display: flex; gap: 6px; padding: 0 16px 12px; }
 .floor-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 8px 12px; border: 1.5px solid #cddbd4; border-radius: 11px; background: #fff; color: var(--ink); font-size: 13px; cursor: pointer; transition: all .18s ease; }
