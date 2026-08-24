@@ -62,6 +62,16 @@ def _service_unavailable(message: str) -> HTTPException:
     )
 
 
+def _agent_disabled() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": ErrorCode.AGENT_DISABLED.value,
+            "message": "The parking assistant is currently disabled.",
+        },
+    )
+
+
 async def _delete_expired_thread(
     request: Request,
     thread_id: str,
@@ -292,6 +302,9 @@ async def chat(
             current_user,
             session,
         )
+
+    if not request.app.state.settings.agent_enabled:
+        raise _agent_disabled()
 
     request_id = _request_id(request)
     message_id = f"request:{request_id}"

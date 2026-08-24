@@ -286,6 +286,32 @@ async def test_happy_chat_response(agent_api):
 
 
 @pytest.mark.asyncio
+async def test_disabled_agent_returns_503_without_building_or_invoking_graph():
+    fake_agent = FakeAgent()
+    application = create_app(
+        Settings(_env_file=None, agent_enabled=False, llm_api_key=None),
+        agent_override=fake_agent,
+    )
+    with patch("src.api.main.build_graph") as build_graph:
+        async with application.router.lifespan_context(application):
+            assert application.state.agent is None
+            assert application.state.agent_checkpointer is None
+            async with AsyncClient(
+                transport=ASGITransport(app=application),
+                base_url="http://test",
+            ) as client:
+                response = await client.post(
+                    "/api/v1/agent/chat",
+                    json=_payload(),
+                )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "AGENT_DISABLED"
+    assert fake_agent.calls == []
+    build_graph.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_two_turns_same_thread_keep_context(agent_api):
     _, client, fake_agent = agent_api
 

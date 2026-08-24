@@ -32,7 +32,7 @@ ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 | WrongParkingReportVerificationOutcome | PENDING, CONFIRMED, REJECTED, DUPLICATE, UNVERIFIABLE |
 | RewardSourceType | ADJACENT_SLOT_OBSERVATION, WRONG_PARKING_REPORT |
 | RewardTransactionStatus | PENDING, EARNED, CANCELLED |
-| ErrorCode | Canonical values live in `src/models/common.py`; contribution/report additions include OBSERVATION_NOT_FOUND, OBSERVATION_ALREADY_EXISTS, OBSERVATION_EXPIRED, INVALID_OBSERVATION_TRANSITION, OBSERVATION_VERSION_CONFLICT, REWARD_ALREADY_SETTLED, REPORT_REWARD_DUPLICATE and CONTRIBUTION_DAILY_LIMIT_REACHED |
+| ErrorCode | Canonical values live in `src/models/schemas.py`; public feature availability codes include AGENT_DISABLED and SPEECH_DISABLED; contribution/report additions include OBSERVATION_NOT_FOUND, OBSERVATION_ALREADY_EXISTS, OBSERVATION_EXPIRED, INVALID_OBSERVATION_TRANSITION, OBSERVATION_VERSION_CONFLICT, REWARD_ALREADY_SETTLED, REPORT_REWARD_DUPLICATE and CONTRIBUTION_DAILY_LIMIT_REACHED |
 
 ## Data schemas
 
@@ -111,7 +111,7 @@ HTTP status codes and stable error codes follow the implementation guide:
 | 400 | INVALID_TRANSITION |
 | 404 | SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ROUTE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND |
 | 409 | SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS |
-| 503 | AGENT_TOOL_UNAVAILABLE |
+| 503 | AGENT_DISABLED, AGENT_TOOL_UNAVAILABLE |
 
 Voice transcription additionally uses:
 
@@ -120,7 +120,7 @@ Voice transcription additionally uses:
 | 400 | SPEECH_AUDIO_INVALID |
 | 413 | SPEECH_AUDIO_TOO_LARGE |
 | 422 | SPEECH_NO_TRANSCRIPT |
-| 503 | SPEECH_TRANSCRIPTION_UNAVAILABLE |
+| 503 | SPEECH_DISABLED, SPEECH_TRANSCRIPTION_UNAVAILABLE |
 | 504 | SPEECH_TRANSCRIPTION_TIMEOUT |
 
 Wrong-parking report lifecycle additionally uses:
@@ -212,6 +212,10 @@ Agent timeout, missing LLM configuration, or unexpected Agent/tool failures retu
 with `AGENT_TOOL_UNAVAILABLE` in the standard `ErrorResponse` envelope and include the request
 ID. This endpoint does not provide streaming, WebSocket, voice, or QR behavior.
 
+When `AGENT_ENABLED=false`, the endpoint still applies its existing authentication and
+ownership checks, then returns HTTP 503 with `AGENT_DISABLED` in the standard error envelope.
+No LLM client or LangGraph graph is created and no graph is invoked.
+
 ## Speech transcription
 
 ### `POST /api/v1/speech/transcriptions`
@@ -235,6 +239,9 @@ server-side `LLM_API_KEY` credential. The credential is never sent to the browse
 transcript is returned to the editable composer and is not automatically submitted to the
 Agent endpoint. Transcription uses a 60-second timeout and one retry for transient network,
 rate-limit, or provider failures by default.
+
+When `SPEECH_ENABLED=false`, the endpoint returns HTTP 503 with `SPEECH_DISABLED` before
+reading the request body or invoking the transcription provider.
 
 ## Wrong-parking reports
 

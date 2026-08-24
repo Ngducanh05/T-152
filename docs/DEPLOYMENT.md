@@ -15,6 +15,8 @@ SUPABASE_REPORT_EVIDENCE_BUCKET=wrong-parking-evidence
 
 LLM_API_KEY=<server only>
 LLM_MODEL=<configured model>
+AGENT_ENABLED=true
+SPEECH_ENABLED=false
 
 CORS_ORIGINS=<actual deployed frontend origin>
 
@@ -31,7 +33,16 @@ NEXT_PUBLIC_API_BASE_URL=<deployed backend>/api/v1
 NEXT_PUBLIC_SUPABASE_URL=<Supabase project URL>
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<public browser key>
 NEXT_PUBLIC_DEMO_MODE=false
+NEXT_PUBLIC_AGENT_ENABLED=true
+NEXT_PUBLIC_SPEECH_ENABLED=false
 ```
+
+`AGENT_ENABLED` and `SPEECH_ENABLED` default to `true`. In production,
+`LLM_API_KEY` is required when either backend feature is enabled; the backend may start
+without that key only when both flags are `false`. All other production safety validation
+remains required. Keep the backend and `NEXT_PUBLIC_` flags aligned. Public environment
+variables are frozen into the browser bundle during `next build`, so rebuild the frontend
+after changing them.
 
 If using the existing Next.js rewrite:
 

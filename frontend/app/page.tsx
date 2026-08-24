@@ -22,6 +22,7 @@ import { useParkingWorkflow } from "@/hooks/use-parking-workflow";
 import { formatApiErrorForOperator, parkSmartApi } from "@/lib/api";
 import type { ParkingIdentity } from "@/lib/auth";
 import { formatParkingLocation } from "@/lib/parking-display";
+import { isAgentEnabled } from "@/lib/public-config";
 import { notifyWrongParkingReportCreated } from "@/lib/report-updates";
 import { buildRouteInstructions } from "@/lib/route-instructions";
 import type { ChatUiAction } from "@/lib/types";
@@ -42,6 +43,7 @@ function AuthenticatedHome() {
 }
 
 function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
+  const agentEnabled = isAgentEnabled();
   const { refreshProfile } = useAuth();
   const data = useParkSmartData(parkSmartApi, identity.userId);
   const workflow = useParkingWorkflow(data, parkSmartApi, identity);
@@ -331,12 +333,12 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
             </article>
           )}
 
-          {workflow.pending === "chat" && (
+          {agentEnabled && workflow.pending === "chat" && (
             <div className="chat-loading" role="status">
               <i /><i /><i /><span>ParkSmart đang xử lý…</span>
             </div>
           )}
-          {workflow.retryMessage && (
+          {agentEnabled && workflow.retryMessage && (
             <button
               type="button"
               className="agent-retry"
@@ -349,11 +351,18 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
         </div>
 
         <footer className="chat-composer-dock">
-          <AgentComposer
-            onSend={workflow.sendAgentMessage}
-            threadReady={Boolean(workflow.threadId)}
-            chatPending={workflow.pending === "chat"}
-          />
+          {agentEnabled ? (
+            <AgentComposer
+              onSend={workflow.sendAgentMessage}
+              threadReady={Boolean(workflow.threadId)}
+              chatPending={workflow.pending === "chat"}
+            />
+          ) : (
+            <p className="agent-note" role="status">
+              Trợ lý AI hiện đang tạm tắt. Bạn vẫn có thể sử dụng các thao tác
+              tìm chỗ, giữ chỗ và báo sự cố.
+            </p>
+          )}
         </footer>
       </section>
 

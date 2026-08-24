@@ -10,6 +10,8 @@ def test_development_defaults_remain_valid(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert settings.app_env == "development"
     assert settings.demo_mode is True
+    assert settings.agent_enabled is True
+    assert settings.speech_enabled is True
 
 
 def test_production_with_demo_mode_is_rejected() -> None:
@@ -69,7 +71,7 @@ def test_production_missing_supabase_auth_and_storage_settings_is_rejected() -> 
     assert "SUPABASE_REPORT_EVIDENCE_BUCKET is required" in message
 
 
-def test_production_missing_llm_api_key_is_rejected() -> None:
+def test_production_missing_llm_api_key_is_rejected_when_agent_enabled() -> None:
     with pytest.raises(ValidationError) as exc_info:
         Settings(
             _env_file=None,
@@ -82,9 +84,50 @@ def test_production_missing_llm_api_key_is_rejected() -> None:
             supabase_service_role_key="service-role-test-key",
             supabase_report_evidence_bucket="wrong-parking-evidence",
             llm_api_key=None,
+            agent_enabled=True,
+            speech_enabled=False,
         )
 
     assert "LLM_API_KEY is required" in str(exc_info.value)
+
+
+def test_production_missing_llm_api_key_is_rejected_when_speech_enabled() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            _env_file=None,
+            app_env="production",
+            debug=False,
+            demo_mode=False,
+            database_url="postgresql+asyncpg://parksmart:parksmart@db.example.com:5432/app",
+            supabase_url="https://example.supabase.co",
+            supabase_anon_key="anon-test-key",
+            supabase_service_role_key="service-role-test-key",
+            supabase_report_evidence_bucket="wrong-parking-evidence",
+            llm_api_key=None,
+            agent_enabled=False,
+            speech_enabled=True,
+        )
+
+    assert "LLM_API_KEY is required" in str(exc_info.value)
+
+
+def test_production_without_llm_key_is_accepted_when_agent_and_speech_disabled() -> None:
+    settings = Settings(
+        _env_file=None,
+        app_env="production",
+        debug=False,
+        demo_mode=False,
+        database_url="postgresql+asyncpg://parksmart:parksmart@db.example.com:5432/app",
+        supabase_url="https://example.supabase.co",
+        supabase_anon_key="anon-test-key",
+        supabase_service_role_key="service-role-test-key",
+        supabase_report_evidence_bucket="wrong-parking-evidence",
+        llm_api_key=None,
+        agent_enabled=False,
+        speech_enabled=False,
+    )
+
+    assert settings.llm_api_key is None
 
 
 def test_valid_production_like_settings_are_accepted() -> None:

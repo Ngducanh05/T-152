@@ -72,13 +72,15 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        checkpointer = InMemorySaver()
+        checkpointer = InMemorySaver() if application_settings.agent_enabled else None
         application.state.agent_checkpointer = checkpointer
-        application.state.agent = (
-            agent_override
-            if agent_override is not None
-            else build_graph(checkpointer=checkpointer)
-        )
+        application.state.agent = None
+        if application_settings.agent_enabled:
+            application.state.agent = (
+                agent_override
+                if agent_override is not None
+                else build_graph(checkpointer=checkpointer)
+            )
         application.state.agent_thread_owners = {}
         application.state.agent_thread_locks = {}
         application.state.agent_thread_last_access = {}

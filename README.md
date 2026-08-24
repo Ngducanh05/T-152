@@ -44,7 +44,7 @@ Giữ backend URL trong `frontend/.env.local` ở dạng:
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
 ```
 
-Điền `LLM_API_KEY` trong `.env` nếu dùng Agent thật. Không commit `.env`,
+Điền `LLM_API_KEY` trong `.env` nếu bật Agent hoặc Speech. Không commit `.env`,
 `frontend/.env.local`, API key hoặc database password.
 
 ### Các biến môi trường
@@ -80,7 +80,11 @@ cấu hình; giá trị rỗng nghĩa là tính năng tương ứng chưa đư�
 | `NEXT_PUBLIC_SUPABASE_URL` | Khi bật auth | Rỗng | Supabase project URL công khai cho frontend |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Khi bật auth | Rỗng | Publishable/anon key cho frontend; không phải service-role |
 | `NEXT_PUBLIC_DEMO_MODE` | Không | `false` | Bật identity demo ở frontend khi phát triển offline |
-| `LLM_API_KEY` | Có khi chạy Agent thật | Rỗng | API key của LLM provider |
+| `NEXT_PUBLIC_AGENT_ENABLED` | Không | `true` | Render Agent composer và cho phép frontend gọi Agent chat |
+| `NEXT_PUBLIC_SPEECH_ENABLED` | Không | `true` (`false` trong public beta example) | Hiển thị và khởi tạo Voice STT/TTS |
+| `AGENT_ENABLED` | Không | `true` | Khởi tạo LangGraph và phục vụ Agent chat |
+| `SPEECH_ENABLED` | Không | `true` | Cho phép backend transcription endpoint |
+| `LLM_API_KEY` | Khi Agent hoặc Speech backend bật trong production | Rỗng | API key dùng chung cho LLM/STT provider |
 | `LLM_MODEL` | Không | `gpt-4o-mini` | Model dùng cho LangGraph Agent |
 | `LLM_TEMPERATURE` | Không | `0` | Temperature cho Agent |
 | `SPEECH_TRANSCRIPTION_MODEL` | Khi dùng backend STT fallback | `gpt-4o-mini-transcribe` | Model chuyển audio thành text |
@@ -98,6 +102,11 @@ cấu hình; giá trị rỗng nghĩa là tính năng tương ứng chưa đư�
 
 Không đưa biến không có tiền tố `NEXT_PUBLIC_` vào client bundle. Đặc biệt,
 `LLM_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` và `AI_LOG_API_KEY` chỉ thuộc backend.
+Public beta dùng `NEXT_PUBLIC_AGENT_ENABLED=true` và
+`NEXT_PUBLIC_SPEECH_ENABLED=false`. Giá trị `NEXT_PUBLIC_` được đóng vào bundle lúc
+`next build`; cần build lại frontend sau khi đổi cờ. Backend production chỉ được thiếu
+`LLM_API_KEY` khi cả `AGENT_ENABLED=false` và `SPEECH_ENABLED=false`; các validation
+production khác vẫn giữ nguyên.
 
 ## 2. Khởi động PostgreSQL
 

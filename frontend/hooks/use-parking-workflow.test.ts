@@ -18,6 +18,7 @@ afterEach(() => {
   cleanup();
   sessionStorage.clear();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 function chatResponse(overrides: Partial<ChatResponse> = {}): ChatResponse {
@@ -487,6 +488,19 @@ describe("useParkingWorkflow", () => {
       current_location: "F1-ENTRANCE",
       message: "Chỉ đường tới đó",
     });
+  });
+
+  it("does not call Agent chat when the public Agent flag is disabled", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AGENT_ENABLED", "false");
+    const { api, data } = fixture();
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      expect(await result.current.sendAgentMessage("Tìm chỗ đỗ")).toBeNull();
+    });
+
+    expect(api.chat).not.toHaveBeenCalled();
+    expect(result.current.pending).toBeNull();
   });
 
   it("returns the Agent response message after preserving structured UI effects", async () => {

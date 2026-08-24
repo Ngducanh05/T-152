@@ -15,6 +15,7 @@ import {
   rotateThreadId,
 } from "@/lib/demo";
 import type { ParkingIdentity } from "@/lib/auth";
+import { isAgentEnabled } from "@/lib/public-config";
 import type {
   ChatUiAction,
   AdjacentSlotObservedStatus,
@@ -660,6 +661,7 @@ export function useParkingWorkflow(
   }
 
   async function sendAgentMessage(message: string, appendUserMessage = true) {
+    if (!isAgentEnabled()) return null;
     const trimmed = message.trim();
     if (!trimmed || !threadId || chatInFlightRef.current) return null;
     chatInFlightRef.current = true;

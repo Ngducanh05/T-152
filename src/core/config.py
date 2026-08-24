@@ -26,6 +26,8 @@ class Settings(BaseSettings):
         ),
     )
     demo_mode: bool = True
+    agent_enabled: bool = True
+    speech_enabled: bool = True
     next_public_api_base_url: str = "http://localhost:8000"
 
     supabase_url: str | None = None
@@ -110,7 +112,9 @@ class Settings(BaseSettings):
             failures.append("SUPABASE_SERVICE_ROLE_KEY is required")
         if not self.supabase_report_evidence_bucket:
             failures.append("SUPABASE_REPORT_EVIDENCE_BUCKET is required")
-        if not self.llm_api_key:
+        if (self.agent_enabled or self.speech_enabled) and not (
+            self.llm_api_key or ""
+        ).strip():
             failures.append("LLM_API_KEY is required")
 
         if failures:

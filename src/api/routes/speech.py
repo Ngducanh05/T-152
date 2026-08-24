@@ -45,6 +45,13 @@ async def create_transcription(
     request: Request,
 ) -> SuccessResponse[SpeechTranscriptionResponse]:
     settings: Settings = request.app.state.settings
+    if not settings.speech_enabled:
+        raise _speech_error(
+            503,
+            ErrorCode.SPEECH_DISABLED,
+            "Speech transcription is currently disabled.",
+        )
+
     media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if media_type not in _ALLOWED_MEDIA_TYPES:
         raise _speech_error(
