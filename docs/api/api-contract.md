@@ -265,8 +265,20 @@ changes `ParkingSlot.status`.
 The endpoint accepts either JSON (no image) or `multipart/form-data`. Multipart uses the
 same fields plus optional `evidence`. Evidence is never required; when supplied it must be
 JPEG, PNG, WebP, HEIC or HEIF and must not exceed `REPORT_EVIDENCE_MAX_BYTES`. The backend
-chooses the private Storage path. The response includes nullable `evidence_storage_path`,
+validates both the declared MIME type and the file signature, reads the upload with a bounded
+stream, and returns HTTP 413 with `REPORT_EVIDENCE_TOO_LARGE` when the configured byte limit
+is exceeded. Invalid, empty, spoofed or unsupported image content returns HTTP 400 with
+`REPORT_EVIDENCE_INVALID`. The backend chooses the private Storage path. The response includes nullable `evidence_storage_path`,
 `evidence_content_type` and `evidence_size_bytes`; it never exposes the service-role key.
+
+`WRONG_PARKING_REPORT_DAILY_LIMIT=0` disables the submission quota. When it is greater than
+zero, successful report creation atomically consumes one persistent quota unit per trusted
+parking user and UTC day, including duplicate reports and reports that receive no reward.
+Validation and Storage upload failures do not consume quota. An exhausted quota returns HTTP
+429 with `REPORT_DAILY_LIMIT_REACHED`, a positive `Retry-After` value until the next UTC day,
+the standard error envelope and `X-Request-ID`. A read-only preflight avoids known-unnecessary
+uploads; the transaction-time atomic consume remains authoritative under races, and a race
+loser's uploaded object is deleted.
 
 ### Admin lifecycle endpoints
 

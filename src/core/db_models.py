@@ -143,6 +143,39 @@ class AgentDailyUsage(Base):
     )
 
 
+class ReportDailyUsage(Base):
+    __tablename__ = "report_daily_usage"
+    __table_args__ = (
+        CheckConstraint(
+            "submission_count >= 0",
+            name="ck_report_daily_usage_submission_count_nonnegative",
+        ),
+        Index("ix_report_daily_usage_usage_date", "usage_date"),
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("parking_users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    usage_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    submission_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class Vehicle(Base):
     __tablename__ = "vehicles"
 
@@ -579,6 +612,7 @@ __all__ = [
     "ParkingSlot",
     "ParkingUser",
     "Profile",
+    "ReportDailyUsage",
     "ReservationStatus",
     "RewardSourceType",
     "RewardTransaction",

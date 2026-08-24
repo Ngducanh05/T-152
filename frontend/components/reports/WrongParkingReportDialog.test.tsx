@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { canonicalMap } from "@/test/fixtures";
+import { ApiError } from "@/lib/api";
 import type { WrongParkingReport } from "@/lib/types";
 
 import { WrongParkingReportDialog } from "./WrongParkingReportDialog";
@@ -166,5 +167,105 @@ describe("WrongParkingReportDialog", () => {
     expect(screen.getByRole("status")).toHaveTextContent("đang được gửi");
     resolveSubmit(createdReport);
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Đã gửi báo cáo"));
+  });
+
+  it("rejects image MIME types outside the exact allowlist", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    render(
+      <WrongParkingReportDialog
+        slots={canonicalMap.slots}
+        initialSlotId="F1-D01"
+        rewardPoints={20}
+        onClose={vi.fn()}
+        onSubmit={vi.fn(async () => createdReport)}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Xe đỗ sai ô/ }));
+    await user.upload(
+      screen.getByLabelText(/^Ảnh hiện trường/),
+      new File(["gif"], "scene.gif", { type: "image/gif" }),
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("dung lượng tối đa 5 MB");
+    expect(screen.queryByText("Đã chọn: scene.gif")).not.toBeInTheDocument();
+  });
+
+  it("rejects evidence larger than five megabytes", async () => {
+    const user = userEvent.setup();
+    render(
+      <WrongParkingReportDialog
+        slots={canonicalMap.slots}
+        initialSlotId="F1-D01"
+        rewardPoints={20}
+        onClose={vi.fn()}
+        onSubmit={vi.fn(async () => createdReport)}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Xe đỗ sai ô/ }));
+    await user.upload(
+      screen.getByLabelText(/^Ảnh hiện trường/),
+      new File([new Uint8Array(5_000_001)], "large.jpg", { type: "image/jpeg" }),
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("dung lượng tối đa 5 MB");
+    expect(screen.queryByText("Đã chọn: large.jpg")).not.toBeInTheDocument();
+  });
+
+  it("keeps the complete draft and does not retry after a daily quota error", async () => {
+    const user = userEvent.setup();
+    const evidence = new File(["jpeg"], "scene.jpg", { type: "image/jpeg" });
+    const onSubmit = vi.fn().mockRejectedValue(
+      new ApiError({
+        code: "REPORT_DAILY_LIMIT_REACHED",
+        message: "Daily limit reached.",
+        status: 429,
+      }),
+    );
+    render(
+      <WrongParkingReportDialog
+        slots={canonicalMap.slots}
+        initialSlotId="F1-D01"
+        rewardPoints={20}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const reason = screen.getByRole("button", { name: /Xe đỗ chéo vạch/ });
+    await user.click(reason);
+    await user.type(screen.getByLabelText(/Mô tả.*không bắt buộc/), "Giữ nguyên bản nháp");
+    await user.upload(screen.getByLabelText(/^Ảnh hiện trường/), evidence);
+    await user.click(screen.getByRole("button", { name: /Gửi báo cáo/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Bạn đã gửi hết số báo cáo cho hôm nay. Vui lòng thử lại vào ngày mai.",
+    );
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(reason).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText(/Mô tả.*không bắt buộc/)).toHaveValue(
+      "Giữ nguyên bản nháp",
+    );
+    expect(screen.getByText("Đã chọn: scene.jpg")).toBeVisible();
+    expect(screen.queryByText("Đã gửi báo cáo.")).not.toBeInTheDocument();
+  });
+
+  it("renders the evidence privacy notice", async () => {
+    const user = userEvent.setup();
+    render(
+      <WrongParkingReportDialog
+        slots={canonicalMap.slots}
+        initialSlotId="F1-D01"
+        rewardPoints={20}
+        onClose={vi.fn()}
+        onSubmit={vi.fn(async () => createdReport)}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Xe đỗ sai ô/ }));
+
+    expect(
+      screen.getByText(
+        "Ảnh chỉ được dùng để xác minh báo cáo. Không chụp khuôn mặt hoặc thông tin cá nhân không cần thiết.",
+      ),
+    ).toBeVisible();
   });
 });

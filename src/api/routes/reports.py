@@ -1,7 +1,9 @@
 """User-facing API for reporting vehicles parked in the wrong position."""
 
 import logging
+from datetime import UTC, datetime
 from json import JSONDecodeError
+from math import ceil
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -13,6 +15,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from starlette.datastructures import UploadFile
 
 from src.api.dependencies import (
     ParkingUserDependency,
@@ -21,6 +24,7 @@ from src.api.dependencies import (
     resolve_parking_user_id,
 )
 from src.core.parking_report import ParkingReportError, ParkingReportService
+from src.core.report_quota import ReportQuotaExceeded
 from src.models.common import ErrorResponse, SuccessResponse
 from src.models.schemas import (
     EntityId,
@@ -31,8 +35,61 @@ from src.models.schemas import (
 )
 from src.services.report_evidence import ReportEvidenceStorage, validate_report_image
 
+EVIDENCE_CHUNK_BYTES = 64 * 1024
+
 router = APIRouter(prefix="/reports", tags=["Reports"])
 logger = logging.getLogger(__name__)
+
+
+def _evidence_too_large(max_bytes: int) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+        detail={
+            "code": ErrorCode.REPORT_EVIDENCE_TOO_LARGE.value,
+            "message": f"Report evidence must not exceed {max_bytes} bytes.",
+        },
+    )
+
+
+def _daily_limit_reached(error: ReportQuotaExceeded) -> HTTPException:
+    retry_after = max(
+        1,
+        ceil((error.reset_at - datetime.now(UTC)).total_seconds()),
+    )
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        headers={"Retry-After": str(retry_after)},
+        detail={
+            "code": ErrorCode.REPORT_DAILY_LIMIT_REACHED.value,
+            "message": "The daily wrong-parking report limit has been reached.",
+        },
+    )
+
+
+def _report_http_error(error: ParkingReportError) -> HTTPException:
+    status_code = (
+        status.HTTP_404_NOT_FOUND
+        if error.code in {ErrorCode.USER_NOT_FOUND, ErrorCode.SLOT_NOT_FOUND}
+        else status.HTTP_422_UNPROCESSABLE_CONTENT
+    )
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": error.code.value, "message": error.message},
+    )
+
+
+async def _read_bounded_evidence(evidence: UploadFile, max_bytes: int) -> bytes:
+    if evidence.size is not None and evidence.size > max_bytes:
+        raise _evidence_too_large(max_bytes)
+
+    content = bytearray()
+    while True:
+        chunk = await evidence.read(EVIDENCE_CHUNK_BYTES)
+        if not chunk:
+            return bytes(content)
+        content.extend(chunk)
+        if len(content) > max_bytes:
+            raise _evidence_too_large(max_bytes)
 
 
 def _report_response(report: object) -> WrongParkingReport:
@@ -82,7 +139,13 @@ class WrongParkingReportRequest(BaseModel):
     "/wrong-parking",
     response_model=SuccessResponse[WrongParkingReport],
     status_code=status.HTTP_201_CREATED,
-    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+    responses={
+        400: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        413: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
+    },
 )
 async def create_wrong_parking_report(
     http_request: Request,
@@ -91,12 +154,41 @@ async def create_wrong_parking_report(
     settings: SettingsDependency,
 ) -> SuccessResponse[WrongParkingReport]:
     content_type = http_request.headers.get("content-type", "")
+    content_length = http_request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_length = int(content_length)
+        except ValueError:
+            declared_length = None
+        if (
+            declared_length is not None
+            and declared_length > settings.report_evidence_max_bytes + EVIDENCE_CHUNK_BYTES
+        ):
+            raise _evidence_too_large(settings.report_evidence_max_bytes)
+
     evidence_bytes: bytes | None = None
     evidence_content_type: str | None = None
+    evidence_upload: UploadFile | None = None
     try:
         if content_type.startswith("multipart/form-data"):
-            form = await http_request.form()
+            try:
+                form = await http_request.form(
+                    max_files=1,
+                    max_fields=5,
+                    max_part_size=2048,
+                )
+            except Exception as error:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "VALIDATION_ERROR",
+                        "message": "Multipart request validation failed.",
+                    },
+                ) from error
             evidence = form.get("evidence")
+            if evidence is not None and not isinstance(evidence, UploadFile):
+                raise ValueError("evidence must be an uploaded file")
+            evidence_upload = evidence
             request = WrongParkingReportRequest(
                 user_id=str(form.get("user_id") or ""),
                 slot_id=str(form.get("slot_id") or ""),
@@ -112,87 +204,102 @@ async def create_wrong_parking_report(
                     else None
                 ),
             )
-            if hasattr(evidence, "read"):
-                evidence_bytes = await evidence.read()  # type: ignore[union-attr]
-                evidence_content_type = getattr(evidence, "content_type", None)
         else:
             request = WrongParkingReportRequest.model_validate(await http_request.json())
     except (JSONDecodeError, ValidationError, ValueError) as error:
+        if evidence_upload is not None:
+            await evidence_upload.close()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "VALIDATION_ERROR", "message": "Request validation failed."},
         ) from error
 
-    user_id = resolve_parking_user_id(request.user_id, current_user)
-    report_id = f"REPORT-{uuid4()}"
-    stored_evidence = None
-    evidence_storage = ReportEvidenceStorage(settings)
-    if evidence_bytes is not None:
-        normalized_content_type = validate_report_image(
-            content_type=evidence_content_type,
-            size_bytes=len(evidence_bytes),
-            max_bytes=settings.report_evidence_max_bytes,
-        )
-        stored_evidence = await evidence_storage.upload(
-            report_id=report_id,
-            data=evidence_bytes,
-            content_type=normalized_content_type,
-            allow_demo_fallback=current_user is None,
-        )
-
-    async def cleanup_uploaded_evidence() -> None:
-        if stored_evidence is None:
-            return
-        if not await evidence_storage.delete(stored_evidence.storage_path):
-            logger.warning(
-                "wrong_parking_report_evidence_cleanup_failed report_id=%s request_id=%s",
-                report_id,
-                getattr(http_request.state, "request_id", "unknown"),
-            )
-
     try:
+        user_id = resolve_parking_user_id(request.user_id, current_user)
+        report_id = f"REPORT-{uuid4()}"
+        stored_evidence = None
+        evidence_storage = ReportEvidenceStorage(settings)
+        report_service = ParkingReportService(session, settings=settings)
+
         async with session.begin():
-            report = await ParkingReportService(session).create_wrong_parking_report(
-                report_id=report_id,
+            await report_service.preflight_wrong_parking_report(
                 reporter_user_id=user_id,
                 slot_id=request.slot_id,
-                reason_code=request.reason_code,
-                description=request.description,
-                observed_plate_number=request.observed_plate_number,
-                evidence_storage_path=(
-                    stored_evidence.storage_path if stored_evidence is not None else None
-                ),
-                evidence_content_type=(
-                    stored_evidence.content_type if stored_evidence is not None else None
-                ),
-                evidence_size_bytes=(
-                    stored_evidence.size_bytes if stored_evidence is not None else None
-                ),
             )
-            response_report = _report_response(report)
+
+        if evidence_upload is not None:
+            evidence_content_type = evidence_upload.content_type
+            evidence_bytes = await _read_bounded_evidence(
+                evidence_upload,
+                settings.report_evidence_max_bytes,
+            )
+            normalized_content_type = validate_report_image(
+                content_type=evidence_content_type,
+                data=evidence_bytes,
+                max_bytes=settings.report_evidence_max_bytes,
+            )
+            stored_evidence = await evidence_storage.upload(
+                report_id=report_id,
+                data=evidence_bytes,
+                content_type=normalized_content_type,
+                allow_demo_fallback=current_user is None,
+            )
+
+        async def cleanup_uploaded_evidence() -> None:
+            if stored_evidence is None:
+                return
+            if not await evidence_storage.delete(stored_evidence.storage_path):
+                logger.warning(
+                    "wrong_parking_report_evidence_cleanup_failed report_id=%s request_id=%s",
+                    report_id,
+                    getattr(http_request.state, "request_id", "unknown"),
+                )
+
+        try:
+            async with session.begin():
+                report = await report_service.create_wrong_parking_report(
+                    report_id=report_id,
+                    reporter_user_id=user_id,
+                    slot_id=request.slot_id,
+                    reason_code=request.reason_code,
+                    description=request.description,
+                    observed_plate_number=request.observed_plate_number,
+                    evidence_storage_path=(
+                        stored_evidence.storage_path if stored_evidence is not None else None
+                    ),
+                    evidence_content_type=(
+                        stored_evidence.content_type if stored_evidence is not None else None
+                    ),
+                    evidence_size_bytes=(
+                        stored_evidence.size_bytes if stored_evidence is not None else None
+                    ),
+                )
+                response_report = _report_response(report)
+        except ReportQuotaExceeded as error:
+            await cleanup_uploaded_evidence()
+            raise _daily_limit_reached(error) from error
+        except ParkingReportError as error:
+            await cleanup_uploaded_evidence()
+            logger.warning(
+                "wrong_parking_report_action action=create report_id=%s slot_id=%s "
+                "actor_id=%s outcome=failure request_id=%s error_code=%s",
+                error.report_id or "unknown",
+                error.slot_id or request.slot_id,
+                user_id,
+                getattr(http_request.state, "request_id", "unknown"),
+                error.code.value,
+            )
+            raise _report_http_error(error) from error
+        except Exception:
+            await cleanup_uploaded_evidence()
+            raise
+    except ReportQuotaExceeded as error:
+        raise _daily_limit_reached(error) from error
     except ParkingReportError as error:
-        await cleanup_uploaded_evidence()
-        logger.warning(
-            "wrong_parking_report_action action=create report_id=%s slot_id=%s "
-            "actor_id=%s outcome=failure request_id=%s error_code=%s",
-            error.report_id or "unknown",
-            error.slot_id or request.slot_id,
-            user_id,
-            getattr(http_request.state, "request_id", "unknown"),
-            error.code.value,
-        )
-        status_code = (
-            status.HTTP_404_NOT_FOUND
-            if error.code in {ErrorCode.USER_NOT_FOUND, ErrorCode.SLOT_NOT_FOUND}
-            else status.HTTP_422_UNPROCESSABLE_CONTENT
-        )
-        raise HTTPException(
-            status_code=status_code,
-            detail={"code": error.code.value, "message": error.message},
-        ) from error
-    except Exception:
-        await cleanup_uploaded_evidence()
-        raise
+        raise _report_http_error(error) from error
+    finally:
+        if evidence_upload is not None:
+            await evidence_upload.close()
     logger.info(
         "wrong_parking_report_action action=create report_id=%s slot_id=%s "
         "actor_id=%s outcome=success request_id=%s",

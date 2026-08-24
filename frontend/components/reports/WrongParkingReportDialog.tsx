@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 
-import { formatApiErrorForOperator } from "@/lib/api";
+import { ApiError, formatApiErrorForOperator } from "@/lib/api";
 import { formatParkingLocation } from "@/lib/parking-display";
 import type {
   ParkingSlot,
@@ -37,6 +37,13 @@ const STANDARD_REASONS: Array<{
 ];
 
 const MAX_IMAGE_BYTES = 5_000_000;
+const ALLOWED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
 
 export function WrongParkingReportDialog({
   slots,
@@ -85,7 +92,9 @@ export function WrongParkingReportDialog({
       setSubmittedReport(report);
     } catch (error) {
       setErrorMessage(
-        formatApiErrorForOperator(error, "Không thể gửi báo cáo lúc này."),
+        error instanceof ApiError && error.code === "REPORT_DAILY_LIMIT_REACHED"
+          ? "Bạn đã gửi hết số báo cáo cho hôm nay. Vui lòng thử lại vào ngày mai."
+          : formatApiErrorForOperator(error, "Không thể gửi báo cáo lúc này."),
       );
     } finally {
       submittingRef.current = false;
@@ -226,7 +235,7 @@ export function WrongParkingReportDialog({
                         const file = event.target.files?.[0] ?? null;
                         if (
                           file &&
-                          (!file.type.startsWith("image/") ||
+                          (!ALLOWED_IMAGE_TYPES.has(file.type.toLowerCase()) ||
                             file.size <= 0 ||
                             file.size > MAX_IMAGE_BYTES)
                         ) {
@@ -244,6 +253,9 @@ export function WrongParkingReportDialog({
                       {evidence
                         ? `Đã chọn: ${evidence.name}`
                         : "Thêm ảnh giúp bộ phận vận hành xác minh nhanh hơn."}
+                    </small>
+                    <small>
+                      Ảnh chỉ được dùng để xác minh báo cáo. Không chụp khuôn mặt hoặc thông tin cá nhân không cần thiết.
                     </small>
                   </label>
                 </div>

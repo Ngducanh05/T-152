@@ -77,6 +77,7 @@ cấu hình; giá trị rỗng nghĩa là tính năng tương ứng chưa đư�
 | `SUPABASE_SERVICE_ROLE_KEY` | Chỉ backend khi cần | Rỗng | Secret service-role key; không đưa ra frontend |
 | `SUPABASE_REPORT_EVIDENCE_BUCKET` | Khi dùng ảnh report | `wrong-parking-evidence` | Private bucket do backend quản lý |
 | `REPORT_EVIDENCE_MAX_BYTES` | Không | `5000000` | Kích thước ảnh report tối đa |
+| `WRONG_PARKING_REPORT_DAILY_LIMIT` | Không | `0` | Số report tối đa mỗi user/ngày UTC; `0` không giới hạn |
 | `NEXT_PUBLIC_SUPABASE_URL` | Khi bật auth | Rỗng | Supabase project URL công khai cho frontend |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Khi bật auth | Rỗng | Publishable/anon key cho frontend; không phải service-role |
 | `NEXT_PUBLIC_DEMO_MODE` | Không | `false` | Bật identity demo ở frontend khi phát triển offline |
@@ -114,6 +115,11 @@ Public beta production dùng `AGENT_DAILY_REQUEST_LIMIT=5` và
 `AGENT_MAX_STEPS=4`. Quota được lưu trong PostgreSQL theo trusted parking user và ngày UTC;
 request đã qua validation được tính ngay trước khi gọi graph, kể cả khi provider hoặc tool
 lỗi sau đó.
+
+Public beta production dùng `WRONG_PARKING_REPORT_DAILY_LIMIT=5`. Quota report được lưu
+trong PostgreSQL theo trusted parking user và ngày UTC; local development mặc định `0`
+(unlimited). Evidence giữ giới hạn 5.000.000 byte và chỉ chấp nhận JPEG, PNG, WebP,
+HEIC hoặc HEIF có MIME khớp signature thực tế.
 
 ## 2. Khởi động PostgreSQL
 

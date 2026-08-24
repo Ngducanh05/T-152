@@ -12,6 +12,8 @@ SUPABASE_URL=<server-side Supabase project URL>
 SUPABASE_ANON_KEY=<server-side auth verification public/anon key>
 SUPABASE_SERVICE_ROLE_KEY=<SERVER ONLY>
 SUPABASE_REPORT_EVIDENCE_BUCKET=wrong-parking-evidence
+REPORT_EVIDENCE_MAX_BYTES=5000000
+WRONG_PARKING_REPORT_DAILY_LIMIT=5
 
 LLM_API_KEY=<server only>
 LLM_MODEL=<configured model>
@@ -65,7 +67,7 @@ alembic heads
 Expected target:
 
 ```text
-20260824_0011
+20260824_0012
 ```
 
 Run migrations once as a pre-deploy or release step. Do not run migrations

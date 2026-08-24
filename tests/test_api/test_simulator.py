@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -5,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -21,6 +22,7 @@ from src.core.db_models import (
     ParkingReservation,
     ParkingSession,
     ParkingUser,
+    ReportDailyUsage,
     RewardTransaction,
     Vehicle,
 )
@@ -36,6 +38,7 @@ from src.models.schemas import (
     ReservationStatus,
     SlotStatus,
 )
+from src.services.report_evidence import ReportEvidenceStorage, StoredReportEvidence
 
 
 @dataclass(slots=True)
@@ -640,6 +643,336 @@ async def test_other_wrong_parking_reason_requires_meaningful_description(
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_known_exhausted_report_quota_rejects_before_storage_upload(
+    simulator_api: SimulatorApi,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
+        wrong_parking_report_daily_limit=1
+    )
+    first = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        json={
+            "user_id": "USER-001",
+            "slot_id": "F1-D01",
+            "reason_code": "WRONG_SLOT",
+        },
+    )
+    assert first.status_code == 201
+
+    upload_calls = 0
+
+    async def upload(*_args, **_kwargs):
+        nonlocal upload_calls
+        upload_calls += 1
+        raise AssertionError("storage upload must not run")
+
+    monkeypatch.setattr(ReportEvidenceStorage, "upload", upload)
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        data={
+            "user_id": "USER-001",
+            "slot_id": "F1-D02",
+            "reason_code": "CROSSED_LINE",
+        },
+        files={"evidence": ("scene.jpg", b"\xff\xd8\xffscene", "image/jpeg")},
+    )
+
+    assert response.status_code == 429
+    assert response.json()["error"]["code"] == "REPORT_DAILY_LIMIT_REACHED"
+    assert int(response.headers["Retry-After"]) > 0
+    assert response.headers[REQUEST_ID_HEADER]
+    assert upload_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_report_quota_race_loser_deletes_uploaded_evidence(
+    simulator_api: SimulatorApi,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
+        wrong_parking_report_daily_limit=1
+    )
+    both_uploaded = asyncio.Event()
+    uploaded_paths: list[str] = []
+    deleted_paths: list[str] = []
+
+    async def upload(_self, *, report_id: str, data: bytes, content_type: str, **_kwargs):
+        path = f"reports/{report_id}/evidence.jpg"
+        uploaded_paths.append(path)
+        if len(uploaded_paths) == 2:
+            both_uploaded.set()
+        await asyncio.wait_for(both_uploaded.wait(), timeout=5)
+        return StoredReportEvidence(path, content_type, len(data))
+
+    async def delete_evidence(_self, storage_path: str | None):
+        if storage_path is not None:
+            deleted_paths.append(storage_path)
+        return True
+
+    monkeypatch.setattr(ReportEvidenceStorage, "upload", upload)
+    monkeypatch.setattr(ReportEvidenceStorage, "delete", delete_evidence)
+
+    async def submit(slot_id: str):
+        return await simulator_api.client.post(
+            "/api/v1/reports/wrong-parking",
+            data={
+                "user_id": "USER-001",
+                "slot_id": slot_id,
+                "reason_code": "CROSSED_LINE",
+            },
+            files={"evidence": ("scene.jpg", b"\xff\xd8\xffscene", "image/jpeg")},
+        )
+
+    responses = await asyncio.gather(submit("F1-D01"), submit("F1-D02"))
+
+    assert sorted(response.status_code for response in responses) == [201, 429]
+    assert len(uploaded_paths) == 2
+    assert len(deleted_paths) == 1
+    assert deleted_paths[0] in uploaded_paths
+
+
+@pytest.mark.asyncio
+async def test_report_multipart_without_content_length_still_succeeds(
+    simulator_api: SimulatorApi,
+):
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
+        demo_mode=True,
+        supabase_url=None,
+        supabase_service_role_key=None,
+    )
+    request = simulator_api.client.build_request(
+        "POST",
+        "/api/v1/reports/wrong-parking",
+        data={
+            "user_id": "USER-001",
+            "slot_id": "F1-D01",
+            "reason_code": "CROSSED_LINE",
+        },
+        files={"evidence": ("scene.png", b"\x89PNG\r\n\x1a\nscene", "image/png")},
+    )
+    del request.headers["Content-Length"]
+
+    response = await simulator_api.client.send(request)
+
+    assert response.status_code == 201
+    assert response.json()["data"]["evidence_content_type"] == "image/png"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("filename", "content_type", "data"),
+    [
+        ("scene.jpg", "image/jpeg", b"\xff\xd8\xffscene"),
+        ("scene.png", "image/png", b"\x89PNG\r\n\x1a\nscene"),
+        ("scene.webp", "image/webp", b"RIFF\x04\x00\x00\x00WEBPscene"),
+    ],
+)
+async def test_report_api_accepts_valid_evidence_signatures(
+    simulator_api: SimulatorApi,
+    filename: str,
+    content_type: str,
+    data: bytes,
+):
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
+        demo_mode=True,
+        supabase_url=None,
+        supabase_service_role_key=None,
+    )
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        data={
+            "user_id": "USER-001",
+            "slot_id": "F1-D01",
+            "reason_code": "CROSSED_LINE",
+        },
+        files={"evidence": (filename, data, content_type)},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"]["evidence_content_type"] == content_type
+
+
+@pytest.mark.asyncio
+async def test_report_api_rejects_mime_spoofing_without_storage_upload(
+    simulator_api: SimulatorApi,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    upload_calls = 0
+
+    async def upload(*_args, **_kwargs):
+        nonlocal upload_calls
+        upload_calls += 1
+        raise AssertionError("storage upload must not run")
+
+    monkeypatch.setattr(ReportEvidenceStorage, "upload", upload)
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        data={
+            "user_id": "USER-001",
+            "slot_id": "F1-D01",
+            "reason_code": "CROSSED_LINE",
+        },
+        files={"evidence": ("spoofed.png", b"\xff\xd8\xffjpeg", "image/png")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "REPORT_EVIDENCE_INVALID"
+    assert upload_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_storage_failure_does_not_consume_report_quota(
+    simulator_api: SimulatorApi,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
+        wrong_parking_report_daily_limit=1
+    )
+
+    async def upload(*_args, **_kwargs):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "REPORT_EVIDENCE_STORAGE_UNCONFIGURED",
+                "message": "Storage unavailable.",
+            },
+        )
+
+    monkeypatch.setattr(ReportEvidenceStorage, "upload", upload)
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        data={
+            "user_id": "USER-001",
+            "slot_id": "F1-D01",
+            "reason_code": "CROSSED_LINE",
+        },
+        files={"evidence": ("scene.jpg", b"\xff\xd8\xffscene", "image/jpeg")},
+    )
+
+    assert response.status_code == 503
+    async with simulator_api.session_factory() as session:
+        usage_rows = await session.scalar(select(func.count()).select_from(ReportDailyUsage))
+    assert usage_rows == 0
+
+
+@pytest.mark.asyncio
+async def test_unknown_slot_does_not_upload_or_consume_report_quota(
+    simulator_api: SimulatorApi,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
+        wrong_parking_report_daily_limit=1
+    )
+    upload_calls = 0
+
+    async def upload(*_args, **_kwargs):
+        nonlocal upload_calls
+        upload_calls += 1
+        raise AssertionError("storage upload must not run")
+
+    monkeypatch.setattr(ReportEvidenceStorage, "upload", upload)
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        data={
+            "user_id": "USER-001",
+            "slot_id": "F1-D99",
+            "reason_code": "CROSSED_LINE",
+        },
+        files={"evidence": ("scene.jpg", b"\xff\xd8\xffscene", "image/jpeg")},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "SLOT_NOT_FOUND"
+    assert upload_calls == 0
+    async with simulator_api.session_factory() as session:
+        usage_rows = await session.scalar(select(func.count()).select_from(ReportDailyUsage))
+    assert usage_rows == 0
+
+
+@pytest.mark.asyncio
+async def test_oversized_declared_report_body_is_rejected_early(
+    simulator_api: SimulatorApi,
+):
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        content=b"not-read",
+        headers={
+            "Content-Type": "multipart/form-data; boundary=unused",
+            "Content-Length": str(5_000_000 + 64 * 1024 + 1),
+        },
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "REPORT_EVIDENCE_TOO_LARGE"
+
+
+@pytest.mark.asyncio
+async def test_report_multipart_rejects_too_many_fields(
+    simulator_api: SimulatorApi,
+):
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        files={
+            "user_id": (None, "USER-001"),
+            "slot_id": (None, "F1-D01"),
+            "reason_code": (None, "CROSSED_LINE"),
+            "observed_plate_number": (None, "51A-123.45"),
+            "description": (None, "Description"),
+            "extra": (None, "not allowed"),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_authenticated_user_mismatch_does_not_upload_or_consume_report_quota(
+    simulator_api: SimulatorApi,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def resident_user() -> CurrentUser:
+        return CurrentUser(
+            id=uuid4(),
+            email="resident@example.com",
+            full_name="Resident",
+            role=AppRole.USER,
+            parking_user_id="USER-001",
+        )
+
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
+        demo_mode=False,
+        wrong_parking_report_daily_limit=1,
+    )
+    simulator_api.application.dependency_overrides[get_optional_current_user] = resident_user
+    upload_calls = 0
+
+    async def upload(*_args, **_kwargs):
+        nonlocal upload_calls
+        upload_calls += 1
+        raise AssertionError("storage upload must not run")
+
+    monkeypatch.setattr(ReportEvidenceStorage, "upload", upload)
+    response = await simulator_api.client.post(
+        "/api/v1/reports/wrong-parking",
+        data={
+            "user_id": "USER-002",
+            "slot_id": "F1-D01",
+            "reason_code": "CROSSED_LINE",
+        },
+        files={"evidence": ("scene.jpg", b"\xff\xd8\xffscene", "image/jpeg")},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "PARKING_OWNERSHIP_MISMATCH"
+    assert upload_calls == 0
+    async with simulator_api.session_factory() as session:
+        usage_rows = await session.scalar(select(func.count()).select_from(ReportDailyUsage))
+    assert usage_rows == 0
 
 
 async def _create_lifecycle_report(

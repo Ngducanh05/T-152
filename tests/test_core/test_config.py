@@ -4,6 +4,16 @@ from pydantic import ValidationError
 from src.core.config import Settings
 
 
+def test_wrong_parking_report_daily_limit_defaults_to_unlimited() -> None:
+    assert Settings().wrong_parking_report_daily_limit == 0
+
+
+@pytest.mark.parametrize("value", [-1, 101])
+def test_wrong_parking_report_daily_limit_enforces_bounds(value: int) -> None:
+    with pytest.raises(ValidationError):
+        Settings(wrong_parking_report_daily_limit=value)
+
+
 def test_development_defaults_remain_valid(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DEBUG", raising=False)
     settings = Settings(_env_file=None)
