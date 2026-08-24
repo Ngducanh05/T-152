@@ -33,7 +33,7 @@ const createdReport: WrongParkingReport = {
 };
 
 describe("WrongParkingReportDialog", () => {
-  it("submits a standard reason immediately with normalized optional fields", async () => {
+  it("selects a standard reason before submitting normalized optional fields", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn(async () => createdReport);
     render(
@@ -46,7 +46,7 @@ describe("WrongParkingReportDialog", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Thêm thông tin" }));
+    await user.click(screen.getByRole("button", { name: /Xe đỗ chéo vạch/ }));
     await user.type(
       screen.getByLabelText("Biển số quan sát được (không bắt buộc)"),
       "51a-123.45",
@@ -55,7 +55,7 @@ describe("WrongParkingReportDialog", () => {
       screen.getByLabelText(/Mô tả.*không bắt buộc/),
       "  Xe đỗ chéo sang ô bên cạnh.  ",
     );
-    await user.click(screen.getByRole("button", { name: "Gửi: Xe đỗ chéo vạch" }));
+    await user.click(screen.getByRole("button", { name: /Gửi báo cáo/ }));
 
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(onSubmit).toHaveBeenCalledWith({
@@ -68,7 +68,7 @@ describe("WrongParkingReportDialog", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Đã gửi báo cáo");
   });
 
-  it("does not require typing for a standard reason", async () => {
+  it("does not submit a standard reason until the user confirms", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn(async () => createdReport);
     render(
@@ -81,7 +81,10 @@ describe("WrongParkingReportDialog", () => {
     );
 
     await user.selectOptions(screen.getByLabelText("Ô cần phản ánh"), "F1-A02");
-    await user.click(screen.getByRole("button", { name: "Gửi: Xe chắn lối đi" }));
+    await user.click(screen.getByRole("button", { name: /Xe chắn lối đi/ }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Biển số quan sát được (không bắt buộc)")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /Gửi báo cáo/ }));
     expect(onSubmit).toHaveBeenCalledWith({
       slotId: "F1-A02",
       reasonCode: "BLOCKING_ACCESS",
@@ -107,12 +110,13 @@ describe("WrongParkingReportDialog", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Thêm thông tin" }));
+    await user.click(screen.getByRole("button", { name: /Xe đỗ chéo vạch/ }));
+    expect(onSubmit).not.toHaveBeenCalled();
     await user.upload(
       screen.getByLabelText(/^Ảnh hiện trường \(không bắt buộc\)/),
       evidence,
     );
-    await user.click(screen.getByRole("button", { name: "Gửi: Xe đỗ chéo vạch" }));
+    await user.click(screen.getByRole("button", { name: /Gửi báo cáo/ }));
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({ evidence }),
@@ -133,7 +137,7 @@ describe("WrongParkingReportDialog", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Lý do khác" }));
-    const submit = screen.getByRole("button", { name: "Gửi báo cáo lý do khác" });
+    const submit = screen.getByRole("button", { name: /Gửi báo cáo/ });
     expect(submit).toBeDisabled();
     await user.type(screen.getByLabelText(/Mô tả.*bắt buộc/), "Sai");
     expect(submit).toBeDisabled();
@@ -155,8 +159,9 @@ describe("WrongParkingReportDialog", () => {
       />,
     );
 
-    const reason = screen.getByRole("button", { name: "Gửi: Xe đỗ sai ô" });
-    await user.dblClick(reason);
+    await user.click(screen.getByRole("button", { name: /Xe đỗ sai ô/ }));
+    const submit = screen.getByRole("button", { name: /Gửi báo cáo/ });
+    await user.dblClick(submit);
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(screen.getByRole("status")).toHaveTextContent("đang được gửi");
     resolveSubmit(createdReport);

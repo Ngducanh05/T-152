@@ -18,6 +18,7 @@ import type { ParkingIdentity } from "@/lib/auth";
 import type {
   ChatUiAction,
   AdjacentSlotObservedStatus,
+  FloorId,
   FloorScopedId,
   ParkingPreference,
   RecommendationCandidate,
@@ -208,6 +209,13 @@ function preferencesFor(value: ParkingPreference) {
   };
 }
 
+function floorIdFromNode(nodeId: FloorScopedId): FloorId | undefined {
+  const floorId = nodeId.slice(0, 2);
+  return floorId === "F1" || floorId === "F2" || floorId === "F3"
+    ? floorId
+    : undefined;
+}
+
 export function useParkingWorkflow(
   data: WorkflowData,
   api: WorkflowApi = parkSmartApi,
@@ -326,6 +334,7 @@ export function useParkingWorkflow(
           const result = await api.recommend({
             user_id: identity.userId,
             start_node_id: nodeId,
+            floor_id: floorIdFromNode(nodeId),
             charging_required: deferredPreference === "EV",
             accessible_required: deferredPreference === "ACCESSIBLE",
             near_elevator: deferredPreference === "NEAR_ELEVATOR",
@@ -371,6 +380,7 @@ export function useParkingWorkflow(
       const result = await api.recommend({
         user_id: identity.userId,
         start_node_id: startNodeId,
+        floor_id: floorIdFromNode(startNodeId),
         charging_required: preferences.chargingRequired,
         accessible_required: preferences.accessibleRequired,
         near_elevator: preferences.nearElevator,

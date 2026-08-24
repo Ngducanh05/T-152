@@ -11,7 +11,7 @@ identity cho tài khoản người dùng mới. Role và quyền admin luôn l�
 backend quản lý, không tin role trong token metadata.
 
 Demo mặc định dùng `USER-001` và `VEHICLE-001`. Khi bật `DEMO_MODE` và
-`SIMULATOR_ENABLED`, operator có thể đưa demo về baseline: 40 ô, 39 AVAILABLE,
+`SIMULATOR_ENABLED`, operator có thể đưa demo về baseline: 120 ô, 119 AVAILABLE,
 0 RESERVED, 1 OCCUPIED; chỉ `F1-B03` bị chiếm bởi `SIM-CAR-02`.
 
 ## Công nghệ và yêu cầu
@@ -129,7 +129,8 @@ uv run python scripts\seed_demo.py
 Lần thứ hai phải báo `0 row(s) created`. Script gọi trực tiếp
 `src/core/seed.py` qua async SQLAlchemy session đã cấu hình. Nó chỉ thêm dữ liệu
 canonical còn thiếu, không reset trạng thái mutable của slot, reservation hoặc
-parking session.
+parking session. Baseline canonical hiện có 120 slot: mỗi tầng F1/F2/F3 có 40
+slot. Khi Supabase mới chỉ có F1, chạy seed sẽ bổ sung 80 slot và graph F2/F3.
 
 ## 5. Khởi động FastAPI
 
@@ -159,7 +160,9 @@ Mở:
   nội bộ, không xuất hiện trong bộ chọn vị trí, tên vị trí hoặc marker. Hướng rẽ được tính
   deterministic từ `route.polyline`, không được suy diễn từ LLM prose.
 - `http://localhost:3000/admin` cho dashboard vận hành có map. Ô có report `OPEN` giữ màu
-  trạng thái và có viền/icon/badge đỏ; click ô để resolve, reopen hoặc hard-delete report.
+  trạng thái và có viền/icon/badge đỏ; click ô để mở chi tiết/report/observation. Panel
+  chi tiết ô có thể đóng hoặc đóng bằng cách click lại ô. Dashboard không hiển thị
+  simulator controls; simulator API chỉ còn phục vụ development/test có kiểm soát.
 
 Backend và PostgreSQL phải đang chạy. `/admin` hoạt động không bearer token chỉ
 khi `DEMO_MODE=true`; ngoài demo mode, backend yêu cầu role `admin`.
@@ -167,6 +170,9 @@ khi `DEMO_MODE=true`; ngoài demo mode, backend yêu cầu role `admin`.
 Để kiểm thử đăng nhập thật, đặt `DEMO_MODE=false` và `NEXT_PUBLIC_DEMO_MODE=false`.
 Không để hai giá trị này lệch nhau. Người dùng mới có thể thêm xe đầu tiên sau khi
 đăng ký; admin phải được operator đổi `profiles.app_role` thành `admin`.
+Browser lưu Supabase session trong `sessionStorage` với storage key riêng cho từng tab,
+cho phép mở user và admin đồng thời mà không thay session của nhau. Đóng tab kết thúc
+session của tab đó; không duplicate một tab đã đăng nhập nếu cần hai identity độc lập.
 
 ## 7. Reset demo một bước
 
@@ -271,9 +277,10 @@ có cấu trúc.
 
 ## 12. Demo report lifecycle
 
-1. Tại `/`, chạm **Báo xe đỗ sai**, chọn ô và reason. Ảnh hiện trường là tùy chọn để admin
-   xác minh nhanh hơn. Với reason chuẩn không cần nhập mô tả; report không làm thay đổi
-   trạng thái ô.
+1. Tại `/`, chạm **Báo xe đỗ sai**, chọn ô rồi chọn reason. Chọn reason chỉ đánh dấu lựa
+   chọn, không gửi API. Form sau đó cho nhập biển số, mô tả và ảnh hiện trường tùy chọn;
+   user phải bấm **Gửi báo cáo** riêng. Popup cuộn trong viewport và giữ nút gửi ở đáy.
+   Với reason chuẩn không cần nhập mô tả; report không làm thay đổi trạng thái ô.
 2. Tại `/admin`, tìm viền đỏ và badge OPEN trên map, click ô để mở drawer; ảnh được mở qua
    signed URL ngắn hạn và bucket không public.
 3. Resolve report với version hiện tại và outcome bắt buộc. Cảnh báo chỉ biến mất khi ô không còn report OPEN;
@@ -301,7 +308,8 @@ chỉ là tín hiệu làm mới.
 
 Admin có thể click trực tiếp ô trên bản đồ để xem trạng thái, report hoặc observation đang
 chờ; thao tác đổi `AVAILABLE`/`OCCUPIED` dùng endpoint admin và Parking State Service, không
-được ghi đè `RESERVED`. Phối cảnh hầm giữ góc nhìn isometric cố định; lối lên/xuống cùng
+được ghi đè `RESERVED`. Panel chi tiết có nút đóng rõ ràng và việc đóng bỏ luôn selected
+outline. Dashboard không còn khu điều khiển mô phỏng. Phối cảnh hầm giữ góc nhìn isometric cố định; lối lên/xuống cùng
 tông màu mặt đường, nằm ngoài mép làn xe, dùng vạch dọc theo hướng dốc và lối xuống có
 miệng hầm cùng tường chắn riêng. Xe đang đỗ dùng khối hộp chữ nhật isometric. F2/F3 dùng lại
 renderer và hình học chuẩn hiện tại. Reward summary phía user được polling cùng
@@ -312,6 +320,10 @@ nhiều lần; guard in-flight vẫn chặn double-click gọi API song song. V�
 active, nút **Tôi đã đến nơi** xác nhận vị trí tại đúng slot, refetch version authoritative,
 rồi mới gọi confirm parking trong cùng một thao tác chủ đích. Chọn slot trong LocationPicker
 riêng lẻ vẫn không tự động xác nhận đỗ.
+
+Recommendation nhận `floor_id` tùy chọn. Khi user nói “tầng 1/2/3” hoặc F1/F2/F3,
+Agent truyền hard constraint này vào Core Service và không bắt user chọn thêm khu A/B/C/D.
+Các nút preference có sạc/dễ tiếp cận/gần thang máy cũng gửi tầng suy ra từ vị trí đã xác nhận.
 
 Reservation/session, lỗi và thông báo mutation được giữ trong priority dock sticky dưới
 header, nên vẫn thao tác được khi lịch sử chat dài. Sau khi xác nhận đỗ, user có thể tùy chọn

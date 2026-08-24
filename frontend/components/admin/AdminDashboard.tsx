@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ReportDetailDrawer,
@@ -32,7 +32,6 @@ import type {
 
 const ZONES: ZoneId[] = ["A", "B", "C", "D"];
 const REPORT_REFRESH_INTERVAL_MS = 3_000;
-type MutationName = "park" | "leave" | "reset" | "scenario";
 type FilterValue<T extends string> = T | "ALL";
 
 function formatUpdatedAt(value: string | null) {
@@ -53,9 +52,6 @@ export function AdminDashboard() {
   const [statusFilter, setStatusFilter] =
     useState<FilterValue<SlotStatus>>("ALL");
   const [evFilter, setEvFilter] = useState<"ALL" | "EV" | "NO_EV">("ALL");
-  const [parkSlotId, setParkSlotId] = useState("");
-  const [parkVehicleId, setParkVehicleId] = useState("SIM-CAR-01");
-  const [leaveSlotId, setLeaveSlotId] = useState("");
   const [events, setEvents] = useState<ParkingEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
@@ -72,7 +68,6 @@ export function AdminDashboard() {
   const [selectedObservationId, setSelectedObservationId] = useState<string | null>(null);
   const [observationRejectReason, setObservationRejectReason] = useState("");
   const [observationMutationPending, setObservationMutationPending] = useState(false);
-  const [mutationPending, setMutationPending] = useState<MutationName | null>(null);
   const [operationNotice, setOperationNotice] = useState<string | null>(null);
   const [selectedReportSlotId, setSelectedReportSlotId] = useState<string | null>(null);
   const [selectedAdminSlotId, setSelectedAdminSlotId] = useState<string | null>(null);
@@ -86,7 +81,6 @@ export function AdminDashboard() {
     useState<PendingReportMutation | null>(null);
   const [newReportNotice, setNewReportNotice] =
     useState<WrongParkingReport | null>(null);
-  const mutationLockRef = useRef(false);
   const reportMutationLockRef = useRef(false);
   const observedReportIdsRef = useRef<Set<string> | null>(null);
 
@@ -273,22 +267,6 @@ export function AdminDashboard() {
     };
   }, [loadObservations, loadReports]);
 
-  const availableSlots = useMemo(
-    () => data.slots.filter((slot) => slot.status === "AVAILABLE"),
-    [data.slots],
-  );
-  const occupiedSlots = useMemo(
-    () => data.slots.filter((slot) => slot.status === "OCCUPIED"),
-    [data.slots],
-  );
-
-  const effectiveParkSlotId = availableSlots.some((slot) => slot.id === parkSlotId)
-    ? parkSlotId
-    : availableSlots[0]?.id ?? "";
-  const effectiveLeaveSlotId = occupiedSlots.some((slot) => slot.id === leaveSlotId)
-    ? leaveSlotId
-    : occupiedSlots[0]?.id ?? "";
-
   const filteredSlots = useMemo(
     () =>
       data.slots.filter((slot) => {
@@ -331,10 +309,6 @@ export function AdminDashboard() {
   const availableEv = data.slots.filter(
     (slot) => slot.has_charger && slot.status === "AVAILABLE",
   ).length;
-  const leaveSlot =
-    occupiedSlots.find((slot) => slot.id === effectiveLeaveSlotId) ?? null;
-  const operationDisabled = mutationPending !== null;
-
   async function loadDrawerReports(slotId = selectedReportSlotId) {
     if (!slotId) return;
     setDrawerLoading(true);
@@ -385,6 +359,12 @@ export function AdminDashboard() {
   }
 
   function inspectSlot(slotId: string) {
+    if (selectedAdminSlotId === slotId) {
+      setSelectedAdminSlotId(null);
+      setSelectedObservationId(null);
+      setSelectedReportSlotId(null);
+      return;
+    }
     const slot = data.slots.find((candidate) => candidate.id === slotId);
     setZoneFilter("ALL");
     setStatusFilter("ALL");
@@ -559,58 +539,6 @@ export function AdminDashboard() {
     }
   }
 
-  async function runMutation(
-    name: MutationName,
-    action: () => Promise<unknown>,
-    successMessage: string,
-  ) {
-    if (mutationLockRef.current) return;
-    mutationLockRef.current = true;
-    setMutationPending(name);
-    setOperationNotice(null);
-    try {
-      await action();
-      await data.refresh();
-      await loadEvents();
-      setOperationNotice(successMessage);
-    } catch (error) {
-      setOperationNotice(
-        formatApiErrorForOperator(error, "Không thể hoàn tất thao tác vận hành."),
-      );
-    } finally {
-      mutationLockRef.current = false;
-      setMutationPending(null);
-    }
-  }
-
-  function submitPark(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!effectiveParkSlotId || !/^SIM-CAR-[0-9]{2,}$/.test(parkVehicleId)) return;
-    void runMutation(
-      "park",
-      () =>
-        parkSmartApi.parkSimulatedVehicle({
-          slot_id: effectiveParkSlotId,
-          vehicle_id: parkVehicleId,
-        }),
-      `Đã ghi nhận ${parkVehicleId} đỗ tại ${formatParkingLocation(effectiveParkSlotId)}.`,
-    );
-  }
-
-  function submitLeave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!leaveSlot?.occupied_by_vehicle_id) return;
-    void runMutation(
-      "leave",
-      () =>
-        parkSmartApi.leaveSimulatedVehicle({
-          slot_id: leaveSlot.id,
-          vehicle_id: leaveSlot.occupied_by_vehicle_id as string,
-        }),
-      `Đã ghi nhận xe rời ${formatParkingLocation(leaveSlot.id)}.`,
-    );
-  }
-
   async function retryDashboard() {
     setOperationNotice(null);
     await Promise.allSettled([data.refresh(), loadEvents(), loadReports()]);
@@ -622,7 +550,7 @@ export function AdminDashboard() {
         <div>
           <p className="eyebrow green">TRUNG TÂM VẬN HÀNH</p>
           <h1>Bảng điều khiển vận hành</h1>
-          <p>Quản trị viên thử nghiệm · các thao tác mô phỏng chỉ hoạt động trong chế độ thử nghiệm</p>
+          <p>Theo dõi trạng thái bãi xe và xác minh đóng góp cộng đồng</p>
         </div>
         <div className="admin-top-actions">
           <button
@@ -760,14 +688,14 @@ export function AdminDashboard() {
                     </div>
                     <button
                       type="button"
-                      className="modal-close"
+                      className="secondary-button admin-detail-close"
                       aria-label="Đóng chi tiết ô đỗ"
                       onClick={() => {
                         setSelectedAdminSlotId(null);
                         setSelectedObservationId(null);
                         setSelectedReportSlotId(null);
                       }}
-                    >×</button>
+                    >Đóng ×</button>
                   </header>
                   <dl>
                     <div><dt>Trạng thái</dt><dd>{formatSlotStatus(selectedAdminSlot.status)}</dd></div>
@@ -876,46 +804,6 @@ export function AdminDashboard() {
               )}
             </div>
 
-            <aside className="admin-operations card">
-              <div className="admin-section-heading">
-                <div><p className="eyebrow green">MÔ PHỎNG BÃI XE</p><h2>Điều khiển thủ công</h2></div>
-              </div>
-              <form onSubmit={submitPark}>
-                <h3>Ghi nhận xe đỗ</h3>
-                <label>Ô đang trống
-                  <select value={effectiveParkSlotId} onChange={(event) => setParkSlotId(event.target.value)} disabled={operationDisabled || availableSlots.length === 0}>
-                    {availableSlots.map((slot) => <option key={slot.id} value={slot.id}>{formatParkingLocation(slot.id)}</option>)}
-                  </select>
-                </label>
-                <label>Mã xe mô phỏng
-                  <input value={parkVehicleId} onChange={(event) => setParkVehicleId(event.target.value.toUpperCase())} pattern="SIM-CAR-[0-9]{2,}" placeholder="SIM-CAR-01" disabled={operationDisabled} />
-                </label>
-                <button className="primary-button" disabled={operationDisabled || !effectiveParkSlotId || !/^SIM-CAR-[0-9]{2,}$/.test(parkVehicleId)}>
-                  {mutationPending === "park" ? "Đang xử lý…" : "Ghi nhận xe đỗ"}
-                </button>
-              </form>
-
-              <form onSubmit={submitLeave}>
-                <h3>Ghi nhận xe rời ô</h3>
-                <label>Ô đang có xe
-                  <select value={effectiveLeaveSlotId} onChange={(event) => setLeaveSlotId(event.target.value)} disabled={operationDisabled || occupiedSlots.length === 0}>
-                    {occupiedSlots.map((slot) => <option key={slot.id} value={slot.id}>{formatParkingLocation(slot.id)} · {slot.occupied_by_vehicle_id}</option>)}
-                  </select>
-                </label>
-                <button className="secondary-button" disabled={operationDisabled || !leaveSlot?.occupied_by_vehicle_id}>
-                  {mutationPending === "leave" ? "Đang xử lý…" : "Ghi nhận xe rời ô"}
-                </button>
-              </form>
-
-              <div className="admin-scenario-actions">
-                <button type="button" className="secondary-button" disabled={operationDisabled} onClick={() => void runMutation("reset", () => parkSmartApi.resetDemo(), "Đã đưa dữ liệu thử nghiệm về trạng thái ban đầu.")}>
-                  {mutationPending === "reset" ? "Đang đặt lại…" : "Đặt lại dữ liệu thử nghiệm"}
-                </button>
-                <button type="button" className="primary-button" disabled={operationDisabled} onClick={() => void runMutation("scenario", () => parkSmartApi.runFixedScenario(), "Đã chạy xong kịch bản cố định.")}>
-                  {mutationPending === "scenario" ? "Đang chạy…" : "Chạy kịch bản cố định"}
-                </button>
-              </div>
-            </aside>
           </section>
 
           <section className="card admin-events" aria-labelledby="pending-contributions-title">

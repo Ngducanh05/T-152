@@ -10,3 +10,13 @@ Create a private Supabase Storage bucket before enabling production report evide
 The image is optional. The FastAPI backend uploads at most one image per report to a
 backend-generated path and gives admins five-minute signed URLs for review. A report without
 an image follows the same verification and reward lifecycle.
+
+The user UI must not upload merely because a reason was selected. It first reveals the
+optional plate, description and image fields, then sends the report only after the explicit
+submit action. The modal keeps its action reachable through an internal scroll region and a
+sticky submit dock on short viewports.
+
+Admin evidence access remains tied to report authorization and uses a short-lived signed
+URL. Hard-delete removes the Storage object together with the report row; any retained
+reward-ledger source reference must not copy the image path, plate number or description
+into reward metadata.

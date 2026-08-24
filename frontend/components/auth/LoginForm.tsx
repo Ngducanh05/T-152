@@ -82,11 +82,6 @@ export function LoginForm({
         <span className={styles.logoMark} aria-hidden="true">P</span>
         <div>
           <h1>{mode === "login" ? "Đăng nhập ParkSmart" : "Đăng ký ParkSmart"}</h1>
-          <p>
-            {mode === "login"
-              ? "Su dung tai khoan ParkSmart cua ban."
-              : "Tu dang ky luon tao tai khoan nguoi dung."}
-          </p>
         </div>
       </div>
 
@@ -187,10 +182,6 @@ export function LoginForm({
             ? "Đăng nhập"
             : "Đăng ký"}
       </button>
-
-      <p className={styles.securityNote}>
-        Vai tro do backend ParkSmart quyet dinh; man hinh nay khong cho phep chon quyen.
-      </p>
     </form>
   );
 }
