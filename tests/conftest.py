@@ -9,7 +9,11 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from src.main import app
+from tests.database_safety import enforce_safe_test_database
+
+enforce_safe_test_database()
+
+from src.main import app  # noqa: E402  # Safety guard must run before app import.
 
 
 @pytest_asyncio.fixture
