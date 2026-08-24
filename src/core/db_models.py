@@ -1,10 +1,11 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -106,6 +107,39 @@ class ParkingUser(Base):
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     current_node_id: Mapped[str | None] = mapped_column(
         ForeignKey("map_nodes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+
+class AgentDailyUsage(Base):
+    __tablename__ = "agent_daily_usage"
+    __table_args__ = (
+        CheckConstraint(
+            "request_count >= 0",
+            name="ck_agent_daily_usage_request_count_nonnegative",
+        ),
+        Index("ix_agent_daily_usage_usage_date", "usage_date"),
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("parking_users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    usage_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    request_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -532,6 +566,7 @@ class WrongParkingReport(Base):
 
 __all__ = [
     "ActorType",
+    "AgentDailyUsage",
     "AppRoleEnum",
     "Base",
     "MapEdge",

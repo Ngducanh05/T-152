@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     speech_timeout_seconds: float = Field(default=60.0, gt=0.0, le=120.0)
     speech_max_retries: int = Field(default=1, ge=0, le=2)
     agent_thread_ttl_seconds: float = Field(default=3600.0, gt=0.0)
+    agent_daily_request_limit: int = Field(default=0, ge=0, le=1000)
+    agent_max_steps: int = Field(default=8, ge=1, le=8)
 
     cors_origins: str = Field(
         default="http://localhost:3000",

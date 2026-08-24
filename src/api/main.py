@@ -79,7 +79,10 @@ def create_app(
             application.state.agent = (
                 agent_override
                 if agent_override is not None
-                else build_graph(checkpointer=checkpointer)
+                else build_graph(
+                    checkpointer=checkpointer,
+                    max_steps=application_settings.agent_max_steps,
+                )
             )
         application.state.agent_thread_owners = {}
         application.state.agent_thread_locks = {}

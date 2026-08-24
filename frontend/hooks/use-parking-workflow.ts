@@ -719,6 +719,14 @@ export function useParkingWorkflow(
     } catch (error) {
       if (
         error instanceof ApiError &&
+        error.status === 429 &&
+        error.code === "AGENT_DAILY_LIMIT_REACHED"
+      ) {
+        setNotice(
+          "Bạn đã dùng hết lượt trợ lý AI hôm nay. Bạn vẫn có thể tìm chỗ, giữ chỗ và báo sự cố bằng các thao tác có sẵn. Vui lòng thử lại vào ngày mai.",
+        );
+      } else if (
+        error instanceof ApiError &&
         error.status === 503 &&
         error.code === "AGENT_TOOL_UNAVAILABLE"
       ) {

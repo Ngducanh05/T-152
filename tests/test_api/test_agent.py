@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -9,10 +10,12 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from langchain_core.messages import AIMessage, ToolMessage
 
 from src.api.main import REQUEST_ID_HEADER, create_app
+from src.core.agent_quota import AgentQuotaExceeded
 from src.core.config import Settings
 
 
@@ -292,7 +295,14 @@ async def test_disabled_agent_returns_503_without_building_or_invoking_graph():
         Settings(_env_file=None, agent_enabled=False, llm_api_key=None),
         agent_override=fake_agent,
     )
-    with patch("src.api.main.build_graph") as build_graph:
+    consume_quota = AsyncMock()
+    with (
+        patch("src.api.main.build_graph") as build_graph,
+        patch(
+            "src.api.routes.agent.AgentQuotaService.consume",
+            consume_quota,
+        ),
+    ):
         async with application.router.lifespan_context(application):
             assert application.state.agent is None
             assert application.state.agent_checkpointer is None
@@ -309,6 +319,136 @@ async def test_disabled_agent_returns_503_without_building_or_invoking_graph():
     assert response.json()["error"]["code"] == "AGENT_DISABLED"
     assert fake_agent.calls == []
     build_graph.assert_not_called()
+    consume_quota.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_configured_step_budget_is_passed_when_building_graph():
+    built_agent = FakeAgent()
+    application = create_app(
+        Settings(_env_file=None, agent_max_steps=4, llm_api_key=None)
+    )
+    with patch("src.api.main.build_graph", return_value=built_agent) as build_graph:
+        async with application.router.lifespan_context(application):
+            assert application.state.agent is built_agent
+
+    build_graph.assert_called_once()
+    assert build_graph.call_args.kwargs["max_steps"] == 4
+    assert build_graph.call_args.kwargs["checkpointer"] is not None
+
+
+@pytest.mark.asyncio
+async def test_daily_quota_exceeded_returns_429_without_invoking_agent():
+    fake_agent = FakeAgent()
+    reset_at = datetime.now(UTC) + timedelta(hours=1)
+    application = create_app(
+        Settings(_env_file=None, agent_daily_request_limit=1, llm_api_key=None),
+        agent_override=fake_agent,
+    )
+    consume_quota = AsyncMock(side_effect=AgentQuotaExceeded(reset_at))
+    with patch(
+        "src.api.routes.agent.AgentQuotaService.consume",
+        consume_quota,
+    ):
+        async with application.router.lifespan_context(application):
+            async with AsyncClient(
+                transport=ASGITransport(app=application),
+                base_url="http://test",
+            ) as client:
+                response = await client.post(
+                    "/api/v1/agent/chat",
+                    json=_payload(),
+                )
+
+    assert response.status_code == 429
+    assert response.json()["error"]["code"] == "AGENT_DAILY_LIMIT_REACHED"
+    assert response.json()["error"]["request_id"]
+    assert response.headers[REQUEST_ID_HEADER] == response.json()["error"]["request_id"]
+    assert int(response.headers["Retry-After"]) > 0
+    consume_quota.assert_awaited_once_with("USER-001")
+    assert fake_agent.calls == []
+
+
+@pytest.mark.asyncio
+async def test_vehicle_validation_failure_does_not_consume_quota():
+    fake_agent = FakeAgent()
+    application = create_app(
+        Settings(_env_file=None, agent_daily_request_limit=1, llm_api_key=None),
+        agent_override=fake_agent,
+    )
+    consume_quota = AsyncMock()
+    invalid_vehicle = HTTPException(
+        status_code=403,
+        detail={
+            "code": "PARKING_VEHICLE_MISMATCH",
+            "message": "The vehicle is not owned by this user.",
+        },
+    )
+    with (
+        patch(
+            "src.api.routes.agent.resolve_vehicle_id",
+            AsyncMock(side_effect=invalid_vehicle),
+        ),
+        patch(
+            "src.api.routes.agent.AgentQuotaService.consume",
+            consume_quota,
+        ),
+    ):
+        async with application.router.lifespan_context(application):
+            async with AsyncClient(
+                transport=ASGITransport(app=application),
+                base_url="http://test",
+            ) as client:
+                response = await client.post(
+                    "/api/v1/agent/chat",
+                    json=_payload(),
+                )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "PARKING_VEHICLE_MISMATCH"
+    consume_quota.assert_not_awaited()
+    assert fake_agent.calls == []
+
+
+@pytest.mark.asyncio
+async def test_parking_ownership_failure_does_not_consume_quota():
+    fake_agent = FakeAgent()
+    application = create_app(
+        Settings(_env_file=None, agent_daily_request_limit=1, llm_api_key=None),
+        agent_override=fake_agent,
+    )
+    consume_quota = AsyncMock()
+    ownership_error = HTTPException(
+        status_code=403,
+        detail={
+            "code": "PARKING_OWNERSHIP_MISMATCH",
+            "message": "The parking identity is not owned by this user.",
+        },
+    )
+    with (
+        patch(
+            "src.api.routes.agent.resolve_parking_user_id",
+            side_effect=ownership_error,
+        ),
+        patch(
+            "src.api.routes.agent.AgentQuotaService.consume",
+            consume_quota,
+        ),
+    ):
+        async with application.router.lifespan_context(application):
+            async with AsyncClient(
+                transport=ASGITransport(app=application),
+                base_url="http://test",
+            ) as client:
+                response = await client.post(
+                    "/api/v1/agent/chat",
+                    json=_payload(),
+                )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "PARKING_OWNERSHIP_MISMATCH"
+    consume_quota.assert_not_awaited()
+    assert fake_agent.calls == []
 
 
 @pytest.mark.asyncio

@@ -83,6 +83,8 @@ cấu hình; giá trị rỗng nghĩa là tính năng tương ứng chưa đư�
 | `NEXT_PUBLIC_AGENT_ENABLED` | Không | `true` | Render Agent composer và cho phép frontend gọi Agent chat |
 | `NEXT_PUBLIC_SPEECH_ENABLED` | Không | `true` (`false` trong public beta example) | Hiển thị và khởi tạo Voice STT/TTS |
 | `AGENT_ENABLED` | Không | `true` | Khởi tạo LangGraph và phục vụ Agent chat |
+| `AGENT_DAILY_REQUEST_LIMIT` | Không | `0` | Số request Agent tối đa mỗi user/ngày UTC; `0` tắt quota |
+| `AGENT_MAX_STEPS` | Không | `8` | Step budget cho một Agent request, từ 1 đến 8 |
 | `SPEECH_ENABLED` | Không | `true` | Cho phép backend transcription endpoint |
 | `LLM_API_KEY` | Khi Agent hoặc Speech backend bật trong production | Rỗng | API key dùng chung cho LLM/STT provider |
 | `LLM_MODEL` | Không | `gpt-4o-mini` | Model dùng cho LangGraph Agent |
@@ -107,6 +109,11 @@ Public beta dùng `NEXT_PUBLIC_AGENT_ENABLED=true` và
 `next build`; cần build lại frontend sau khi đổi cờ. Backend production chỉ được thiếu
 `LLM_API_KEY` khi cả `AGENT_ENABLED=false` và `SPEECH_ENABLED=false`; các validation
 production khác vẫn giữ nguyên.
+
+Public beta production dùng `AGENT_DAILY_REQUEST_LIMIT=5` và
+`AGENT_MAX_STEPS=4`. Quota được lưu trong PostgreSQL theo trusted parking user và ngày UTC;
+request đã qua validation được tính ngay trước khi gọi graph, kể cả khi provider hoặc tool
+lỗi sau đó.
 
 ## 2. Khởi động PostgreSQL
 

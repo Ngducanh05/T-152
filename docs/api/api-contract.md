@@ -111,6 +111,7 @@ HTTP status codes and stable error codes follow the implementation guide:
 | 400 | INVALID_TRANSITION |
 | 404 | SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ROUTE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND |
 | 409 | SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS |
+| 429 | AGENT_DAILY_LIMIT_REACHED |
 | 503 | AGENT_DISABLED, AGENT_TOOL_UNAVAILABLE |
 
 Voice transcription additionally uses:
@@ -212,9 +213,18 @@ Agent timeout, missing LLM configuration, or unexpected Agent/tool failures retu
 with `AGENT_TOOL_UNAVAILABLE` in the standard `ErrorResponse` envelope and include the request
 ID. This endpoint does not provide streaming, WebSocket, voice, or QR behavior.
 
-When `AGENT_ENABLED=false`, the endpoint still applies its existing authentication and
-ownership checks, then returns HTTP 503 with `AGENT_DISABLED` in the standard error envelope.
-No LLM client or LangGraph graph is created and no graph is invoked.
+When `AGENT_ENABLED=false`, the authentication dependency still applies, then the handler
+returns HTTP 503 with `AGENT_DISABLED` before ownership/vehicle resolution or quota
+consumption. No LLM client or LangGraph graph is created and no graph is invoked.
+
+When `AGENT_DAILY_REQUEST_LIMIT` is greater than zero, each authenticated/trusted parking
+user may invoke the Agent at most that many times per UTC day. A request is charged after
+authentication, ownership and vehicle validation succeed and immediately before graph
+invocation. Later provider timeout or tool failure does not refund the request. Exceeding the
+limit returns HTTP 429 with `AGENT_DAILY_LIMIT_REACHED`, the standard error envelope,
+`X-Request-ID`, and a positive integer `Retry-After` header counting seconds until the next
+UTC day. `AGENT_DAILY_REQUEST_LIMIT=0` disables quota persistence. `AGENT_MAX_STEPS` controls
+the per-request graph step budget and is constrained to 1–8.
 
 ## Speech transcription
 

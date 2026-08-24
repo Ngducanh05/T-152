@@ -12,6 +12,25 @@ def test_development_defaults_remain_valid(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.demo_mode is True
     assert settings.agent_enabled is True
     assert settings.speech_enabled is True
+    assert settings.agent_daily_request_limit == 0
+    assert settings.agent_max_steps == 8
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("agent_daily_request_limit", -1),
+        ("agent_daily_request_limit", 1001),
+        ("agent_max_steps", 0),
+        ("agent_max_steps", 9),
+    ],
+)
+def test_agent_quota_and_step_budget_bounds_are_enforced(
+    field: str,
+    value: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{field: value})
 
 
 def test_production_with_demo_mode_is_rejected() -> None:

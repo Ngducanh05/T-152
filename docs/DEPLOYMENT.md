@@ -16,6 +16,8 @@ SUPABASE_REPORT_EVIDENCE_BUCKET=wrong-parking-evidence
 LLM_API_KEY=<server only>
 LLM_MODEL=<configured model>
 AGENT_ENABLED=true
+AGENT_DAILY_REQUEST_LIMIT=5
+AGENT_MAX_STEPS=4
 SPEECH_ENABLED=false
 
 CORS_ORIGINS=<actual deployed frontend origin>
@@ -63,7 +65,7 @@ alembic heads
 Expected target:
 
 ```text
-20260824_0010
+20260824_0011
 ```
 
 Run migrations once as a pre-deploy or release step. Do not run migrations
