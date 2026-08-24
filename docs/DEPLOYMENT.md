@@ -113,6 +113,101 @@ Verify that `parking_slots` contains 40 rows for each of F1, F2 and F3 (120 tota
 that `map_nodes` contains 55/53/53 rows respectively. A database with only 40 F1 slots is
 not ready for the multi-floor UI.
 
+## Backend Test Database Safety
+
+Never run `pytest` while `DATABASE_URL` points to production, Supabase Direct, a
+Supabase pooler, or any other remote database. The root pytest configuration validates the
+effective `DATABASE_URL` before importing the application or collecting database fixtures.
+It only accepts loopback hosts and the repository's Docker Compose database service; there
+is no bypass flag.
+
+Start and verify the repository PostgreSQL service before running backend tests:
+
+```bash
+docker compose up -d database
+docker compose exec database pg_isready -U parksmart -d parksmart
+export DATABASE_URL="postgresql+asyncpg://parksmart:parksmart@127.0.0.1:5432/parksmart"
+uv run pytest -q
+unset DATABASE_URL
+```
+
+Do not proceed unless `pg_isready` reports that the local service accepts connections.
+Keep the explicit local override only in the same Git Bash terminal that runs pytest, and
+always unset it immediately after the test command. The safety guard's failure message
+intentionally does not print the configured URL, credentials, query string, or remote
+project identifier.
+
+## Daily Quota Data API Hardening Verification
+
+After Alembic `20260824_0012`, apply the Supabase-specific
+`docs/database/P152_SUPABASE_PLATFORM_HARDENING.sql` through the controlled platform
+procedure. Do not encode Supabase roles in an Alembic migration.
+
+Verify RLS is enabled for both quota tables:
+
+```sql
+select
+    c.relname as table_name,
+    c.relrowsecurity as rls_enabled
+from pg_class as c
+join pg_namespace as n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relname in ('agent_daily_usage', 'report_daily_usage')
+order by c.relname;
+```
+
+Expected: exactly two rows and `rls_enabled=true` for both. Verify neither Data API role
+has table privileges, including privileges inherited through other grants:
+
+```sql
+with targets(table_name) as (
+    values ('agent_daily_usage'), ('report_daily_usage')
+), data_api_roles(role_name) as (
+    values ('anon'), ('authenticated')
+)
+select
+    targets.table_name,
+    data_api_roles.role_name,
+    has_table_privilege(
+        data_api_roles.role_name,
+        format('public.%I', targets.table_name),
+        'SELECT'
+    ) as can_select,
+    has_table_privilege(
+        data_api_roles.role_name,
+        format('public.%I', targets.table_name),
+        'INSERT'
+    ) as can_insert,
+    has_table_privilege(
+        data_api_roles.role_name,
+        format('public.%I', targets.table_name),
+        'UPDATE'
+    ) as can_update,
+    has_table_privilege(
+        data_api_roles.role_name,
+        format('public.%I', targets.table_name),
+        'DELETE'
+    ) as can_delete
+from targets
+cross join data_api_roles
+order by targets.table_name, data_api_roles.role_name;
+```
+
+Expected: all four privilege columns are `false` for all four table/role combinations.
+
+Before public beta, list leaked pytest schemas in production:
+
+```sql
+select schema_name
+from information_schema.schemata
+where left(schema_name, 5) = 'test_'
+order by schema_name;
+```
+
+Production must return zero `test_*` schemas before release. Treat any result as a release
+blocker and clean it up through a separately reviewed production operation; never use a
+pytest run or this runbook verification step to delete production schemas automatically.
+
 ## Health Checks
 
 Liveness:
