@@ -203,6 +203,16 @@ Browser lưu Supabase session trong `sessionStorage` với storage key riêng ch
 cho phép mở user và admin đồng thời mà không thay session của nhau. Đóng tab kết thúc
 session của tab đó; không duplicate một tab đã đăng nhập nếu cần hai identity độc lập.
 
+Với public beta production, không cấp admin bằng thao tác development thủ công hoặc
+token metadata. Dùng runbook [Admin Provisioning](docs/ADMIN_PROVISIONING.md); tài liệu
+này bổ sung, không thay thế flow development/demo hiện tại. Release gate yêu cầu:
+
+- email Supabase của dedicated admin đã confirmed;
+- `profiles.app_role=admin`, còn `parking_user_id` và `default_vehicle_id` đều null;
+- user thường gọi admin API nhận `403 ADMIN_REQUIRED`;
+- request anonymous gọi admin API nhận `401 AUTH_REQUIRED`;
+- production đặt `DEMO_MODE=false` và `SIMULATOR_ENABLED=false`.
+
 ## 7. Reset demo một bước
 
 Khi backend đang chạy với `DEMO_MODE=true` và `SIMULATOR_ENABLED=true`:

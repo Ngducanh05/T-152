@@ -6,6 +6,7 @@
 APP_ENV=production
 DEBUG=false
 DEMO_MODE=false
+SIMULATOR_ENABLED=false
 DATABASE_URL=<postgresql+asyncpg production URL>
 
 SUPABASE_URL=<server-side Supabase project URL>
@@ -55,6 +56,26 @@ it, rebuild and redeploy the frontend. Before launch, open `/privacy`, verify th
 `mailto:` link targets the monitored inbox, and send a test deletion request. Complete an
 admin hard-delete smoke test as well: confirm that it removes both the database report row
 and its private Storage object.
+
+## Production Admin RBAC Release Gate
+
+Use [ADMIN_PROVISIONING.md](ADMIN_PROVISIONING.md) for public beta production admin
+promotion and emergency revoke. It supplements, and does not replace, the existing
+development/demo runbook.
+
+Do not release until all checks pass:
+
+- The dedicated admin account has a confirmed Supabase email.
+- Its `profiles.app_role` is `admin`.
+- Its `profiles.parking_user_id` and `profiles.default_vehicle_id` are null.
+- `GET /api/v1/auth/me` returns the backend-owned admin profile without a parking identity.
+- A regular user calling representative admin APIs receives `403 ADMIN_REQUIRED`.
+- An anonymous request to an admin API receives `401 AUTH_REQUIRED`.
+- Production has `DEMO_MODE=false`.
+- Production has `SIMULATOR_ENABLED=false`.
+
+Never provision a production admin through frontend metadata, an anon key, browser console,
+or by enabling demo/simulator behavior.
 
 If using the existing Next.js rewrite:
 
