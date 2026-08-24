@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
@@ -182,6 +183,9 @@ export function LoginForm({
             ? "Đăng nhập"
             : "Đăng ký"}
       </button>
+      <p className={styles.securityNote}>
+        <Link href="/privacy">Quyền riêng tư</Link>
+      </p>
     </form>
   );
 }

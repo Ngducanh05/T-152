@@ -39,6 +39,7 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<public browser key>
 NEXT_PUBLIC_DEMO_MODE=false
 NEXT_PUBLIC_AGENT_ENABLED=true
 NEXT_PUBLIC_SPEECH_ENABLED=false
+NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL=<real monitored email>
 ```
 
 `AGENT_ENABLED` and `SPEECH_ENABLED` default to `true`. In production,
@@ -47,6 +48,13 @@ without that key only when both flags are `false`. All other production safety v
 remains required. Keep the backend and `NEXT_PUBLIC_` flags aligned. Public environment
 variables are frozen into the browser bundle during `next build`, so rebuild the frontend
 after changing them.
+
+`NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL` is also a Next.js build-time variable. A real,
+monitored contact email is a release blocker before opening the public beta. After changing
+it, rebuild and redeploy the frontend. Before launch, open `/privacy`, verify that the
+`mailto:` link targets the monitored inbox, and send a test deletion request. Complete an
+admin hard-delete smoke test as well: confirm that it removes both the database report row
+and its private Storage object.
 
 If using the existing Next.js rewrite:
 

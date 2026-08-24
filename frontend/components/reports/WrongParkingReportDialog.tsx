@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState } from "react";
 
 import { ApiError, formatApiErrorForOperator } from "@/lib/api";
@@ -254,10 +255,20 @@ export function WrongParkingReportDialog({
                         ? `Đã chọn: ${evidence.name}`
                         : "Thêm ảnh giúp bộ phận vận hành xác minh nhanh hơn."}
                     </small>
-                    <small>
-                      Ảnh chỉ được dùng để xác minh báo cáo. Không chụp khuôn mặt hoặc thông tin cá nhân không cần thiết.
-                    </small>
                   </label>
+                  <p className="report-privacy-notice">
+                    Ảnh chỉ được dùng để xác minh báo cáo. Không chụp khuôn mặt
+                    hoặc thông tin cá nhân không cần thiết. Admin được ủy quyền
+                    có thể xem ảnh và xóa ảnh cùng report. Xem{" "}
+                    <Link
+                      href="/privacy"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Quyền riêng tư (mở trong tab mới)
+                    </Link>
+                    .
+                  </p>
                 </div>
                 <div className="report-submit-dock">
                   <button

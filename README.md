@@ -83,6 +83,7 @@ cấu hình; giá trị rỗng nghĩa là tính năng tương ứng chưa đư�
 | `NEXT_PUBLIC_DEMO_MODE` | Không | `false` | Bật identity demo ở frontend khi phát triển offline |
 | `NEXT_PUBLIC_AGENT_ENABLED` | Không | `true` | Render Agent composer và cho phép frontend gọi Agent chat |
 | `NEXT_PUBLIC_SPEECH_ENABLED` | Không | `true` (`false` trong public beta example) | Hiển thị và khởi tạo Voice STT/TTS |
+| `NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL` | Trước public beta | Rỗng | Email công khai, có người theo dõi để tiếp nhận yêu cầu xóa dữ liệu |
 | `AGENT_ENABLED` | Không | `true` | Khởi tạo LangGraph và phục vụ Agent chat |
 | `AGENT_DAILY_REQUEST_LIMIT` | Không | `0` | Số request Agent tối đa mỗi user/ngày UTC; `0` tắt quota |
 | `AGENT_MAX_STEPS` | Không | `8` | Step budget cho một Agent request, từ 1 đến 8 |
@@ -110,6 +111,12 @@ Public beta dùng `NEXT_PUBLIC_AGENT_ENABLED=true` và
 `next build`; cần build lại frontend sau khi đổi cờ. Backend production chỉ được thiếu
 `LLM_API_KEY` khi cả `AGENT_ENABLED=false` và `SPEECH_ENABLED=false`; các validation
 production khác vẫn giữ nguyên.
+
+Trước khi mở public beta, bắt buộc cấu hình
+`NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL` bằng một email thật đang được theo dõi. Trang
+`/privacy` chỉ tạo liên kết `mailto:` khi giá trị hợp lệ; nếu thiếu hoặc sai định dạng,
+trang sẽ thông báo kênh liên hệ đang được cấu hình. Đây là biến build-time của Next.js,
+vì vậy phải build và redeploy frontend sau khi thay đổi.
 
 Public beta production dùng `AGENT_DAILY_REQUEST_LIMIT=5` và
 `AGENT_MAX_STEPS=4`. Quota được lưu trong PostgreSQL theo trusted parking user và ngày UTC;

@@ -264,8 +264,55 @@ describe("WrongParkingReportDialog", () => {
 
     expect(
       screen.getByText(
-        "Ảnh chỉ được dùng để xác minh báo cáo. Không chụp khuôn mặt hoặc thông tin cá nhân không cần thiết.",
+        /Ảnh chỉ được dùng để xác minh báo cáo[\s\S]*Admin được ủy quyền/,
       ),
     ).toBeVisible();
+    const privacyLink = screen.getByRole("link", {
+      name: "Quyền riêng tư (mở trong tab mới)",
+    });
+    expect(privacyLink).toHaveAttribute("href", "/privacy");
+    expect(privacyLink).toHaveAttribute("target", "_blank");
+    expect(privacyLink).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("does not close, submit, or reset the draft when the privacy link is activated", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onSubmit = vi.fn(async () => createdReport);
+    const evidence = new File(["jpeg"], "draft.jpg", { type: "image/jpeg" });
+    render(
+      <WrongParkingReportDialog
+        slots={canonicalMap.slots}
+        initialSlotId="F1-D01"
+        rewardPoints={20}
+        onClose={onClose}
+        onSubmit={onSubmit}
+      />,
+    );
+    const reason = screen.getByRole("button", { name: /Xe đỗ chéo vạch/ });
+    await user.click(reason);
+    await user.type(screen.getByLabelText(/Mô tả.*không bắt buộc/), "Bản nháp riêng tư");
+    await user.upload(screen.getByLabelText(/^Ảnh hiện trường/), evidence);
+    const privacyLink = screen.getByRole("link", {
+      name: "Quyền riêng tư (mở trong tab mới)",
+    });
+    expect(privacyLink).toHaveAttribute("href", "/privacy");
+    expect(privacyLink).toHaveAttribute("target", "_blank");
+    expect(privacyLink).toHaveAttribute("rel", "noopener noreferrer");
+
+    await user.click(privacyLink);
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(reason).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText(/Mô tả.*không bắt buộc/)).toHaveValue(
+      "Bản nháp riêng tư",
+    );
+    const evidenceInput = screen.getByLabelText(
+      /^Ảnh hiện trường/,
+    ) as HTMLInputElement;
+    expect(evidenceInput.files).toHaveLength(1);
+    expect(evidenceInput.files?.item(0)).toBe(evidence);
+    expect(screen.getByText("Đã chọn: draft.jpg")).toBeVisible();
   });
 });
