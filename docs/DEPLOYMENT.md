@@ -31,6 +31,60 @@ PORT=<provided by platform, optional locally because fallback is 8000>
 `SUPABASE_SERVICE_ROLE_KEY` must never be exposed to frontend code and must never
 be configured as a `NEXT_PUBLIC_` variable.
 
+## Private Backend Image: Local Build to Render
+
+Use this path when Render cannot use the GitHub Organization App: build the backend
+locally, push it to a **private** Docker Hub repository, then configure a Render Web
+Service with **Existing Image**. The repository must remain private because installed
+Python packages can still be extracted from a container image even when repository files
+are excluded from its filesystem.
+
+Build and inspect the exact Linux platform locally before publishing:
+
+```bash
+docker buildx build --platform linux/amd64 --load \
+  -t parksmart-ai-api:local-verify .
+docker image inspect parksmart-ai-api:local-verify \
+  --format '{{.Os}}/{{.Architecture}}'
+```
+
+Create an immutable release tag from the Git commit. Never use `latest` for production:
+
+```bash
+export IMAGE_REPOSITORY="<docker-hub-namespace>/<private-repository>"
+export IMAGE_TAG="$(git rev-parse --short=12 HEAD)"
+export IMAGE_REF="${IMAGE_REPOSITORY}:${IMAGE_TAG}"
+
+docker buildx build --platform linux/amd64 --load -t "${IMAGE_REF}" .
+docker push "${IMAGE_REF}"
+```
+
+Do not put a Docker Hub username, token, or real image reference in the repository. Use a
+Docker Hub access token limited to read-only access for Render's private registry
+credential. Keep push credentials only in the operator's local credential store; Render
+does not need write access.
+
+In Render:
+
+1. Create or update a Web Service using **Existing Image** and the immutable
+   `<docker-hub-namespace>/<private-repository>:<short-git-sha>` reference.
+2. Attach the read-only private registry credential.
+3. Configure backend environment variables in Render; do not bake secrets,
+   `DATABASE_URL`, or `PORT` into the image.
+4. Set Render's **Health Check Path** to `/api/v1/health/database`. This database
+   readiness endpoint must succeed before Render treats the deployment as healthy.
+   The image command binds `0.0.0.0` and reads Render's `PORT` automatically.
+5. Run Alembic through the controlled release step, never in the image `CMD`.
+
+`/health` is only the process liveness endpoint and is appropriate for a local container
+smoke test. It does not prove that the deployed service can reach its database. Use
+`/api/v1/health/database` for deployment readiness and as the Render Health Check Path.
+
+An image-backed Render service does not auto-deploy from Git. For every release, build and
+push a new short-SHA tag, update the service to that immutable image reference, then use
+**Manual Deploy** / **Deploy latest reference** as appropriate. Record the deployed tag so
+rollback selects a known immutable image rather than rebuilding source.
+
 ## Frontend Required Build/Runtime Environment
 
 ```text
@@ -210,7 +264,7 @@ pytest run or this runbook verification step to delete production schemas automa
 
 ## Health Checks
 
-Liveness:
+Process liveness and local container smoke test only:
 
 ```text
 GET /health
@@ -222,8 +276,8 @@ Database readiness:
 GET /api/v1/health/database
 ```
 
-Use the database health endpoint as the deployment readiness check when the
-platform supports it.
+Use the database health endpoint as the deployment readiness check and configure it as
+Render's Health Check Path. Do not substitute the liveness endpoint for this release gate.
 
 When the frontend opens, `BackendReadinessGate` calls
 `GET /api/v1/health/database` before mounting `AuthProvider` or any application
