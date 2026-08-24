@@ -1,16 +1,19 @@
-.git
-.gitignore
-.env
-.venv
-__pycache__
-*.pyc
-.pytest_cache
-.ruff_cache
-docs/
-presentation/
-eval/
-*.md
-!requirements.txt
-.dockerignore
-Dockerfile
-docker-compose.yml
+# Default-deny the Docker build context. Only backend packaging inputs follow.
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!uv.lock
+!src/
+!src/**
+
+# Secrets and generated/local files remain excluded after the src negation.
+**/.env*
+**/__pycache__/
+**/.cache/
+**/*.pyc
+**/*.pyo
+**/*.log
+**/*.bak
+**/*.backup
+**/*~
