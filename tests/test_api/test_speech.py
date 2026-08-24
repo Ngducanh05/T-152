@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from starlette.requests import Request
 
 from src.api.main import create_app
 from src.core.config import Settings
@@ -41,6 +42,33 @@ async def test_transcribes_supported_audio_without_persisting_it(speech_app):
     }
     transcribe.assert_awaited_once()
     assert transcribe.await_args.kwargs["media_type"] == "audio/webm"
+
+
+async def test_disabled_speech_returns_503_without_reading_or_transcribing_audio():
+    application = create_app(
+        Settings(_env_file=None, speech_enabled=False, llm_api_key=None)
+    )
+    transcribe = AsyncMock()
+    read_body = AsyncMock(return_value=b"voice")
+    with (
+        patch("src.api.routes.speech.transcribe_audio", transcribe),
+        patch.object(Request, "body", read_body),
+    ):
+        async with application.router.lifespan_context(application):
+            async with AsyncClient(
+                transport=ASGITransport(app=application),
+                base_url="http://test",
+            ) as client:
+                response = await client.post(
+                    "/api/v1/speech/transcriptions",
+                    content=b"voice",
+                    headers={"Content-Type": "audio/webm"},
+                )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "SPEECH_DISABLED"
+    read_body.assert_not_awaited()
+    transcribe.assert_not_awaited()
 
 
 async def test_rejects_empty_or_unsupported_audio(speech_app):

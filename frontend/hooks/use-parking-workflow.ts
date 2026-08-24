@@ -15,6 +15,7 @@ import {
   rotateThreadId,
 } from "@/lib/demo";
 import type { ParkingIdentity } from "@/lib/auth";
+import { isAgentEnabled } from "@/lib/public-config";
 import type {
   ChatUiAction,
   AdjacentSlotObservedStatus,
@@ -660,6 +661,7 @@ export function useParkingWorkflow(
   }
 
   async function sendAgentMessage(message: string, appendUserMessage = true) {
+    if (!isAgentEnabled()) return null;
     const trimmed = message.trim();
     if (!trimmed || !threadId || chatInFlightRef.current) return null;
     chatInFlightRef.current = true;
@@ -716,6 +718,14 @@ export function useParkingWorkflow(
       return response.message;
     } catch (error) {
       if (
+        error instanceof ApiError &&
+        error.status === 429 &&
+        error.code === "AGENT_DAILY_LIMIT_REACHED"
+      ) {
+        setNotice(
+          "Bạn đã dùng hết lượt trợ lý AI hôm nay. Bạn vẫn có thể tìm chỗ, giữ chỗ và báo sự cố bằng các thao tác có sẵn. Vui lòng thử lại vào ngày mai.",
+        );
+      } else if (
         error instanceof ApiError &&
         error.status === 503 &&
         error.code === "AGENT_TOOL_UNAVAILABLE"

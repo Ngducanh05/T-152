@@ -89,6 +89,61 @@ afterEach(() => {
 });
 
 describe("AuthProvider signup", () => {
+  it("forwards only full_name and ignores caller-supplied identity metadata", async () => {
+    const { ApiError } = await import("@/lib/api");
+    const supabase = createSupabaseMock({
+      data: {
+        user: { id: profile.id },
+        session: { access_token: "signup-access-token" },
+      },
+      error: null,
+    });
+    mocks.createBrowserSupabaseClient.mockReturnValue(supabase);
+    mocks.getCurrentUser.mockRejectedValue(
+      new ApiError({
+        code: "PROFILE_NOT_FOUND",
+        message: "The ParkSmart profile does not exist.",
+        status: 403,
+      }),
+    );
+    mocks.onboardCurrentUser.mockResolvedValue(profile);
+    let authValue = null as unknown as AuthValue;
+
+    render(
+      <AuthProvider>
+        <AuthProbe onValue={(value) => { authValue = value; }} />
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(mocks.createBrowserSupabaseClient).toHaveBeenCalledOnce(),
+    );
+
+    const maliciousInput = {
+      fullName: "  User  ",
+      email: "  user@example.com  ",
+      password: "safe-test-password",
+      role: "admin",
+      app_role: "admin",
+      parking_user_id: "ATTACKER-USER",
+      default_vehicle_id: "ATTACKER-VEHICLE",
+    } as Parameters<AuthValue["signUp"]>[0];
+    await authValue.signUp(maliciousInput);
+
+    expect(supabase.auth.signUp).toHaveBeenCalledOnce();
+    expect(supabase.auth.signUp).toHaveBeenCalledWith({
+      email: "user@example.com",
+      password: "safe-test-password",
+      options: {
+        data: {
+          full_name: "User",
+        },
+      },
+    });
+    expect(mocks.onboardCurrentUser).toHaveBeenCalledOnce();
+    expect(mocks.onboardCurrentUser).toHaveBeenCalledWith();
+  });
+
   it("onboards the ParkSmart profile when signup returns a session", async () => {
     const { ApiError } = await import("@/lib/api");
     const supabase = createSupabaseMock({

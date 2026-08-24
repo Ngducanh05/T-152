@@ -11,10 +11,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 from alembic import command
 from src.core import database as core_database
 from src.core.db_models import (
+    AgentDailyUsage,
     Base,
     ParkingEvent,
     ParkingSlot,
     Profile,
+    ReportDailyUsage,
     WrongParkingReport,
 )
 from src.models.schemas import ErrorCode, WrongParkingReason, WrongParkingReportStatus
@@ -24,6 +26,8 @@ from src.services import database as compatibility_database
 from src.services import db_models as compatibility_models
 
 EXPECTED_TABLES = {
+    "agent_daily_usage",
+    "report_daily_usage",
     "profiles",
     "parking_users",
     "vehicles",
@@ -64,8 +68,10 @@ def test_parking_migration_follows_profiles_revision():
     contribution_revision = scripts.get_revision("0008")
     auth_report_merge_revision = scripts.get_revision("20260822_0009")
     integration_merge_revision = scripts.get_revision("20260824_0010")
+    agent_quota_revision = scripts.get_revision("20260824_0011")
+    report_quota_revision = scripts.get_revision("20260824_0012")
 
-    assert scripts.get_current_head() == "20260824_0010"
+    assert scripts.get_current_head() == "20260824_0012"
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
     assert location_cleanup_revision is not None
@@ -82,6 +88,76 @@ def test_parking_migration_follows_profiles_revision():
     assert set(auth_report_merge_revision.down_revision) == {"0007", "20260821_0008"}
     assert integration_merge_revision is not None
     assert set(integration_merge_revision.down_revision) == {"0008", "20260822_0009"}
+    assert agent_quota_revision is not None
+    assert agent_quota_revision.down_revision == "20260824_0010"
+    assert report_quota_revision is not None
+    assert report_quota_revision.down_revision == "20260824_0011"
+
+
+def test_agent_daily_usage_model_and_migration_constraints_match():
+    table = AgentDailyUsage.__table__
+    assert tuple(column.name for column in table.primary_key.columns) == (
+        "user_id",
+        "usage_date",
+    )
+    assert table.c.user_id.type.length == 64
+    assert table.c.request_count.nullable is False
+    assert table.c.created_at.type.timezone is True
+    assert table.c.updated_at.type.timezone is True
+    assert {
+        constraint.name for constraint in table.constraints
+    } >= {"ck_agent_daily_usage_request_count_nonnegative"}
+    assert {
+        index.name: tuple(column.name for column in index.columns)
+        for index in table.indexes
+    }["ix_agent_daily_usage_usage_date"] == ("usage_date",)
+    assert {
+        foreign_key.target_fullname for foreign_key in table.c.user_id.foreign_keys
+    } == {"parking_users.id"}
+
+    output = StringIO()
+    config = Config("alembic.ini", output_buffer=output)
+    config.attributes["configure_logger"] = False
+    command.upgrade(config, "20260824_0010:20260824_0011", sql=True)
+    migration_sql = output.getvalue()
+    assert "CREATE TABLE agent_daily_usage" in migration_sql
+    assert "PRIMARY KEY (user_id, usage_date)" in migration_sql
+    assert "request_count >= 0" in migration_sql
+    assert "FOREIGN KEY(user_id) REFERENCES parking_users (id) ON DELETE CASCADE" in migration_sql
+    assert "CREATE INDEX ix_agent_daily_usage_usage_date" in migration_sql
+
+
+def test_report_daily_usage_model_and_migration_constraints_match():
+    table = ReportDailyUsage.__table__
+    assert tuple(column.name for column in table.primary_key.columns) == (
+        "user_id",
+        "usage_date",
+    )
+    assert table.c.user_id.type.length == 64
+    assert table.c.submission_count.nullable is False
+    assert table.c.created_at.type.timezone is True
+    assert table.c.updated_at.type.timezone is True
+    assert {
+        constraint.name for constraint in table.constraints
+    } >= {"ck_report_daily_usage_submission_count_nonnegative"}
+    assert {
+        index.name: tuple(column.name for column in index.columns)
+        for index in table.indexes
+    }["ix_report_daily_usage_usage_date"] == ("usage_date",)
+    user_foreign_key = next(iter(table.c.user_id.foreign_keys))
+    assert user_foreign_key.target_fullname == "parking_users.id"
+    assert user_foreign_key.ondelete == "CASCADE"
+
+    output = StringIO()
+    config = Config("alembic.ini", output_buffer=output)
+    config.attributes["configure_logger"] = False
+    command.upgrade(config, "20260824_0011:20260824_0012", sql=True)
+    migration_sql = output.getvalue()
+    assert "CREATE TABLE report_daily_usage" in migration_sql
+    assert "PRIMARY KEY (user_id, usage_date)" in migration_sql
+    assert "submission_count >= 0" in migration_sql
+    assert "FOREIGN KEY(user_id) REFERENCES parking_users (id) ON DELETE CASCADE" in migration_sql
+    assert "CREATE INDEX ix_report_daily_usage_usage_date" in migration_sql
 
 
 def test_cold_start_sql_replaces_legacy_profile_enum_once():

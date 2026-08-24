@@ -9,6 +9,8 @@ import re
 from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from math import ceil
 from time import monotonic
 from typing import Any
 
@@ -24,6 +26,11 @@ from src.api.dependencies import (
     resolve_vehicle_id,
 )
 from src.api.ui_actions import derive_chat_ui_actions
+from src.core.agent_quota import (
+    AgentQuotaError,
+    AgentQuotaExceeded,
+    AgentQuotaService,
+)
 from src.core.database import get_session_factory
 from src.core.route_guidance import vietnamese_route_guidance
 from src.models.common import ErrorResponse, SuccessResponse
@@ -58,6 +65,31 @@ def _service_unavailable(message: str) -> HTTPException:
         detail={
             "code": ErrorCode.AGENT_TOOL_UNAVAILABLE.value,
             "message": message,
+        },
+    )
+
+
+def _agent_disabled() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": ErrorCode.AGENT_DISABLED.value,
+            "message": "The parking assistant is currently disabled.",
+        },
+    )
+
+
+def _daily_limit_reached(error: AgentQuotaExceeded) -> HTTPException:
+    retry_after = max(
+        1,
+        ceil((error.reset_at - datetime.now(UTC)).total_seconds()),
+    )
+    return HTTPException(
+        status_code=429,
+        headers={"Retry-After": str(retry_after)},
+        detail={
+            "code": ErrorCode.AGENT_DAILY_LIMIT_REACHED.value,
+            "message": "The daily parking assistant request limit has been reached.",
         },
     )
 
@@ -273,6 +305,7 @@ def _recommendation_fallback(slot_ids: list[str]) -> str:
     "/chat",
     response_model=SuccessResponse[ChatResponse],
     responses={
+        429: {"model": ErrorResponse},
         401: {"model": ErrorResponse},
         403: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
@@ -285,33 +318,64 @@ async def chat(
     session: SessionDependency,
     current_user: ParkingUserDependency,
 ) -> SuccessResponse[ChatResponse]:
-    user_id = resolve_parking_user_id(payload.user_id, current_user)
-    async with session.begin():
-        vehicle_id = await resolve_vehicle_id(
-            payload.vehicle_id,
-            current_user,
-            session,
-        )
+    settings = request.app.state.settings
+    if not settings.agent_enabled:
+        raise _agent_disabled()
 
+    user_id = resolve_parking_user_id(payload.user_id, current_user)
     request_id = _request_id(request)
     message_id = f"request:{request_id}"
-    runtime_context = AgentRuntimeContext(
-        user_id=user_id,
-        vehicle_id=vehicle_id,
-        request_id=request_id,
-        session_factory=get_session_factory(),
-        current_location=payload.current_location,
-    )
-    logger.info(
-        "agent_chat_started request_id=%s user_id=%s thread_id=%s",
-        request_id,
-        user_id,
-        payload.thread_id,
-    )
     try:
         async with _thread_invocation(
             request, payload.thread_id, user_id
         ) as namespaced_thread_id:
+            try:
+                async with session.begin():
+                    vehicle_id = await resolve_vehicle_id(
+                        payload.vehicle_id,
+                        current_user,
+                        session,
+                    )
+                    await AgentQuotaService(session, settings=settings).consume(user_id)
+            except AgentQuotaExceeded as error:
+                logger.info(
+                    "agent_quota_checked request_id=%s user_id=%s status=exceeded",
+                    request_id,
+                    user_id,
+                )
+                raise _daily_limit_reached(error) from error
+            except AgentQuotaError as error:
+                logger.warning(
+                    "agent_quota_checked request_id=%s user_id=%s status=error code=%s",
+                    request_id,
+                    user_id,
+                    error.code.value,
+                )
+                status_code = 404 if error.code is ErrorCode.USER_NOT_FOUND else 409
+                raise HTTPException(
+                    status_code=status_code,
+                    detail={"code": error.code.value, "message": error.message},
+                ) from error
+
+            logger.info(
+                "agent_quota_checked request_id=%s user_id=%s status=%s",
+                request_id,
+                user_id,
+                "disabled" if settings.agent_daily_request_limit == 0 else "consumed",
+            )
+            runtime_context = AgentRuntimeContext(
+                user_id=user_id,
+                vehicle_id=vehicle_id,
+                request_id=request_id,
+                session_factory=get_session_factory(),
+                current_location=payload.current_location,
+            )
+            logger.info(
+                "agent_chat_started request_id=%s user_id=%s thread_id=%s",
+                request_id,
+                user_id,
+                payload.thread_id,
+            )
             config = {"configurable": {"thread_id": namespaced_thread_id}}
             async with asyncio.timeout(request.app.state.agent_chat_timeout_seconds):
                 result = await request.app.state.agent.ainvoke(

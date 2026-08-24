@@ -32,7 +32,7 @@ ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 | WrongParkingReportVerificationOutcome | PENDING, CONFIRMED, REJECTED, DUPLICATE, UNVERIFIABLE |
 | RewardSourceType | ADJACENT_SLOT_OBSERVATION, WRONG_PARKING_REPORT |
 | RewardTransactionStatus | PENDING, EARNED, CANCELLED |
-| ErrorCode | Canonical values live in `src/models/common.py`; contribution/report additions include OBSERVATION_NOT_FOUND, OBSERVATION_ALREADY_EXISTS, OBSERVATION_EXPIRED, INVALID_OBSERVATION_TRANSITION, OBSERVATION_VERSION_CONFLICT, REWARD_ALREADY_SETTLED, REPORT_REWARD_DUPLICATE and CONTRIBUTION_DAILY_LIMIT_REACHED |
+| ErrorCode | Canonical values live in `src/models/schemas.py`; public feature availability codes include AGENT_DISABLED and SPEECH_DISABLED; contribution/report additions include OBSERVATION_NOT_FOUND, OBSERVATION_ALREADY_EXISTS, OBSERVATION_EXPIRED, INVALID_OBSERVATION_TRANSITION, OBSERVATION_VERSION_CONFLICT, REWARD_ALREADY_SETTLED, REPORT_REWARD_DUPLICATE and CONTRIBUTION_DAILY_LIMIT_REACHED |
 
 ## Data schemas
 
@@ -111,7 +111,8 @@ HTTP status codes and stable error codes follow the implementation guide:
 | 400 | INVALID_TRANSITION |
 | 404 | SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ROUTE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND |
 | 409 | SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS |
-| 503 | AGENT_TOOL_UNAVAILABLE |
+| 429 | AGENT_DAILY_LIMIT_REACHED |
+| 503 | AGENT_DISABLED, AGENT_TOOL_UNAVAILABLE |
 
 Voice transcription additionally uses:
 
@@ -120,7 +121,7 @@ Voice transcription additionally uses:
 | 400 | SPEECH_AUDIO_INVALID |
 | 413 | SPEECH_AUDIO_TOO_LARGE |
 | 422 | SPEECH_NO_TRANSCRIPT |
-| 503 | SPEECH_TRANSCRIPTION_UNAVAILABLE |
+| 503 | SPEECH_DISABLED, SPEECH_TRANSCRIPTION_UNAVAILABLE |
 | 504 | SPEECH_TRANSCRIPTION_TIMEOUT |
 
 Wrong-parking report lifecycle additionally uses:
@@ -212,6 +213,19 @@ Agent timeout, missing LLM configuration, or unexpected Agent/tool failures retu
 with `AGENT_TOOL_UNAVAILABLE` in the standard `ErrorResponse` envelope and include the request
 ID. This endpoint does not provide streaming, WebSocket, voice, or QR behavior.
 
+When `AGENT_ENABLED=false`, the authentication dependency still applies, then the handler
+returns HTTP 503 with `AGENT_DISABLED` before ownership/vehicle resolution or quota
+consumption. No LLM client or LangGraph graph is created and no graph is invoked.
+
+When `AGENT_DAILY_REQUEST_LIMIT` is greater than zero, each authenticated/trusted parking
+user may invoke the Agent at most that many times per UTC day. A request is charged after
+authentication, ownership and vehicle validation succeed and immediately before graph
+invocation. Later provider timeout or tool failure does not refund the request. Exceeding the
+limit returns HTTP 429 with `AGENT_DAILY_LIMIT_REACHED`, the standard error envelope,
+`X-Request-ID`, and a positive integer `Retry-After` header counting seconds until the next
+UTC day. `AGENT_DAILY_REQUEST_LIMIT=0` disables quota persistence. `AGENT_MAX_STEPS` controls
+the per-request graph step budget and is constrained to 1–8.
+
 ## Speech transcription
 
 ### `POST /api/v1/speech/transcriptions`
@@ -236,6 +250,9 @@ transcript is returned to the editable composer and is not automatically submitt
 Agent endpoint. Transcription uses a 60-second timeout and one retry for transient network,
 rate-limit, or provider failures by default.
 
+When `SPEECH_ENABLED=false`, the endpoint returns HTTP 503 with `SPEECH_DISABLED` before
+reading the request body or invoking the transcription provider.
+
 ## Wrong-parking reports
 
 ### `POST /api/v1/reports/wrong-parking`
@@ -248,8 +265,20 @@ changes `ParkingSlot.status`.
 The endpoint accepts either JSON (no image) or `multipart/form-data`. Multipart uses the
 same fields plus optional `evidence`. Evidence is never required; when supplied it must be
 JPEG, PNG, WebP, HEIC or HEIF and must not exceed `REPORT_EVIDENCE_MAX_BYTES`. The backend
-chooses the private Storage path. The response includes nullable `evidence_storage_path`,
+validates both the declared MIME type and the file signature, reads the upload with a bounded
+stream, and returns HTTP 413 with `REPORT_EVIDENCE_TOO_LARGE` when the configured byte limit
+is exceeded. Invalid, empty, spoofed or unsupported image content returns HTTP 400 with
+`REPORT_EVIDENCE_INVALID`. The backend chooses the private Storage path. The response includes nullable `evidence_storage_path`,
 `evidence_content_type` and `evidence_size_bytes`; it never exposes the service-role key.
+
+`WRONG_PARKING_REPORT_DAILY_LIMIT=0` disables the submission quota. When it is greater than
+zero, successful report creation atomically consumes one persistent quota unit per trusted
+parking user and UTC day, including duplicate reports and reports that receive no reward.
+Validation and Storage upload failures do not consume quota. An exhausted quota returns HTTP
+429 with `REPORT_DAILY_LIMIT_REACHED`, a positive `Retry-After` value until the next UTC day,
+the standard error envelope and `X-Request-ID`. A read-only preflight avoids known-unnecessary
+uploads; the transaction-time atomic consume remains authoritative under races, and a race
+loser's uploaded object is deleted.
 
 ### Admin lifecycle endpoints
 

@@ -49,6 +49,7 @@ vi.mock("@/components/auth/LogoutButton", () => ({
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 function workflowFixture(): ParkingWorkflow {
@@ -101,6 +102,57 @@ function workflowFixture(): ParkingWorkflow {
 }
 
 describe("user chat page", () => {
+  it("renders the Agent composer when Agent is enabled", () => {
+    vi.stubEnv("NEXT_PUBLIC_AGENT_ENABLED", "true");
+    const workflow = workflowFixture();
+    mocks.useParkSmartData.mockReturnValue({
+      map: canonicalMap,
+      slots: canonicalMap.slots,
+      status: parkingStatus,
+      currentLocation,
+      activeReservation: null,
+      activeSession: null,
+      lastUpdatedAt: null,
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+    mocks.useParkingWorkflow.mockReturnValue(workflow);
+
+    render(<Home />);
+
+    expect(screen.getByTestId("agent-composer")).toBeVisible();
+  });
+
+  it("replaces the Agent composer with the public fallback when disabled", () => {
+    vi.stubEnv("NEXT_PUBLIC_AGENT_ENABLED", "false");
+    const workflow = workflowFixture();
+    mocks.useParkSmartData.mockReturnValue({
+      map: canonicalMap,
+      slots: canonicalMap.slots,
+      status: parkingStatus,
+      currentLocation,
+      activeReservation: null,
+      activeSession: null,
+      lastUpdatedAt: null,
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+    mocks.useParkingWorkflow.mockReturnValue(workflow);
+
+    render(<Home />);
+
+    expect(screen.queryByTestId("agent-composer")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Trợ lý AI hiện đang tạm tắt. Bạn vẫn có thể sử dụng các thao tác tìm chỗ, giữ chỗ và báo sự cố.",
+      ),
+    ).toBeVisible();
+  });
+
   it("does not render ParkingMap or operational summaries and shows welcome actions", async () => {
     const user = userEvent.setup();
     const workflow = workflowFixture();
