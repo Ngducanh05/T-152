@@ -99,6 +99,19 @@ GET /api/v1/health/database
 Use the database health endpoint as the deployment readiness check when the
 platform supports it.
 
+When the frontend opens, `BackendReadinessGate` calls
+`GET /api/v1/health/database` before mounting `AuthProvider` or any application
+route. It shows the Render free-instance cold-start notice after about three
+seconds, retries failed checks sequentially, and gives the user a manual retry
+action after a readiness deadline of about 75 seconds. Each attempt has a
+10-second timeout, followed by a four-second retry delay; requests never overlap.
+After readiness succeeds, the gate stops checking and renders the application.
+
+This is a startup readiness gate, not a keep-alive mechanism. Do not add periodic
+pings after the application becomes ready. Keeping `AuthProvider` behind the gate
+also prevents session initialization and `/auth/me` calls from treating a backend
+cold start as an authentication failure.
+
 ## Supabase Storage Checklist
 
 - Bucket name: `wrong-parking-evidence`

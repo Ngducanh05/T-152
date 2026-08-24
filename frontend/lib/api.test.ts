@@ -36,6 +36,40 @@ describe("API envelope parsing", () => {
   });
 });
 
+describe("database readiness", () => {
+  it("checks the public database health URL with the supplied AbortSignal", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope({ database: "connected" })),
+    );
+    const authProvider = {
+      getAccessToken: vi.fn(async () => "access-token"),
+      refreshAccessToken: vi.fn(async () => "refreshed-token"),
+    };
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1/",
+      fetcher,
+      authProvider,
+    });
+    const controller = new AbortController();
+
+    await expect(
+      api.checkDatabaseHealth(controller.signal),
+    ).resolves.toEqual({ database: "connected" });
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      "http://api.test/api/v1/health/database",
+    );
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
+      signal: controller.signal,
+    });
+    expect(fetcher.mock.calls[0]?.[1]?.method).toBeUndefined();
+    expect(fetcher.mock.calls[0]?.[1]?.body).toBeUndefined();
+    expect(authProvider.getAccessToken).not.toHaveBeenCalled();
+    expect(authProvider.refreshAccessToken).not.toHaveBeenCalled();
+  });
+});
+
 describe("optional resources", () => {
   it("converts expected 404 responses to null", async () => {
     const fetcher = vi.fn<typeof fetch>(async () =>
