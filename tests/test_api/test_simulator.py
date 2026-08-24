@@ -329,13 +329,30 @@ async def test_reserved_slot_rejects_simulator_park(simulator_api: SimulatorApi)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("simulator_enabled", "demo_mode"),
-    [(False, True), (True, False)],
+    ("simulator_enabled", "demo_mode", "expected_status", "expected_code"),
+    [
+        pytest.param(
+            False,
+            True,
+            400,
+            "INVALID_TRANSITION",
+            id="disabled-in-demo",
+        ),
+        pytest.param(
+            True,
+            False,
+            401,
+            "AUTH_REQUIRED",
+            id="anonymous-outside-demo",
+        ),
+    ],
 )
 async def test_simulator_disabled_rejects_endpoint(
     simulator_api: SimulatorApi,
     simulator_enabled: bool,
     demo_mode: bool,
+    expected_status: int,
+    expected_code: str,
 ):
     simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
         simulator_enabled=simulator_enabled,
@@ -343,12 +360,17 @@ async def test_simulator_disabled_rejects_endpoint(
     )
 
     response = await simulator_api.client.post("/api/v1/simulator/reset", json={})
-    status_response = await simulator_api.client.get("/api/v1/parking/status")
 
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "INVALID_TRANSITION"
-    status = status_response.json()["data"]
-    assert (status["available"], status["reserved"], status["occupied"]) == (120, 0, 0)
+    assert response.status_code == expected_status
+    assert response.json()["error"]["code"] == expected_code
+    if demo_mode:
+        status_response = await simulator_api.client.get("/api/v1/parking/status")
+        status = status_response.json()["data"]
+        assert (status["available"], status["reserved"], status["occupied"]) == (
+            120,
+            0,
+            0,
+        )
 
 
 @pytest.mark.asyncio
@@ -486,7 +508,7 @@ async def test_admin_events_require_admin_role_outside_demo(simulator_api: Simul
             id=uuid4(),
             email="resident@example.com",
             full_name="Resident",
-            app_role=AppRole.RESIDENT,
+            role=AppRole.USER,
         )
 
     simulator_api.application.dependency_overrides[get_optional_current_user] = resident_user
@@ -499,7 +521,7 @@ async def test_admin_events_require_admin_role_outside_demo(simulator_api: Simul
             id=uuid4(),
             email="admin@example.com",
             full_name="Admin",
-            app_role=AppRole.ADMIN,
+            role=AppRole.ADMIN,
         )
 
     simulator_api.application.dependency_overrides[get_optional_current_user] = admin_user
@@ -1111,7 +1133,7 @@ async def test_non_admin_cannot_resolve_reopen_or_delete_reports_outside_demo(
             id=uuid4(),
             email="resident@example.com",
             full_name="Resident",
-            app_role=AppRole.RESIDENT,
+            role=AppRole.USER,
         )
 
     simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
@@ -1210,7 +1232,7 @@ async def test_report_resolution_uses_authenticated_admin_id_in_demo(
             id=admin_id,
             email="admin@example.com",
             full_name="Admin",
-            app_role=AppRole.ADMIN,
+            role=AppRole.ADMIN,
         )
 
     simulator_api.application.dependency_overrides[get_optional_current_user] = admin_user
@@ -1374,5 +1396,17 @@ def test_admin_report_lifecycle_is_exposed_in_openapi():
     detail_operations = paths["/api/v1/admin/reports/{report_id}"]
     assert {"get", "patch", "delete"} <= detail_operations.keys()
     assert "post" in paths["/api/v1/admin/reports/{report_id}/reopen"]
-    create_schema = openapi["components"]["schemas"]["WrongParkingReportRequest"]
-    assert "reason_code" in create_schema["required"]
+
+    request_body = paths["/api/v1/reports/wrong-parking"]["post"]["requestBody"]
+    json_schema = request_body["content"]["application/json"]["schema"]
+    multipart_schema = request_body["content"]["multipart/form-data"]["schema"]
+    required_fields = {"user_id", "slot_id", "reason_code"}
+
+    assert required_fields <= set(json_schema["required"])
+    assert required_fields <= set(multipart_schema["required"])
+    assert "reason_code" in json_schema["properties"]
+    assert multipart_schema["properties"]["evidence"] == {
+        "type": "string",
+        "format": "binary",
+    }
+    assert "evidence" not in multipart_schema["required"]

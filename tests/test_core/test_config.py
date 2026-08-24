@@ -61,7 +61,11 @@ def test_production_with_demo_mode_is_rejected() -> None:
     assert "DEMO_MODE must be false" in str(exc_info.value)
 
 
-def test_production_with_builtin_localhost_database_url_is_rejected() -> None:
+def test_production_with_builtin_localhost_database_url_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
     with pytest.raises(ValidationError) as exc_info:
         Settings(
             _env_file=None,

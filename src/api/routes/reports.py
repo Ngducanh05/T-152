@@ -135,6 +135,43 @@ class WrongParkingReportRequest(BaseModel):
         return normalized or None
 
 
+_WRONG_PARKING_TEXT_PROPERTIES: dict[str, dict[str, object]] = {
+    "user_id": {"type": "string"},
+    "slot_id": {"type": "string"},
+    "reason_code": {
+        "type": "string",
+        "enum": [reason.value for reason in WrongParkingReason],
+    },
+    "observed_plate_number": {"type": "string", "maxLength": 32},
+    "description": {"type": "string", "maxLength": 500},
+}
+_WRONG_PARKING_REQUIRED_FIELDS = ["user_id", "slot_id", "reason_code"]
+_WRONG_PARKING_OPENAPI_REQUEST_BODY = {
+    "required": True,
+    "content": {
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": _WRONG_PARKING_TEXT_PROPERTIES,
+                "required": _WRONG_PARKING_REQUIRED_FIELDS,
+                "additionalProperties": False,
+            }
+        },
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    **_WRONG_PARKING_TEXT_PROPERTIES,
+                    "evidence": {"type": "string", "format": "binary"},
+                },
+                "required": _WRONG_PARKING_REQUIRED_FIELDS,
+                "additionalProperties": False,
+            }
+        },
+    },
+}
+
+
 @router.post(
     "/wrong-parking",
     response_model=SuccessResponse[WrongParkingReport],
@@ -146,6 +183,7 @@ class WrongParkingReportRequest(BaseModel):
         422: {"model": ErrorResponse},
         429: {"model": ErrorResponse},
     },
+    openapi_extra={"requestBody": _WRONG_PARKING_OPENAPI_REQUEST_BODY},
 )
 async def create_wrong_parking_report(
     http_request: Request,
