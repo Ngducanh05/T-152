@@ -25,9 +25,7 @@ def get_llm(
     resolved_settings = settings or get_settings()
     api_key = (resolved_settings.llm_api_key or "").strip()
     if not api_key:
-        raise LLMConfigurationError(
-            "LLM_API_KEY is not configured; set it before invoking the agent"
-        )
+        raise LLMConfigurationError("LLM_API_KEY is not configured; set it before invoking the agent")
 
     from langchain_openai import ChatOpenAI
 

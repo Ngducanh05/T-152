@@ -6,27 +6,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import ParkingUserDependency, resolve_parking_user_id
+from src.api.errors import domain_http_error
 from src.core.database import get_db_session
 from src.core.parking_state import ParkingStateService
 from src.core.recommendation import RecommendationError, RecommendationService
 from src.core.routing import RoutingService
 from src.models.common import ErrorResponse, SuccessResponse
-from src.models.schemas import ErrorCode, RecommendationRequest, RecommendationResult
+from src.models.schemas import RecommendationRequest, RecommendationResult
 
 router = APIRouter(prefix="/recommendations", tags=["Recommendations"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 def _domain_error(error: RecommendationError) -> HTTPException:
-    status_code = {
-        ErrorCode.ROUTE_NODE_NOT_FOUND: 404,
-        ErrorCode.ROUTE_NOT_FOUND: 422,
-        ErrorCode.INVALID_TRANSITION: 400,
-    }.get(error.code, 422)
-    return HTTPException(
-        status_code=status_code,
-        detail={"code": error.code.value, "message": error.message},
-    )
+    return domain_http_error(error)
 
 
 @router.post(

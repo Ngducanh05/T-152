@@ -15,8 +15,24 @@ from pydantic import (
 EntityId = Annotated[str, Field(min_length=1)]
 FloorId = Literal["F1", "F2", "F3"]
 FloorScopedId = Annotated[str, Field(pattern=r"^F[1-3]-", min_length=4)]
+SLOT_ID_PATTERN = r"^F[1-3]-[A-D](?:0[1-9]|10)$"
+SlotId = Annotated[str, Field(pattern=SLOT_ID_PATTERN)]
 ZoneId = Literal["A", "B", "C", "D"]
 FLOOR_IDS: tuple[str, ...] = ("F1", "F2", "F3")
+
+
+def is_slot_id(value: object) -> bool:
+    """Return whether *value* is a canonical ParkSmart F1-F3 slot ID."""
+    return isinstance(value, str) and re.fullmatch(SLOT_ID_PATTERN, value) is not None
+
+
+def normalize_vehicle_plate(value: str) -> tuple[str, str]:
+    """Return uppercase display and separator-insensitive identity representations."""
+    display = value.strip().upper()
+    normalized = re.sub(r"[\s._-]+", "", display)
+    if len(normalized) < 2:
+        raise ValueError("plate_number is invalid")
+    return display, normalized
 
 
 class SlotStatus(StrEnum):
@@ -61,6 +77,7 @@ class RouteMode(StrEnum):
 
 class ActorType(StrEnum):
     USER = "USER"
+    ADMIN = "ADMIN"
     SIMULATOR = "SIMULATOR"
     CAMERA = "CAMERA"
     SYSTEM = "SYSTEM"
@@ -81,10 +98,36 @@ class WrongParkingReportStatus(StrEnum):
     RESOLVED = "RESOLVED"
 
 
-class WrongParkingReviewStatus(StrEnum):
+class SlotObservationStatus(StrEnum):
+    PENDING = "PENDING"
+    VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+
+
+class WrongParkingReportVerificationOutcome(StrEnum):
     PENDING = "PENDING"
     CONFIRMED = "CONFIRMED"
     REJECTED = "REJECTED"
+    DUPLICATE = "DUPLICATE"
+    UNVERIFIABLE = "UNVERIFIABLE"
+
+
+class RewardSourceType(StrEnum):
+    ADJACENT_SLOT_OBSERVATION = "ADJACENT_SLOT_OBSERVATION"
+    WRONG_PARKING_REPORT = "WRONG_PARKING_REPORT"
+
+
+class RewardTransactionType(StrEnum):
+    CONTRIBUTION_REWARD = "CONTRIBUTION_REWARD"
+    REWARD_REVERSAL = "REWARD_REVERSAL"
+    ADMIN_ADJUSTMENT = "ADMIN_ADJUSTMENT"
+
+
+class RewardTransactionStatus(StrEnum):
+    PENDING = "PENDING"
+    EARNED = "EARNED"
+    CANCELLED = "CANCELLED"
 
 
 class WrongParkingReason(StrEnum):
@@ -96,6 +139,7 @@ class WrongParkingReason(StrEnum):
 
 
 class ChatUIActionType(StrEnum):
+    SCAN_LOCATION_QR = "SCAN_LOCATION_QR"
     SELECT_LOCATION = "SELECT_LOCATION"
     SELECT_PARKING_PREFERENCE = "SELECT_PARKING_PREFERENCE"
     SELECT_SLOT = "SELECT_SLOT"
@@ -126,17 +170,34 @@ class ErrorCode(StrEnum):
     RESERVATION_NOT_FOUND = "RESERVATION_NOT_FOUND"
     ACTIVE_RESERVATION_NOT_FOUND = "ACTIVE_RESERVATION_NOT_FOUND"
     RESERVATION_EXPIRED = "RESERVATION_EXPIRED"
+    PARKING_ARRIVAL_NOT_VERIFIED = "PARKING_ARRIVAL_NOT_VERIFIED"
+    IDEMPOTENCY_KEY_REUSED = "IDEMPOTENCY_KEY_REUSED"
+    IDEMPOTENCY_KEY_INVALID = "IDEMPOTENCY_KEY_INVALID"
     ACTIVE_SESSION_EXISTS = "ACTIVE_SESSION_EXISTS"
     SESSION_NOT_FOUND = "SESSION_NOT_FOUND"
     LOCATION_NODE_NOT_FOUND = "LOCATION_NODE_NOT_FOUND"
     CURRENT_LOCATION_NOT_FOUND = "CURRENT_LOCATION_NOT_FOUND"
     INVALID_LOCATION_NODE_TYPE = "INVALID_LOCATION_NODE_TYPE"
+    INVALID_LOCATION_QR = "INVALID_LOCATION_QR"
+    LOCATION_MARKER_NOT_FOUND = "LOCATION_MARKER_NOT_FOUND"
     REPORT_NOT_FOUND = "REPORT_NOT_FOUND"
     REPORT_VERSION_CONFLICT = "REPORT_VERSION_CONFLICT"
     INVALID_REPORT_TRANSITION = "INVALID_REPORT_TRANSITION"
-    REPORT_EVIDENCE_REQUIRED = "REPORT_EVIDENCE_REQUIRED"
     REPORT_EVIDENCE_INVALID = "REPORT_EVIDENCE_INVALID"
+    REPORT_EVIDENCE_TOO_LARGE = "REPORT_EVIDENCE_TOO_LARGE"
+    REPORT_DAILY_LIMIT_REACHED = "REPORT_DAILY_LIMIT_REACHED"
+    OBSERVATION_NOT_FOUND = "OBSERVATION_NOT_FOUND"
+    OBSERVATION_ALREADY_EXISTS = "OBSERVATION_ALREADY_EXISTS"
+    OBSERVATION_EXPIRED = "OBSERVATION_EXPIRED"
+    INVALID_OBSERVATION_TRANSITION = "INVALID_OBSERVATION_TRANSITION"
+    OBSERVATION_VERSION_CONFLICT = "OBSERVATION_VERSION_CONFLICT"
+    REWARD_ALREADY_SETTLED = "REWARD_ALREADY_SETTLED"
+    CONTRIBUTION_DAILY_LIMIT_REACHED = "CONTRIBUTION_DAILY_LIMIT_REACHED"
+    REPORT_REWARD_DUPLICATE = "REPORT_REWARD_DUPLICATE"
+    AGENT_DISABLED = "AGENT_DISABLED"
+    AGENT_DAILY_LIMIT_REACHED = "AGENT_DAILY_LIMIT_REACHED"
     AGENT_TOOL_UNAVAILABLE = "AGENT_TOOL_UNAVAILABLE"
+    SPEECH_DISABLED = "SPEECH_DISABLED"
     SPEECH_AUDIO_INVALID = "SPEECH_AUDIO_INVALID"
     SPEECH_AUDIO_TOO_LARGE = "SPEECH_AUDIO_TOO_LARGE"
     SPEECH_NO_TRANSCRIPT = "SPEECH_NO_TRANSCRIPT"
@@ -161,6 +222,9 @@ class User(ContractModel):
     id: EntityId
     display_name: str
     current_node_id: FloorScopedId | None = None
+    verified_node_id: FloorScopedId | None = None
+    verified_at: AwareDatetime | None = None
+    verified_marker_id: str | None = None
 
 
 class Vehicle(ContractModel):
@@ -171,7 +235,7 @@ class Vehicle(ContractModel):
 
 
 class ParkingSlot(ContractModel):
-    id: FloorScopedId
+    id: SlotId
     floor_id: FloorId
     zone_id: ZoneId
     node_id: FloorScopedId
@@ -182,11 +246,22 @@ class ParkingSlot(ContractModel):
     occupied_by_vehicle_id: EntityId | None = None
 
 
+class ParkingSlotDefinition(ContractModel):
+    """Static persisted metadata used to render and validate the parking map."""
+
+    id: SlotId
+    floor_id: FloorId
+    zone_id: ZoneId
+    node_id: FloorScopedId
+    has_charger: bool
+    is_accessible: bool
+
+
 class ParkingReservation(ContractModel):
     id: EntityId
     user_id: EntityId
     vehicle_id: EntityId
-    slot_id: FloorScopedId
+    slot_id: SlotId
     status: ReservationStatus
     expires_at: AwareDatetime
     created_at: AwareDatetime
@@ -196,7 +271,7 @@ class ParkingSession(ContractModel):
     id: EntityId
     user_id: EntityId
     vehicle_id: EntityId
-    slot_id: FloorScopedId
+    slot_id: SlotId
     status: ParkingSessionStatus
     parked_at: AwareDatetime
     completed_at: AwareDatetime | None = None
@@ -243,7 +318,7 @@ class RecommendationRequest(ContractModel):
 
 
 class RecommendationCandidate(ContractModel):
-    slot_id: FloorScopedId
+    slot_id: SlotId
     score: float = Field(ge=0, le=100)
     distance_m: float = Field(ge=0)
     reasons: list[str]
@@ -261,7 +336,7 @@ class RecommendationResult(ContractModel):
 class ParkingEvent(ContractModel):
     id: EntityId
     event_type: ParkingEventType
-    slot_id: FloorScopedId | None = None
+    slot_id: SlotId | None = None
     actor_type: ActorType
     actor_id: EntityId | None = None
     old_status: SlotStatus | None = None
@@ -270,13 +345,30 @@ class ParkingEvent(ContractModel):
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
+class SlotObservation(ContractModel):
+    id: EntityId
+    observer_user_id: EntityId
+    observer_session_id: EntityId
+    slot_id: SlotId
+    observed_status: Literal[SlotStatus.AVAILABLE, SlotStatus.OCCUPIED]
+    verification_status: SlotObservationStatus
+    reward_points: int = Field(ge=0)
+    observed_slot_version: int = Field(ge=0)
+    created_at: AwareDatetime
+    expires_at: AwareDatetime
+    verified_at: AwareDatetime | None = None
+    verified_by: EntityId | None = None
+    rejection_reason: str | None = Field(default=None, max_length=500)
+    version: int = Field(ge=0)
+    reward_status: RewardTransactionStatus | None = None
+
+
 class WrongParkingReport(ContractModel):
     id: EntityId
     reporter_user_id: EntityId
-    slot_id: FloorScopedId
+    slot_id: SlotId
     reason_code: WrongParkingReason
     status: WrongParkingReportStatus
-    review_status: WrongParkingReviewStatus = WrongParkingReviewStatus.PENDING
     observed_plate_number: str | None = None
     description: str | None = None
     evidence_storage_path: str | None = None
@@ -284,13 +376,55 @@ class WrongParkingReport(ContractModel):
     evidence_size_bytes: int | None = Field(default=None, ge=0)
     created_at: AwareDatetime
     updated_at: AwareDatetime
-    reviewed_at: AwareDatetime | None = None
-    reviewed_by: EntityId | None = None
-    review_note: str | None = None
     resolved_at: AwareDatetime | None = None
     resolved_by: EntityId | None = None
     resolution_note: str | None = None
+    verification_outcome: WrongParkingReportVerificationOutcome = WrongParkingReportVerificationOutcome.PENDING
+    reward_points: int = Field(default=0, ge=0)
+    reward_status: RewardTransactionStatus | None = None
+    duplicate_candidate_of_id: EntityId | None = None
     version: int = Field(ge=0)
+
+
+class RewardTransaction(ContractModel):
+    id: EntityId
+    user_id: EntityId
+    source_type: RewardSourceType
+    source_reference: EntityId
+    transaction_type: RewardTransactionType
+    status: RewardTransactionStatus
+    points: int = Field(ge=0)
+    created_at: AwareDatetime
+    settled_at: AwareDatetime | None = None
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class RewardSummary(ContractModel):
+    available_points: int = Field(ge=0)
+    pending_points: int = Field(ge=0)
+    verified_contributions: int = Field(ge=0)
+    daily_pending_points: int = Field(ge=0)
+    daily_earned_points: int = Field(ge=0)
+    daily_limit_points: int = Field(ge=0)
+
+
+class RewardConfiguration(ContractModel):
+    adjacent_observation_reward_points: int = Field(ge=0)
+    wrong_parking_report_reward_points: int = Field(ge=0)
+    contribution_daily_points_limit: int = Field(ge=0)
+
+
+class ContributionRecord(ContractModel):
+    id: EntityId
+    source_type: RewardSourceType
+    source_reference: EntityId
+    observer_session_id: EntityId | None = None
+    floor_id: FloorId
+    slot_id: SlotId
+    points: int = Field(ge=0)
+    status: RewardTransactionStatus | None = None
+    created_at: AwareDatetime
+    settled_at: AwareDatetime | None = None
 
 
 class ChatRequest(BaseModel):
@@ -331,9 +465,7 @@ class ChatUIAction(ContractModel):
         if preference is not None and preference not in allowed_preferences:
             raise ValueError("ui action preference is not supported")
         slot_id = value.get("slot_id")
-        if slot_id is not None and re.fullmatch(
-            r"^F[1-3]-[A-D](?:0[1-9]|10)$", slot_id
-        ) is None:
+        if slot_id is not None and not is_slot_id(slot_id):
             raise ValueError("ui action slot_id is not canonical")
         node_id = value.get("node_id")
         if node_id is not None and re.fullmatch(r"^F[1-3]-[A-Z0-9-]+$", node_id) is None:
@@ -347,10 +479,10 @@ class ChatResponse(BaseModel):
     thread_id: str
     message: str = Field(description="Phản hồi công khai từ agent")
     intent: str | None = None
-    selected_slot: str | None = None
+    selected_slot: SlotId | None = None
     tool_names: list[str] = Field(default_factory=list)
     current_location: FloorScopedId | None = None
-    recommended_slot_ids: list[FloorScopedId] = Field(default_factory=list)
+    recommended_slot_ids: list[SlotId] = Field(default_factory=list)
     route: RouteResult | None = None
     ui_actions: list[ChatUIAction] = Field(default_factory=list, max_length=5)
 

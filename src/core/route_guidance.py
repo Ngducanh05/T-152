@@ -28,10 +28,11 @@ def _detect_floor_transitions(path: list[str]) -> list[str]:
             continue
         prev_floor, curr_floor = prev_m.group(1), curr_m.group(1)
         if prev_floor != curr_floor:
-            via = "đường dốc (ramp)" if _RAMP_ID.fullmatch(path[i]) or _RAMP_ID.fullmatch(path[i - 1]) else "thang máy"
-            instructions.append(
-                f"Di chuyển từ {_FLOOR_NAMES.get(prev_floor, prev_floor)} lên {_FLOOR_NAMES.get(curr_floor, curr_floor)} bằng {via}."
-            )
+            goes_up = int(curr_floor[1:]) > int(prev_floor[1:])
+            direction = "lên" if goes_up else "xuống"
+            via_ramp = _RAMP_ID.fullmatch(path[i]) or _RAMP_ID.fullmatch(path[i - 1])
+            via = "đường dốc" if via_ramp else "thang máy"
+            instructions.append(f"Đi {via} {direction} {_FLOOR_NAMES.get(curr_floor, curr_floor)}.")
     return instructions
 
 
@@ -61,9 +62,7 @@ def vietnamese_route_guidance(path: list[str], distance_m: float) -> str:
     side = aisle_match.group(2) if aisle_match else "W"
     is_north = zone in {"A", "B"}
     entry_turn = "trái" if is_north else "phải"
-    bay_turn = (
-        "phải" if (side == "W" and is_north) or (side == "E" and not is_north) else "trái"
-    )
+    bay_turn = "phải" if (side == "W" and is_north) or (side == "E" and not is_north) else "trái"
     start_copy = "Từ cổng vào" if path[0] == "F1-ENTRANCE" else "Từ vị trí hiện tại"
     row_copy = "dãy đầu" if number <= 5 else "dãy thứ hai"
 
@@ -71,8 +70,9 @@ def vietnamese_route_guidance(path: list[str], distance_m: float) -> str:
     if transition_copy:
         guidance += f"{transition_copy} "
     guidance += (
-        f"Đến lối vào khu {zone} ({dest_floor}), rẽ {entry_turn} và đi theo đường bao quanh khu. "
-        f"Tại {row_copy}, rẽ {bay_turn} vào ô {zone}{number:02d}. "
+        f"Ở ngã tư phía trước, rẽ {entry_turn} để vào khu {zone} ở {dest_floor}, "
+        "rồi đi theo lối quanh khu. "
+        f"Khi tới {row_copy} phía trước, rẽ {bay_turn} vào ô {zone}{number:02d}. "
         f"Quãng đường khoảng {distance_m:g} m."
     )
     return guidance

@@ -2,9 +2,10 @@
 
 Source of truth:
 - `src/core/db_models.py`
-- Alembic revisions `20260804_0001` through `20260819_0007`
+- Alembic revisions `20260804_0001` through merge head `20260824_0010`
 
-This document describes the schema after Alembic revision `20260819_0007`.
+This document describes the schema after Alembic revision `20260824_0010` and
+Supabase platform hardening.
 
 ## Identity boundary
 
@@ -38,22 +39,31 @@ erDiagram
 
     PARKING_USERS ||--o{ WRONG_PARKING_REPORTS : reports
     PARKING_SLOTS ||--o{ WRONG_PARKING_REPORTS : reported_slot
+    WRONG_PARKING_REPORTS o|--o{ WRONG_PARKING_REPORTS : duplicate_candidate
+
+    PARKING_USERS ||--o{ SLOT_OBSERVATIONS : observes
+    PARKING_SESSIONS ||--o{ SLOT_OBSERVATIONS : during_session
+    PARKING_SLOTS ||--o{ SLOT_OBSERVATIONS : observed_slot
+
+    PARKING_USERS ||--o{ REWARD_TRANSACTIONS : earns
 ```
 
 ## Table inventory
 
 | Table | Responsibility | Primary key | Important foreign keys |
 |---|---|---|---|
-| `profiles` | App role + bridge from Supabase Auth to parking identity | `id uuid` | `parking_user_id -> parking_users.id`; `default_vehicle_id -> vehicles.id`; planned `id -> auth.users.id` |
+| `profiles` | App role + bridge from Supabase Auth to parking identity | `id uuid` | `id -> auth.users.id`; `parking_user_id -> parking_users.id`; `default_vehicle_id -> vehicles.id` |
 | `parking_users` | Parking-domain user | `id varchar(64)` | `current_node_id -> map_nodes.id` |
 | `vehicles` | Vehicles owned by a parking user | `id varchar(64)` | `user_id -> parking_users.id` |
-| `map_nodes` | Canonical F1 routing graph nodes | `id varchar(64)` | — |
+| `map_nodes` | Canonical F1/F2/F3 routing graph nodes | `id varchar(64)` | — |
 | `map_edges` | Routing graph edges | `(from_node, to_node)` | both endpoints -> `map_nodes.id` |
 | `parking_slots` | Slot inventory + authoritative occupancy state | `id varchar(64)` | `node_id -> map_nodes.id`; `occupied_by_vehicle_id -> vehicles.id` |
 | `parking_reservations` | Temporary reservation state | `id varchar(64)` | user, vehicle, slot |
 | `parking_sessions` | Active/completed parking sessions | `id varchar(64)` | user, vehicle, slot |
 | `parking_events` | Audit/event history | `id varchar(64)` | `slot_id -> parking_slots.id` |
 | `wrong_parking_reports` | Wrong-parking report lifecycle | `id varchar(64)` | reporter user, slot |
+| `slot_observations` | Pending/verified/rejected/expired adjacent observations | `id varchar(64)` | observer user, parking session, slot |
+| `reward_transactions` | Authoritative pending/earned/cancelled Points ledger | `id varchar(64)` | user; source stored as immutable type/reference |
 
 `location_checkpoints` is historical only. It was created in `0002` and removed by `0003`.
 
@@ -65,8 +75,11 @@ erDiagram
 - Active reservation uniqueness is enforced for user, vehicle and slot by partial unique indexes.
 - Active parking-session uniqueness is enforced for user, vehicle and slot by partial unique indexes.
 - `parking_slots.version` and `wrong_parking_reports.version` are optimistic-concurrency counters.
+- `slot_observations(observer_session_id, slot_id)` is unique.
+- `reward_transactions(source_type, source_reference)` is unique and prevents double reward.
+- Evidence stores only the private Storage object path/type/size; image bytes are not stored in PostgreSQL.
 
-## Missing Supabase identity constraint
+## Supabase identity constraint
 
 The backend already assumes:
 
@@ -74,7 +87,7 @@ The backend already assumes:
 auth.users.id == public.profiles.id
 ```
 
-The Supabase deployment should enforce:
+Supabase platform hardening enforces:
 
 ```text
 public.profiles.id

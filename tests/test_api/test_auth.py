@@ -70,7 +70,7 @@ async def test_auth_me_returns_backend_owned_profile_identity() -> None:
         parking_user_id="USER-101",
         default_vehicle_id="VEHICLE-101",
     )
-    app.dependency_overrides[auth_service.get_current_user] = lambda: current_user
+    app.dependency_overrides[auth_service.get_current_user_from_request] = lambda: current_user
     transport = httpx.ASGITransport(app=app)
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -203,6 +203,7 @@ async def test_role_and_parking_identity_come_from_profile_not_token_metadata(
             "id": str(auth_id),
             "email": "user@example.com",
             "user_metadata": {"role": "admin"},
+            "app_metadata": {"role": "admin"},
         }
 
     monkeypatch.setattr(auth_service, "verify_supabase_access_token", fake_verify)
@@ -216,6 +217,98 @@ async def test_role_and_parking_identity_come_from_profile_not_token_metadata(
     assert current_user.role is AppRole.USER
     assert current_user.parking_user_id == "USER-A"
     assert current_user.default_vehicle_id == "VEHICLE-A"
+
+
+@pytest.mark.asyncio
+async def test_onboarding_ignores_malicious_role_and_parking_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    auth_id = UUID("22222222-2222-4222-8222-222222222222")
+
+    class FakeTransaction:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.profile: Profile | None = None
+            self.parking_users: dict[str, ParkingUser] = {}
+
+        def begin(self) -> FakeTransaction:
+            return FakeTransaction()
+
+        async def scalar(self, _statement: object) -> Profile | None:
+            return self.profile
+
+        async def get(self, model: object, identity: object) -> object | None:
+            if model is ParkingUser:
+                return self.parking_users.get(str(identity))
+            return None
+
+        def add(self, instance: object) -> None:
+            if isinstance(instance, Profile):
+                self.profile = instance
+            elif isinstance(instance, ParkingUser):
+                self.parking_users[instance.id] = instance
+
+        async def flush(self) -> None:
+            return None
+
+    fake_session = FakeSession()
+
+    async def fake_db_session():
+        yield fake_session
+
+    async def fake_verify(_token: str) -> dict[str, object]:
+        return {
+            "id": str(auth_id),
+            "email": "malicious-metadata@example.com",
+            "user_metadata": {
+                "full_name": "Metadata Attacker",
+                "role": "admin",
+                "app_role": "admin",
+                "parking_user_id": "ATTACKER-CHOSEN-USER",
+                "default_vehicle_id": "ATTACKER-CHOSEN-VEHICLE",
+            },
+            "app_metadata": {
+                "role": "admin",
+                "app_role": "admin",
+                "parking_user_id": "ATTACKER-CHOSEN-USER",
+                "default_vehicle_id": "ATTACKER-CHOSEN-VEHICLE",
+            },
+        }
+
+    monkeypatch.setattr(auth_routes, "verify_supabase_access_token", fake_verify)
+    monkeypatch.setattr(auth_service, "verify_supabase_access_token", fake_verify)
+
+    app = create_app()
+    app.dependency_overrides[get_db_session] = fake_db_session
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/auth/onboarding",
+            headers={"Authorization": "Bearer malicious-metadata-token"},
+        )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["role"] == "user"
+    assert data["parking_user_id"].startswith("USER-")
+    assert data["parking_user_id"] != "ATTACKER-CHOSEN-USER"
+    assert data["default_vehicle_id"] is None
+
+    profile = fake_session.profile
+    parking_user = fake_session.parking_users.get(data["parking_user_id"])
+    assert profile is not None
+    assert profile.id == auth_id
+    assert profile.app_role is AppRoleEnum.USER
+    assert profile.parking_user_id == data["parking_user_id"]
+    assert profile.default_vehicle_id is None
+    assert parking_user is not None
 
 
 @pytest.mark.asyncio
@@ -257,3 +350,74 @@ async def test_onboarding_is_idempotent_under_concurrent_requests(
     assert parking_user_count == 1
     assert profile is not None
     assert profile.app_role is AppRoleEnum.USER
+
+
+@pytest.mark.asyncio
+async def test_new_user_can_add_first_vehicle_and_link_default_vehicle(
+    auth_client_with_db: tuple[
+        httpx.AsyncClient,
+        async_sessionmaker[AsyncSession],
+    ],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, session_factory = auth_client_with_db
+
+    auth_id = UUID("44444444-4444-4444-8444-444444444444")
+
+    async def fake_verify(_token: str) -> dict[str, object]:
+        return {
+            "id": str(auth_id),
+            "email": "vehicle-user@example.com",
+            "user_metadata": {
+                "full_name": "Vehicle User",
+            },
+        }
+
+    monkeypatch.setattr(
+        auth_routes,
+        "verify_supabase_access_token",
+        fake_verify,
+    )
+    monkeypatch.setattr(
+        auth_service,
+        "verify_supabase_access_token",
+        fake_verify,
+    )
+
+    headers = {
+        "Authorization": "Bearer test-token",
+    }
+
+    onboarding_response = await client.post(
+        "/api/v1/auth/onboarding",
+        headers=headers,
+    )
+
+    assert onboarding_response.status_code == 200
+    assert onboarding_response.json()["data"]["default_vehicle_id"] is None
+
+    vehicle_response = await client.post(
+        "/api/v1/auth/vehicles",
+        headers=headers,
+        json={
+            "plate_number": "29A-123.45",
+            "requires_charging": False,
+        },
+    )
+
+    assert vehicle_response.status_code == 200
+
+    data = vehicle_response.json()["data"]
+    vehicle_id = data["default_vehicle_id"]
+
+    assert vehicle_id is not None
+
+    async with session_factory() as session:
+        profile = await session.get(Profile, auth_id)
+        vehicle = await session.get(Vehicle, vehicle_id)
+
+    assert profile is not None
+    assert vehicle is not None
+    assert profile.default_vehicle_id == vehicle.id
+    assert vehicle.user_id == profile.parking_user_id
+    assert vehicle.plate_number == "29A-123.45"

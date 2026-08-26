@@ -6,9 +6,12 @@ import asyncio
 import json
 import logging
 import re
+import unicodedata
 from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from math import ceil
 from time import monotonic
 from typing import Any
 
@@ -24,7 +27,17 @@ from src.api.dependencies import (
     resolve_vehicle_id,
 )
 from src.api.ui_actions import derive_chat_ui_actions
+from src.core.agent_quota import (
+    AgentQuotaError,
+    AgentQuotaExceeded,
+    AgentQuotaService,
+)
 from src.core.database import get_session_factory
+from src.core.parking_session import (
+    ParkedVehicle,
+    ParkingSessionError,
+    ParkingSessionService,
+)
 from src.core.route_guidance import vietnamese_route_guidance
 from src.models.common import ErrorResponse, SuccessResponse
 from src.models.schemas import ChatRequest, ChatResponse, ErrorCode
@@ -34,6 +47,29 @@ logger = logging.getLogger(__name__)
 
 _SAFE_TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _REGISTERED_TOOL_NAMES = frozenset(agent_tool.name for agent_tool in PARKING_TOOLS)
+
+
+def _requires_fresh_find_vehicle(message: str) -> bool:
+    """Recognize only narrow, high-confidence find-my-car requests."""
+    normalized = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", message.casefold())
+        if not unicodedata.combining(character)
+    )
+    normalized = " ".join(normalized.split())
+    return any(
+        phrase in normalized
+        for phrase in (
+            "xe toi dang do o dau",
+            "xe cua toi dang do o dau",
+            "xe toi o dau",
+            "xe cua toi o dau",
+            "tim xe cua toi",
+            "find my car",
+            "where is my car",
+            "where did i park",
+        )
+    )
 
 
 @dataclass(slots=True)
@@ -62,6 +98,31 @@ def _service_unavailable(message: str) -> HTTPException:
     )
 
 
+def _agent_disabled() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": ErrorCode.AGENT_DISABLED.value,
+            "message": "The parking assistant is currently disabled.",
+        },
+    )
+
+
+def _daily_limit_reached(error: AgentQuotaExceeded) -> HTTPException:
+    retry_after = max(
+        1,
+        ceil((error.reset_at - datetime.now(UTC)).total_seconds()),
+    )
+    return HTTPException(
+        status_code=429,
+        headers={"Retry-After": str(retry_after)},
+        detail={
+            "code": ErrorCode.AGENT_DAILY_LIMIT_REACHED.value,
+            "message": "The daily parking assistant request limit has been reached.",
+        },
+    )
+
+
 async def _delete_expired_thread(
     request: Request,
     thread_id: str,
@@ -70,9 +131,7 @@ async def _delete_expired_thread(
 ) -> None:
     deleted = False
     try:
-        await request.app.state.agent_checkpointer.adelete_thread(
-            deletion.namespaced_thread_id
-        )
+        await request.app.state.agent_checkpointer.adelete_thread(deletion.namespaced_thread_id)
         deleted = True
     except Exception as error:  # noqa: BLE001 - cleanup must not crash requests
         logger.warning(
@@ -100,9 +159,7 @@ def _track_cleanup_task(request: Request, coroutine: Awaitable[None]) -> None:
 
 
 def _schedule_expired_threads(request: Request, now: float) -> None:
-    for thread_id, last_access in list(
-        request.app.state.agent_thread_last_access.items()
-    ):
+    for thread_id, last_access in list(request.app.state.agent_thread_last_access.items()):
         user_id = request.app.state.agent_thread_owners.get(thread_id)
         if user_id is None or now - last_access < request.app.state.agent_thread_ttl_seconds:
             continue
@@ -148,9 +205,7 @@ async def _thread_invocation(
                 request.app.state.agent_thread_owners[thread_id] = user_id
                 request.app.state.agent_thread_last_access[thread_id] = now
                 namespaced_thread_id = f"{user_id}:{thread_id}"
-                entry = request.app.state.agent_thread_locks.setdefault(
-                    namespaced_thread_id, _ThreadLockEntry()
-                )
+                entry = request.app.state.agent_thread_locks.setdefault(namespaced_thread_id, _ThreadLockEntry())
                 entry.users += 1
                 break
         await deletion.completed.wait()
@@ -190,15 +245,9 @@ def _safe_tool_names(messages: list[Any]) -> list[str]:
         if isinstance(message, ToolMessage) and message.name:
             candidates.append(message.name)
         elif isinstance(message, AIMessage):
-            candidates.extend(
-                str(call.get("name", "")) for call in message.tool_calls
-            )
+            candidates.extend(str(call.get("name", "")) for call in message.tool_calls)
         for name in candidates:
-            if (
-                name in _REGISTERED_TOOL_NAMES
-                and _SAFE_TOOL_NAME.fullmatch(name)
-                and name not in names
-            ):
+            if name in _REGISTERED_TOOL_NAMES and _SAFE_TOOL_NAME.fullmatch(name) and name not in names:
                 names.append(name)
     return names
 
@@ -263,16 +312,14 @@ def _recommendation_fallback(slot_ids: list[str]) -> str:
             "trên bản đồ. Bạn có muốn đỗ xe ở ô này không?"
         )
     formatted_slots = ", ".join(slot_ids)
-    return (
-        f"Tôi đã tìm thấy các ô đang trống: {formatted_slots} và đánh dấu chúng "
-        "trên bản đồ. Bạn muốn chọn ô nào?"
-    )
+    return f"Tôi đã tìm thấy các ô đang trống: {formatted_slots} và đánh dấu chúng trên bản đồ. Bạn muốn chọn ô nào?"
 
 
 @router.post(
     "/chat",
     response_model=SuccessResponse[ChatResponse],
     responses={
+        429: {"model": ErrorResponse},
         401: {"model": ErrorResponse},
         403: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
@@ -285,41 +332,77 @@ async def chat(
     session: SessionDependency,
     current_user: ParkingUserDependency,
 ) -> SuccessResponse[ChatResponse]:
-    user_id = resolve_parking_user_id(payload.user_id, current_user)
-    async with session.begin():
-        vehicle_id = await resolve_vehicle_id(
-            payload.vehicle_id,
-            current_user,
-            session,
-        )
+    settings = request.app.state.settings
+    if not settings.agent_enabled:
+        raise _agent_disabled()
 
+    user_id = resolve_parking_user_id(payload.user_id, current_user)
     request_id = _request_id(request)
     message_id = f"request:{request_id}"
-    runtime_context = AgentRuntimeContext(
-        user_id=user_id,
-        vehicle_id=vehicle_id,
-        request_id=request_id,
-        session_factory=get_session_factory(),
-        current_location=payload.current_location,
-    )
-    logger.info(
-        "agent_chat_started request_id=%s user_id=%s thread_id=%s",
-        request_id,
-        user_id,
-        payload.thread_id,
-    )
+    fresh_find_requested = _requires_fresh_find_vehicle(payload.message)
+    fresh_parked_vehicle: ParkedVehicle | None = None
+    fresh_find_missing = False
     try:
-        async with _thread_invocation(
-            request, payload.thread_id, user_id
-        ) as namespaced_thread_id:
+        async with _thread_invocation(request, payload.thread_id, user_id) as namespaced_thread_id:
+            try:
+                async with session.begin():
+                    vehicle_id = await resolve_vehicle_id(
+                        payload.vehicle_id,
+                        current_user,
+                        session,
+                    )
+                    await AgentQuotaService(session, settings=settings).consume(user_id)
+                    if fresh_find_requested:
+                        try:
+                            fresh_parked_vehicle = await ParkingSessionService(session).find_parked_vehicle(user_id)
+                        except ParkingSessionError as error:
+                            if error.code is ErrorCode.ACTIVE_SESSION_NOT_FOUND:
+                                fresh_find_missing = True
+                            else:
+                                raise
+            except AgentQuotaExceeded as error:
+                logger.info(
+                    "agent_quota_checked request_id=%s user_id=%s status=exceeded",
+                    request_id,
+                    user_id,
+                )
+                raise _daily_limit_reached(error) from error
+            except AgentQuotaError as error:
+                logger.warning(
+                    "agent_quota_checked request_id=%s user_id=%s status=error code=%s",
+                    request_id,
+                    user_id,
+                    error.code.value,
+                )
+                status_code = 404 if error.code is ErrorCode.USER_NOT_FOUND else 409
+                raise HTTPException(
+                    status_code=status_code,
+                    detail={"code": error.code.value, "message": error.message},
+                ) from error
+
+            logger.info(
+                "agent_quota_checked request_id=%s user_id=%s status=%s",
+                request_id,
+                user_id,
+                "disabled" if settings.agent_daily_request_limit == 0 else "consumed",
+            )
+            runtime_context = AgentRuntimeContext(
+                user_id=user_id,
+                vehicle_id=vehicle_id,
+                request_id=request_id,
+                session_factory=get_session_factory(),
+                current_location=payload.current_location,
+            )
+            logger.info(
+                "agent_chat_started request_id=%s user_id=%s thread_id=%s",
+                request_id,
+                user_id,
+                payload.thread_id,
+            )
             config = {"configurable": {"thread_id": namespaced_thread_id}}
             async with asyncio.timeout(request.app.state.agent_chat_timeout_seconds):
                 result = await request.app.state.agent.ainvoke(
-                    {
-                        "messages": [
-                            HumanMessage(content=payload.message, id=message_id)
-                        ]
-                    },
+                    {"messages": [HumanMessage(content=payload.message, id=message_id)]},
                     config=config,
                     context=runtime_context,
                 )
@@ -341,19 +424,18 @@ async def chat(
             payload.thread_id,
             type(error).__name__,
         )
-        raise _service_unavailable(
-            "The parking assistant is temporarily unavailable. Please try again."
-        ) from error
+        raise _service_unavailable("The parking assistant is temporarily unavailable. Please try again.") from error
 
     if not isinstance(result, dict):
         raise _service_unavailable("The agent returned an invalid response.")
     current_messages = _messages_after_current_input(result, message_id)
     successful_tools = _successful_tool_names(current_messages)
+    if fresh_parked_vehicle is not None:
+        successful_tools.add("find_parked_vehicle")
     recommendation_ids = result.get("recommended_slot_ids") or []
     error_text = str(result.get("error", ""))
     recovered_recommendation = (
-        error_text.startswith(ErrorCode.AGENT_TOOL_UNAVAILABLE.value)
-        and "recommend_parking_slot" in successful_tools
+        error_text.startswith(ErrorCode.AGENT_TOOL_UNAVAILABLE.value) and "recommend_parking_slot" in successful_tools
     )
     if error_text.startswith(ErrorCode.AGENT_TOOL_UNAVAILABLE.value):
         if not recovered_recommendation:
@@ -363,12 +445,9 @@ async def chat(
                 user_id,
                 payload.thread_id,
             )
-            raise _service_unavailable(
-                "The parking assistant is temporarily unavailable. Please try again."
-            )
+            raise _service_unavailable("The parking assistant is temporarily unavailable. Please try again.")
         logger.warning(
-            "agent_chat_recovered_recommendation request_id=%s user_id=%s "
-            "thread_id=%s recommendation_count=%s",
+            "agent_chat_recovered_recommendation request_id=%s user_id=%s thread_id=%s recommendation_count=%s",
             request_id,
             user_id,
             payload.thread_id,
@@ -379,22 +458,28 @@ async def chat(
     response = ChatResponse(
         thread_id=payload.thread_id,
         message=(
-            _recommendation_fallback(recommendation_ids)
-            if recovered_recommendation
-            else route_guidance or _public_message(current_messages)
+            f"Xe của bạn đang đỗ tại ô {fresh_parked_vehicle.slot_id}."
+            if fresh_parked_vehicle is not None
+            else (
+                "Hiện không có phiên đỗ xe đang hoạt động."
+                if fresh_find_requested and fresh_find_missing
+                else (
+                    _recommendation_fallback(recommendation_ids)
+                    if recovered_recommendation
+                    else route_guidance or _public_message(current_messages)
+                )
+            )
         ),
-        intent=result.get("intent") or None,
-        selected_slot=result.get("selected_slot") or None,
+        intent=("FIND_MY_CAR" if fresh_find_requested else result.get("intent") or None),
+        selected_slot=(
+            fresh_parked_vehicle.slot_id
+            if fresh_parked_vehicle is not None
+            else (None if fresh_find_requested else result.get("selected_slot") or None)
+        ),
         tool_names=_safe_tool_names(current_messages),
         current_location=result.get("current_location") or None,
-        recommended_slot_ids=(
-            recommendation_ids
-            if "recommend_parking_slot" in successful_tools
-            else []
-        ),
-        route=(
-            result.get("route") or None if "get_route" in successful_tools else None
-        ),
+        recommended_slot_ids=(recommendation_ids if "recommend_parking_slot" in successful_tools else []),
+        route=(result.get("route") or None if "get_route" in successful_tools else None),
     )
     response.ui_actions.extend(
         derive_chat_ui_actions(
@@ -404,7 +489,11 @@ async def chat(
             intent=response.intent,
             successful_tool_names=successful_tools,
             active_reservation_id=result.get("active_reservation_id") or None,
-            active_session_id=result.get("active_session_id") or None,
+            active_session_id=(
+                fresh_parked_vehicle.session_id
+                if fresh_parked_vehicle is not None
+                else (None if fresh_find_requested else result.get("active_session_id") or None)
+            ),
             route=response.route,
         )
     )

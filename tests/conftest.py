@@ -1,10 +1,19 @@
+import os
 from unittest.mock import AsyncMock
+
+# Most legacy API/core tests exercise the explicitly supported anonymous demo
+# surface. Authentication tests override settings to production mode.
+os.environ["DEMO_MODE"] = "true"
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from src.main import app
+from tests.database_safety import enforce_safe_test_database
+
+enforce_safe_test_database()
+
+from src.main import app  # noqa: E402  # Safety guard must run before app import.
 
 
 @pytest_asyncio.fixture

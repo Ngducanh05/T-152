@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -50,9 +51,7 @@ async def location_db() -> AsyncGenerator[LocationDatabase, None]:
 async def test_confirm_entrance(location_db: LocationDatabase):
     factory = async_sessionmaker(location_db.engine, expire_on_commit=False)
     async with factory() as session, session.begin():
-        confirmed = await LocationService(session).confirm_location(
-            "USER-001", "F1-ENTRANCE"
-        )
+        confirmed = await LocationService(session).confirm_location("USER-001", "F1-ENTRANCE")
     assert confirmed == "F1-ENTRANCE"
 
 
@@ -64,9 +63,7 @@ async def test_confirm_each_checkpoint(
 ):
     factory = async_sessionmaker(location_db.engine, expire_on_commit=False)
     async with factory() as session, session.begin():
-        confirmed = await LocationService(session).confirm_location(
-            "USER-001", checkpoint_id
-        )
+        confirmed = await LocationService(session).confirm_location("USER-001", checkpoint_id)
     assert confirmed == checkpoint_id
 
 
@@ -74,9 +71,7 @@ async def test_confirm_each_checkpoint(
 async def test_confirm_elevator(location_db: LocationDatabase):
     factory = async_sessionmaker(location_db.engine, expire_on_commit=False)
     async with factory() as session, session.begin():
-        confirmed = await LocationService(session).confirm_location(
-            "USER-001", "F1-ELEVATOR"
-        )
+        confirmed = await LocationService(session).confirm_location("USER-001", "F1-ELEVATOR")
     assert confirmed == "F1-ELEVATOR"
 
 
@@ -103,6 +98,61 @@ async def test_reject_aisle_node(location_db: LocationDatabase):
         with pytest.raises(LocationError, match="internal routing aisle") as error:
             await LocationService(session).confirm_location("USER-001", "F1-C-W")
     assert error.value.code is ErrorCode.INVALID_TRANSITION
+
+
+@pytest.mark.asyncio
+async def test_scanned_qr_can_confirm_aisle_and_persists_location(location_db: LocationDatabase):
+    factory = async_sessionmaker(location_db.engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        verified_at = datetime(2026, 8, 26, 3, 0, tzinfo=UTC)
+        marker = await LocationService(session, clock=lambda: verified_at).confirm_scanned_location(
+            "USER-001", "parksmart:location:v1:PSLOC-F3-D-W"
+        )
+    assert marker.node_id == "F3-D-W"
+    async with factory() as session:
+        user = await session.get(ParkingUser, "USER-001")
+    assert user is not None and user.current_node_id == "F3-D-W"
+    assert user.verified_node_id == "F3-D-W"
+    assert user.verified_at == verified_at
+    assert user.verified_marker_id == "PSLOC-F3-D-W"
+
+
+@pytest.mark.asyncio
+async def test_manual_location_updates_navigation_without_overwriting_verification(
+    location_db: LocationDatabase,
+):
+    factory = async_sessionmaker(location_db.engine, expire_on_commit=False)
+    verified_at = datetime(2026, 8, 26, 3, 0, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        service = LocationService(session, clock=lambda: verified_at)
+        await service.confirm_scanned_location("USER-001", "parksmart:location:v1:PSLOC-F2-C-E")
+        await service.confirm_location("USER-001", "F1-CP2")
+
+    async with factory() as session:
+        user = await session.get(ParkingUser, "USER-001")
+    assert user is not None
+    assert user.current_node_id == "F1-CP2"
+    assert user.verified_node_id == "F2-C-E"
+    assert user.verified_at == verified_at
+    assert user.verified_marker_id == "PSLOC-F2-C-E"
+
+
+@pytest.mark.asyncio
+async def test_scanned_qr_rejects_unknown_user_and_rolls_back(location_db: LocationDatabase):
+    factory = async_sessionmaker(location_db.engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        with pytest.raises(LocationError) as error:
+            await LocationService(session).confirm_scanned_location(
+                "USER-MISSING", "parksmart:location:v1:PSLOC-F3-D-W"
+            )
+    assert error.value.code is ErrorCode.INVALID_TRANSITION
+
+    with pytest.raises(RuntimeError, match="rollback"):
+        async with factory() as session, session.begin():
+            await LocationService(session).confirm_scanned_location("USER-001", "parksmart:location:v1:PSLOC-F3-D-W")
+            raise RuntimeError("rollback")
+    async with factory() as session:
+        assert await LocationService(session).get_current_location("USER-001") == "F1-ENTRANCE"
 
 
 @pytest.mark.asyncio

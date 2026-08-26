@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from langgraph.checkpoint.memory import InMemorySaver
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
@@ -18,6 +19,8 @@ from src.agents.graph import build_graph
 from src.api.routes import api_router
 from src.core.config import Settings, get_settings
 from src.core.logging import configure_logging
+from src.core.reservation_expiry import run_reservation_expiry_worker
+from src.services.auth_service import SupabaseTokenVerifier
 
 REQUEST_ID_HEADER = "X-Request-ID"
 logger = logging.getLogger(__name__)
@@ -46,6 +49,7 @@ def _error_response(
     status_code: int,
     code: str,
     message: str,
+    details: dict[str, object] | None = None,
     headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     return JSONResponse(
@@ -57,6 +61,7 @@ def _error_response(
                 "code": code,
                 "message": message,
                 "request_id": _get_request_id(request),
+                **({"details": details} if details is not None else {}),
             },
         },
     )
@@ -72,28 +77,44 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        checkpointer = InMemorySaver()
+        checkpointer = InMemorySaver() if application_settings.agent_enabled else None
+        application.state.auth_token_verifier = SupabaseTokenVerifier(application_settings)
         application.state.agent_checkpointer = checkpointer
-        application.state.agent = (
-            agent_override
-            if agent_override is not None
-            else build_graph(checkpointer=checkpointer)
-        )
+        application.state.agent = None
+        if application_settings.agent_enabled:
+            application.state.agent = (
+                agent_override
+                if agent_override is not None
+                else build_graph(
+                    checkpointer=checkpointer,
+                    max_steps=application_settings.agent_max_steps,
+                )
+            )
         application.state.agent_thread_owners = {}
         application.state.agent_thread_locks = {}
         application.state.agent_thread_last_access = {}
         application.state.agent_thread_deletions = {}
         application.state.agent_thread_cleanup_tasks = set()
         application.state.agent_thread_registry_lock = asyncio.Lock()
-        application.state.agent_thread_ttl_seconds = (
-            application_settings.agent_thread_ttl_seconds
-        )
-        application.state.agent_chat_timeout_seconds = (
-            application_settings.llm_timeout_seconds
+        application.state.agent_thread_ttl_seconds = application_settings.agent_thread_ttl_seconds
+        application.state.agent_chat_timeout_seconds = application_settings.llm_timeout_seconds
+        expiry_engine = create_async_engine(application_settings.database_url)
+        expiry_session_factory = async_sessionmaker(expiry_engine, expire_on_commit=False)
+        expiry_stop_event = asyncio.Event()
+        expiry_task = asyncio.create_task(
+            run_reservation_expiry_worker(
+                expiry_stop_event,
+                settings=application_settings,
+                session_factory=expiry_session_factory,
+            )
         )
         try:
             yield
         finally:
+            expiry_stop_event.set()
+            await expiry_task
+            await expiry_engine.dispose()
+            await application.state.auth_token_verifier.aclose()
             cleanup_tasks = list(application.state.agent_thread_cleanup_tasks)
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
@@ -162,11 +183,15 @@ def create_app(
         if isinstance(exc.detail, dict):
             code = str(exc.detail.get("code", code))
             message = str(exc.detail.get("message", "Request failed."))
+            details = exc.detail.get("details")
+        else:
+            details = None
         return _error_response(
             request,
             status_code=exc.status_code,
             code=code,
             message=message,
+            details=details if isinstance(details, dict) else None,
             headers=exc.headers,
         )
 

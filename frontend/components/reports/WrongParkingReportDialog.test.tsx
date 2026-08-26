@@ -59,13 +59,16 @@ describe("WrongParkingReportDialog", () => {
     await user.click(screen.getByRole("button", { name: /Gửi báo cáo/ }));
 
     expect(onSubmit).toHaveBeenCalledOnce();
-    expect(onSubmit).toHaveBeenCalledWith({
-      slotId: "F1-D01",
-      reasonCode: "CROSSED_LINE",
-      observedPlateNumber: "51A-123.45",
-      description: "Xe đỗ chéo sang ô bên cạnh.",
-      evidence: null,
-    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      {
+        slotId: "F1-D01",
+        reasonCode: "CROSSED_LINE",
+        observedPlateNumber: "51A-123.45",
+        description: "Xe đỗ chéo sang ô bên cạnh.",
+        evidence: null,
+      },
+      expect.any(String),
+    );
     expect(screen.getByRole("status")).toHaveTextContent("Đã gửi báo cáo");
   });
 
@@ -86,13 +89,16 @@ describe("WrongParkingReportDialog", () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Biển số quan sát được (không bắt buộc)")).toBeVisible();
     await user.click(screen.getByRole("button", { name: /Gửi báo cáo/ }));
-    expect(onSubmit).toHaveBeenCalledWith({
-      slotId: "F1-A02",
-      reasonCode: "BLOCKING_ACCESS",
-      observedPlateNumber: null,
-      description: null,
-      evidence: null,
-    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      {
+        slotId: "F1-A02",
+        reasonCode: "BLOCKING_ACCESS",
+        observedPlateNumber: null,
+        description: null,
+        evidence: null,
+      },
+      expect.any(String),
+    );
   });
 
   it("passes an optional evidence image without making it required", async () => {
@@ -121,7 +127,38 @@ describe("WrongParkingReportDialog", () => {
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({ evidence }),
+      expect.any(String),
     );
+  });
+
+  it("reuses the same report idempotency key after an unknown transport failure", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce(createdReport);
+    render(
+      <WrongParkingReportDialog
+        slots={canonicalMap.slots}
+        initialSlotId="F1-D01"
+        rewardPoints={20}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Xe đỗ chéo vạch/ }));
+    const submit = screen.getByRole("button", { name: /Gửi báo cáo/ });
+    await user.click(submit);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Không thể kết nối");
+    await user.click(submit);
+
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    const firstKey = onSubmit.mock.calls[0]?.[1];
+    const secondKey = onSubmit.mock.calls[1]?.[1];
+    expect(firstKey).toEqual(expect.any(String));
+    expect(secondKey).toBe(firstKey);
+    expect(await screen.findByRole("status")).toHaveTextContent("Đã gửi báo cáo");
   });
 
   it("requires a five-character description only for OTHER", async () => {

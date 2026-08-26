@@ -28,9 +28,7 @@ def test_slot_ids_ev_allocation_and_aisle_attachments_are_exact():
     parking_map = build_canonical_f1_map()
     slots = {slot.id: slot for slot in parking_map.slots}
 
-    assert set(slots) == {
-        f"F1-{zone}{number:02d}" for zone in "ABCD" for number in range(1, 11)
-    }
+    assert set(slots) == {f"F1-{zone}{number:02d}" for zone in "ABCD" for number in range(1, 11)}
     assert {slot.id for slot in parking_map.slots if slot.has_charger} == {
         f"F1-{zone}{number:02d}" for zone in "CD" for number in range(1, 6)
     }
@@ -59,9 +57,7 @@ def test_core_and_assumed_slot_coordinates_are_exact():
 
 def test_edges_are_bidirectional_stored_once_with_canonical_distances():
     parking_map = build_canonical_f1_map()
-    edges = {
-        frozenset((edge.from_node, edge.to_node)): edge for edge in parking_map.edges
-    }
+    edges = {frozenset((edge.from_node, edge.to_node)): edge for edge in parking_map.edges}
 
     assert len(edges) == len(parking_map.edges) == 59
     assert all(edge.bidirectional and edge.enabled for edge in parking_map.edges)
@@ -71,9 +67,7 @@ def test_edges_are_bidirectional_stored_once_with_canonical_distances():
     assert frozenset(("F1-CP2", "F1-ELEVATOR")) not in edges
 
     slot_edges = [
-        edge
-        for edge in parking_map.edges
-        if edge.from_node.endswith(("-W", "-E")) and edge.to_node[-2:].isdigit()
+        edge for edge in parking_map.edges if edge.from_node.endswith(("-W", "-E")) and edge.to_node[-2:].isdigit()
     ]
     assert len(slot_edges) == 40
     assert all(edge.distance_m == 4 for edge in slot_edges)
@@ -101,16 +95,13 @@ def test_all_nodes_are_connected_and_elevator_has_only_canonical_neighbors():
     ("mutation", "message"),
     [
         (
-            lambda parking_map: replace(
-                parking_map, nodes=parking_map.nodes[:-1] + (parking_map.nodes[0],)
-            ),
+            lambda parking_map: replace(parking_map, nodes=parking_map.nodes[:-1] + (parking_map.nodes[0],)),
             "node IDs must be unique",
         ),
         (
             lambda parking_map: replace(
                 parking_map,
-                slots=(replace(parking_map.slots[0], node_id="F1-MISSING"),)
-                + parking_map.slots[1:],
+                slots=(replace(parking_map.slots[0], node_id="F1-MISSING"),) + parking_map.slots[1:],
             ),
             "slot aisle reference does not exist",
         ),
@@ -126,16 +117,14 @@ def test_all_nodes_are_connected_and_elevator_has_only_canonical_neighbors():
         (
             lambda parking_map: replace(
                 parking_map,
-                edges=parking_map.edges[:-1]
-                + (MapEdge("F1-CP2", "F1-ELEVATOR", 1),),
+                edges=parking_map.edges[:-1] + (MapEdge("F1-CP2", "F1-ELEVATOR", 1),),
             ),
             "edge endpoints",
         ),
         (
             lambda parking_map: replace(
                 parking_map,
-                edges=parking_map.edges[:-1]
-                + (MapEdge("F1-D-E", "F1-MISSING", 4),),
+                edges=parking_map.edges[:-1] + (MapEdge("F1-D-E", "F1-MISSING", 4),),
             ),
             "every edge endpoint",
         ),

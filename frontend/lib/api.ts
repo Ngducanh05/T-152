@@ -25,6 +25,7 @@ import type {
   ParkingReservation,
   ParkingSession,
   ParkingSlot,
+  ParkingSnapshot,
   ParkingStatus,
   ContributionRecord,
   RejectSlotObservationRequest,
@@ -47,6 +48,7 @@ import type {
   VerifySlotObservationRequest,
   UpdateParkingSlotStatusRequest,
   WrongParkingReport,
+  UserParkingState,
 } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
@@ -161,6 +163,16 @@ function queryString(values: Record<string, string | number | boolean | undefine
   return query ? `?${query}` : "";
 }
 
+function idempotencyHeaders(
+  idempotencyKey?: string,
+): HeadersInit | undefined {
+  if (!idempotencyKey) return undefined;
+
+  return {
+    "Idempotency-Key": idempotencyKey,
+  };
+}
+
 export class ParkSmartApiClient {
   private readonly baseUrl: string;
   private readonly fetcher: typeof fetch;
@@ -271,6 +283,17 @@ export class ParkSmartApiClient {
     return this.request<ParkingStatus>("/parking/status", { signal });
   }
 
+  getParkingSnapshot(signal?: AbortSignal) {
+    return this.request<ParkingSnapshot>("/parking/snapshot", { signal });
+  }
+
+  getUserParkingState(userId: string, signal?: AbortSignal) {
+    return this.request<UserParkingState>(
+      `/parking/users/${encodeURIComponent(userId)}/state`,
+      { signal },
+    );
+  }
+
   getSlots(filters: SlotFilters = {}, signal?: AbortSignal) {
     const query = queryString({
       zone_id: filters.zone_id,
@@ -324,10 +347,15 @@ export class ParkSmartApiClient {
     });
   }
 
-  createReservation(payload: CreateReservationRequest, signal?: AbortSignal) {
+  createReservation(
+    payload: CreateReservationRequest,
+    signal?: AbortSignal,
+    idempotencyKey?: string,
+  ) {
     return this.request<ParkingReservation>("/reservations", {
       method: "POST",
       body: JSON.stringify(payload),
+      headers: idempotencyHeaders(idempotencyKey),
       signal,
     });
   }
@@ -356,10 +384,15 @@ export class ParkSmartApiClient {
     });
   }
 
-  confirmParking(payload: ConfirmParkingRequest, signal?: AbortSignal) {
+  confirmParking(
+    payload: ConfirmParkingRequest,
+    signal?: AbortSignal,
+    idempotencyKey?: string,
+  ) {
     return this.request<ParkingSession>("/sessions/confirm-parking", {
       method: "POST",
       body: JSON.stringify(payload),
+      headers: idempotencyHeaders(idempotencyKey),
       signal,
     });
   }
@@ -377,12 +410,14 @@ export class ParkSmartApiClient {
     sessionId: string,
     payload: CompleteSessionRequest,
     signal?: AbortSignal,
+    idempotencyKey?: string,
   ) {
     return this.request<ParkingSession>(
       `/sessions/${encodeURIComponent(sessionId)}/complete`,
       {
         method: "POST",
         body: JSON.stringify(payload),
+        headers: idempotencyHeaders(idempotencyKey),
         signal,
       },
     );
@@ -466,7 +501,10 @@ export class ParkSmartApiClient {
   reportWrongParking(
     payload: CreateWrongParkingReportRequest,
     signal?: AbortSignal,
+    idempotencyKey?: string,
   ) {
+    const headers = idempotencyHeaders(idempotencyKey);
+
     if (payload.evidence) {
       const form = new FormData();
       form.set("user_id", payload.user_id);
@@ -480,12 +518,14 @@ export class ParkSmartApiClient {
       return this.request<WrongParkingReport>("/reports/wrong-parking", {
         method: "POST",
         body: form,
+        headers,
         signal,
       });
     }
     return this.request<WrongParkingReport>("/reports/wrong-parking", {
       method: "POST",
       body: JSON.stringify(payload),
+      headers,
       signal,
     });
   }

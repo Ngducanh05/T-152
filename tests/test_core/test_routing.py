@@ -11,7 +11,7 @@ from src.core.config import get_settings
 from src.core.db_models import Base, MapEdge, MapNode
 from src.core.routing import RoutingError, RoutingService
 from src.core.seed import seed_if_missing
-from src.models.schemas import ErrorCode
+from src.models.schemas import ErrorCode, RouteMode
 
 
 @pytest_asyncio.fixture
@@ -181,3 +181,43 @@ async def test_sssp_reuses_loaded_graph(routing_session: AsyncSession):
 
     assert from_entrance["F1-C01"] == route.distance_m
     assert to_exit["F1-C01"] > 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("start", "destination"),
+    [("F1-A01", "F2-A01"), ("F2-A01", "F1-A01")],
+)
+async def test_cross_floor_vehicle_route_uses_ramp_only(
+    routing_session: AsyncSession,
+    start: str,
+    destination: str,
+):
+    route = await RoutingService(routing_session).get_route(
+        start,
+        destination,
+        mode=RouteMode.VEHICLE,
+    )
+
+    assert any(node_id.endswith("-RAMP") for node_id in route.path)
+    assert not any(node_id.endswith("-ELEVATOR") for node_id in route.path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("start", "destination"),
+    [("F1-A01", "F2-A01"), ("F2-A01", "F1-A01")],
+)
+async def test_cross_floor_pedestrian_route_uses_elevator_only(
+    routing_session: AsyncSession,
+    start: str,
+    destination: str,
+):
+    route = await RoutingService(routing_session).get_route(
+        start,
+        destination,
+        mode=RouteMode.PEDESTRIAN,
+    )
+
+    assert any(node_id.endswith("-ELEVATOR") for node_id in route.path)
+    assert not any(node_id.endswith("-RAMP") for node_id in route.path)

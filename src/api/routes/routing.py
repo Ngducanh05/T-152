@@ -7,10 +7,11 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import require_authenticated_or_demo
+from src.api.errors import domain_http_error
 from src.core.database import get_db_session
 from src.core.routing import RoutingError, RoutingService
 from src.models.common import ErrorResponse, SuccessResponse
-from src.models.schemas import ErrorCode, FloorScopedId, RouteMode, RouteResult
+from src.models.schemas import FloorScopedId, RouteMode, RouteResult
 
 router = APIRouter(
     prefix="/routes",
@@ -25,7 +26,7 @@ class RouteRequest(BaseModel):
 
     start_node_id: FloorScopedId
     destination_node_id: FloorScopedId
-    mode: RouteMode | None = None
+    mode: RouteMode
 
 
 class RouteResponse(RouteResult):
@@ -34,14 +35,7 @@ class RouteResponse(RouteResult):
 
 
 def _domain_error(error: RoutingError) -> HTTPException:
-    status_code = {
-        ErrorCode.ROUTE_NODE_NOT_FOUND: 404,
-        ErrorCode.ROUTE_NOT_FOUND: 422,
-    }.get(error.code, 422)
-    return HTTPException(
-        status_code=status_code,
-        detail={"code": error.code.value, "message": error.message},
-    )
+    return domain_http_error(error)
 
 
 @router.post(

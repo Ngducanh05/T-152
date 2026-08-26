@@ -1,13 +1,17 @@
 # ParkSmart AI
 
-ParkSmart AI là hệ thống demo quản lý và dẫn đường trong bãi xe tầng F1. FastAPI
-và PostgreSQL giữ trạng thái authoritative cho bản đồ, ô đỗ, reservation, phiên
+ParkSmart AI là hệ thống quản lý và dẫn đường trong bãi xe nhiều tầng F1/F2/F3. FastAPI
+và PostgreSQL trên Supabase giữ trạng thái authoritative cho bản đồ, ô đỗ, reservation, phiên
 đỗ xe, vị trí người dùng, parking events và báo cáo xe đỗ sai. Next.js cung cấp
 hai giao diện: `/` cho người dùng và `/admin` cho vận hành. LangGraph Agent chỉ
 gọi các Core Service có cùng quy tắc nghiệp vụ với REST API.
 
+Supabase Auth cung cấp đăng nhập/đăng ký; backend tự tạo ParkSmart profile và parking
+identity cho tài khoản người dùng mới. Role và quyền admin luôn lấy từ `profiles` do
+backend quản lý, không tin role trong token metadata.
+
 Demo mặc định dùng `USER-001` và `VEHICLE-001`. Khi bật `DEMO_MODE` và
-`SIMULATOR_ENABLED`, operator có thể đưa demo về baseline: 40 ô, 39 AVAILABLE,
+`SIMULATOR_ENABLED`, operator có thể đưa demo về baseline: 120 ô, 119 AVAILABLE,
 0 RESERVED, 1 OCCUPIED; chỉ `F1-B03` bị chiếm bởi `SIM-CAR-02`.
 
 ## Công nghệ và yêu cầu
@@ -40,7 +44,7 @@ Giữ backend URL trong `frontend/.env.local` ở dạng:
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
 ```
 
-Điền `LLM_API_KEY` trong `.env` nếu dùng Agent thật. Không commit `.env`,
+Điền `LLM_API_KEY` trong `.env` nếu bật Agent hoặc Speech. Không commit `.env`,
 `frontend/.env.local`, API key hoặc database password.
 
 ### Các biến môi trường
@@ -60,13 +64,31 @@ cấu hình; giá trị rỗng nghĩa là tính năng tương ứng chưa đư�
 | `CORS_ORIGINS` | Có khi frontend khác origin | `http://localhost:3000` | Danh sách origin được phép gọi API |
 | `NEXT_PUBLIC_API_BASE_URL` | Có | `http://localhost:8000/api/v1` | Base URL mà frontend dùng để gọi FastAPI |
 | `DATABASE_URL` | Có | PostgreSQL local | Async SQLAlchemy connection string |
+| `ADJACENT_OBSERVATION_REWARD_POINTS` | Không | `10` | Điểm giữ ở trạng thái chờ cho observation hợp lệ |
+| `WRONG_PARKING_REPORT_REWARD_POINTS` | Không | `20` | Điểm giữ ở trạng thái chờ cho report không trùng |
+| `CONTRIBUTION_DAILY_POINTS_LIMIT` | Không | `100` | Cap chung PENDING + EARNED mỗi ngày |
+| `OBSERVATION_VERIFICATION_TTL_SECONDS` | Không | `1800` | Thời hạn admin xác minh observation |
+| `REPORT_REWARD_COOLDOWN_SECONDS` | Không | `3600` | Cửa sổ phát hiện report tương tự |
 | `RESERVATION_TTL_SECONDS` | Không | `300` | Thời gian giữ ô trước khi hết hạn |
 | `SIMULATOR_ENABLED` | Không | `true` | Cho phép Simulator Service hoạt động |
 | `DEMO_MODE` | Không | `true` | Cho phép reset/scenario và Admin Demo không bearer token |
 | `SUPABASE_URL` | Khi bật auth Supabase | Rỗng | Supabase project URL |
 | `SUPABASE_ANON_KEY` | Khi bật auth Supabase | Rỗng | Public Supabase client key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Chỉ backend khi cần | Rỗng | Secret service-role key; không đưa ra frontend |
-| `LLM_API_KEY` | Có khi chạy Agent thật | Rỗng | API key của LLM provider |
+| `SUPABASE_REPORT_EVIDENCE_BUCKET` | Khi dùng ảnh report | `wrong-parking-evidence` | Private bucket do backend quản lý |
+| `REPORT_EVIDENCE_MAX_BYTES` | Không | `5000000` | Kích thước ảnh report tối đa |
+| `WRONG_PARKING_REPORT_DAILY_LIMIT` | Không | `0` | Số report tối đa mỗi user/ngày UTC; `0` không giới hạn |
+| `NEXT_PUBLIC_SUPABASE_URL` | Khi bật auth | Rỗng | Supabase project URL công khai cho frontend |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Khi bật auth | Rỗng | Publishable/anon key cho frontend; không phải service-role |
+| `NEXT_PUBLIC_DEMO_MODE` | Không | `false` | Bật identity demo ở frontend khi phát triển offline |
+| `NEXT_PUBLIC_AGENT_ENABLED` | Không | `true` | Render Agent composer và cho phép frontend gọi Agent chat |
+| `NEXT_PUBLIC_SPEECH_ENABLED` | Không | `true` (`false` trong public beta example) | Hiển thị và khởi tạo Voice STT/TTS |
+| `NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL` | Trước public beta | Rỗng | Email công khai, có người theo dõi để tiếp nhận yêu cầu xóa dữ liệu |
+| `AGENT_ENABLED` | Không | `true` | Khởi tạo LangGraph và phục vụ Agent chat |
+| `AGENT_DAILY_REQUEST_LIMIT` | Không | `0` | Số request Agent tối đa mỗi user/ngày UTC; `0` tắt quota |
+| `AGENT_MAX_STEPS` | Không | `8` | Step budget cho một Agent request, từ 1 đến 8 |
+| `SPEECH_ENABLED` | Không | `true` | Cho phép backend transcription endpoint |
+| `LLM_API_KEY` | Khi Agent hoặc Speech backend bật trong production | Rỗng | API key dùng chung cho LLM/STT provider |
 | `LLM_MODEL` | Không | `gpt-4o-mini` | Model dùng cho LangGraph Agent |
 | `LLM_TEMPERATURE` | Không | `0` | Temperature cho Agent |
 | `SPEECH_TRANSCRIPTION_MODEL` | Khi dùng backend STT fallback | `gpt-4o-mini-transcribe` | Model chuyển audio thành text |
@@ -84,6 +106,27 @@ cấu hình; giá trị rỗng nghĩa là tính năng tương ứng chưa đư�
 
 Không đưa biến không có tiền tố `NEXT_PUBLIC_` vào client bundle. Đặc biệt,
 `LLM_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` và `AI_LOG_API_KEY` chỉ thuộc backend.
+Public beta dùng `NEXT_PUBLIC_AGENT_ENABLED=true` và
+`NEXT_PUBLIC_SPEECH_ENABLED=false`. Giá trị `NEXT_PUBLIC_` được đóng vào bundle lúc
+`next build`; cần build lại frontend sau khi đổi cờ. Backend production chỉ được thiếu
+`LLM_API_KEY` khi cả `AGENT_ENABLED=false` và `SPEECH_ENABLED=false`; các validation
+production khác vẫn giữ nguyên.
+
+Trước khi mở public beta, bắt buộc cấu hình
+`NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL` bằng một email thật đang được theo dõi. Trang
+`/privacy` chỉ tạo liên kết `mailto:` khi giá trị hợp lệ; nếu thiếu hoặc sai định dạng,
+trang sẽ thông báo kênh liên hệ đang được cấu hình. Đây là biến build-time của Next.js,
+vì vậy phải build và redeploy frontend sau khi thay đổi.
+
+Public beta production dùng `AGENT_DAILY_REQUEST_LIMIT=5` và
+`AGENT_MAX_STEPS=4`. Quota được lưu trong PostgreSQL theo trusted parking user và ngày UTC;
+request đã qua validation được tính ngay trước khi gọi graph, kể cả khi provider hoặc tool
+lỗi sau đó.
+
+Public beta production dùng `WRONG_PARKING_REPORT_DAILY_LIMIT=5`. Quota report được lưu
+trong PostgreSQL theo trusted parking user và ngày UTC; local development mặc định `0`
+(unlimited). Evidence giữ giới hạn 5.000.000 byte và chỉ chấp nhận JPEG, PNG, WebP,
+HEIC hoặc HEIF có MIME khớp signature thực tế.
 
 ## 2. Khởi động PostgreSQL
 
@@ -115,7 +158,8 @@ uv run python scripts\seed_demo.py
 Lần thứ hai phải báo `0 row(s) created`. Script gọi trực tiếp
 `src/core/seed.py` qua async SQLAlchemy session đã cấu hình. Nó chỉ thêm dữ liệu
 canonical còn thiếu, không reset trạng thái mutable của slot, reservation hoặc
-parking session.
+parking session. Baseline canonical hiện có 120 slot: mỗi tầng F1/F2/F3 có 40
+slot. Khi Supabase mới chỉ có F1, chạy seed sẽ bổ sung 80 slot và graph F2/F3.
 
 ## 5. Khởi động FastAPI
 
@@ -141,13 +185,33 @@ Mở:
 
 - `http://localhost:3000` cho web app chat mobile-first của người dùng. Trang này không hiển
   thị bản đồ hay mật độ vận hành; route được trình bày bằng điểm đến, khoảng cách và danh
-  sách chỉ dẫn có icon đi thẳng/rẽ trái/rẽ phải. Hướng rẽ được tính deterministic từ
-  `route.polyline`, không được suy diễn từ LLM prose.
+  sách chỉ dẫn đời thường như “Ở ngã tư phía trước, rẽ trái/phải”. Checkpoint chỉ tồn tại
+  nội bộ, không xuất hiện trong bộ chọn vị trí, tên vị trí hoặc marker. Hướng rẽ được tính
+  deterministic từ `route.polyline`, không được suy diễn từ LLM prose.
 - `http://localhost:3000/admin` cho dashboard vận hành có map. Ô có report `OPEN` giữ màu
-  trạng thái và có viền/icon/badge đỏ; click ô để resolve, reopen hoặc hard-delete report.
+  trạng thái và có viền/icon/badge đỏ; click ô để mở chi tiết/report/observation. Panel
+  chi tiết ô có thể đóng hoặc đóng bằng cách click lại ô. Dashboard không hiển thị
+  simulator controls; simulator API chỉ còn phục vụ development/test có kiểm soát.
 
 Backend và PostgreSQL phải đang chạy. `/admin` hoạt động không bearer token chỉ
 khi `DEMO_MODE=true`; ngoài demo mode, backend yêu cầu role `admin`.
+
+Để kiểm thử đăng nhập thật, đặt `DEMO_MODE=false` và `NEXT_PUBLIC_DEMO_MODE=false`.
+Không để hai giá trị này lệch nhau. Người dùng mới có thể thêm xe đầu tiên sau khi
+đăng ký; admin phải được operator đổi `profiles.app_role` thành `admin`.
+Browser lưu Supabase session trong `sessionStorage` với storage key riêng cho từng tab,
+cho phép mở user và admin đồng thời mà không thay session của nhau. Đóng tab kết thúc
+session của tab đó; không duplicate một tab đã đăng nhập nếu cần hai identity độc lập.
+
+Với public beta production, không cấp admin bằng thao tác development thủ công hoặc
+token metadata. Dùng runbook [Admin Provisioning](docs/ADMIN_PROVISIONING.md); tài liệu
+này bổ sung, không thay thế flow development/demo hiện tại. Release gate yêu cầu:
+
+- email Supabase của dedicated admin đã confirmed;
+- `profiles.app_role=admin`, còn `parking_user_id` và `default_vehicle_id` đều null;
+- user thường gọi admin API nhận `403 ADMIN_REQUIRED`;
+- request anonymous gọi admin API nhận `401 AUTH_REQUIRED`;
+- production đặt `DEMO_MODE=false` và `SIMULATOR_ENABLED=false`.
 
 ## 7. Reset demo một bước
 
@@ -252,23 +316,53 @@ có cấu trúc.
 
 ## 12. Demo report lifecycle
 
-1. Tại `/`, chạm **Báo xe đỗ sai**, chọn ô, chọn reason, đính kèm ảnh bằng chứng bắt buộc,
-   rồi chạm nút gửi báo cáo. Với reason chuẩn không cần nhập mô tả; report không làm thay đổi
-   trạng thái ô.
-2. Tại `/admin`, tìm viền đỏ và badge OPEN trên map, click ô để mở drawer.
-3. Resolve report với version hiện tại. Cảnh báo chỉ biến mất khi ô không còn report OPEN;
+1. Tại `/`, chạm **Báo xe đỗ sai**, chọn ô rồi chọn reason. Chọn reason chỉ đánh dấu lựa
+   chọn, không gửi API. Form sau đó cho nhập biển số, mô tả và ảnh hiện trường tùy chọn;
+   user phải bấm **Gửi báo cáo** riêng. Popup cuộn trong viewport và giữ nút gửi ở đáy.
+   Với reason chuẩn không cần nhập mô tả; report không làm thay đổi trạng thái ô.
+2. Tại `/admin`, tìm viền đỏ và badge OPEN trên map, click ô để mở drawer; ảnh được mở qua
+   signed URL ngắn hạn và bucket không public.
+3. Resolve report với version hiện tại và outcome bắt buộc. Cảnh báo chỉ biến mất khi ô không còn report OPEN;
    reopen làm cảnh báo xuất hiện lại.
 4. **Xóa vĩnh viễn** khác resolve: admin phải xác nhận, row bị xóa khỏi database và
    `GET /api/v1/admin/reports/{id}` sau đó trả `404 REPORT_NOT_FOUND`.
 
+## 13. ParkSmart Points và đóng góp đã xác minh
+
+Observation ô bên cạnh và report xe đỗ sai dùng chung một reward ledger và daily cap.
+Khi user submit, contribution cùng reward (nếu còn quota) chỉ ở trạng thái `PENDING`;
+frontend không tự cộng điểm và observation không cập nhật `parking_slots`. Admin phải xác minh:
+
+- observation `VERIFIED` mới đi qua Parking State Service rồi reward thành `EARNED`;
+- observation `REJECTED`/`EXPIRED` hủy reward và không đổi slot;
+- report chỉ `CONFIRMED` mới earn; `REJECTED`, `DUPLICATE`, `UNVERIFIABLE` cancel;
+- reopen không tạo hoặc settle reward lần nữa; hard-delete giữ ledger, đồng thời cancel reward còn pending.
+
+Dashboard admin tiếp tục dùng `ParkingMap`/`IsometricMap`, floor tabs và polling hiện có.
+Observation pending thêm viền/icon cam, report mở giữ cảnh báo đỏ, còn outline xanh biểu thị
+target đang chọn; màu `AVAILABLE`/`RESERVED`/`OCCUPIED` không bị thay thế.
+
 Backend là nguồn sự thật. Polling và refetch sau mutation quyết định UI; browser broadcast
 chỉ là tín hiệu làm mới.
+
+Admin có thể click trực tiếp ô trên bản đồ để xem trạng thái, report hoặc observation đang
+chờ; thao tác đổi `AVAILABLE`/`OCCUPIED` dùng endpoint admin và Parking State Service, không
+được ghi đè `RESERVED`. Panel chi tiết có nút đóng rõ ràng và việc đóng bỏ luôn selected
+outline. Dashboard không còn khu điều khiển mô phỏng. Phối cảnh hầm giữ góc nhìn isometric cố định; lối lên/xuống cùng
+tông màu mặt đường, nằm ngoài mép làn xe, dùng vạch dọc theo hướng dốc và lối xuống có
+miệng hầm cùng tường chắn riêng. Xe đang đỗ dùng khối hộp chữ nhật isometric. F2/F3 dùng lại
+renderer và hình học chuẩn hiện tại. Reward summary phía user được polling cùng
+parking state nên điểm đã xác minh hiện ra mà không cần tải lại trang.
 
 Các shortcut đọc/chọn như tìm ô, chọn vị trí, chọn slot, tìm xe và mở report có thể dùng lại
 nhiều lần; guard in-flight vẫn chặn double-click gọi API song song. Với reservation đang
 active, nút **Tôi đã đến nơi** xác nhận vị trí tại đúng slot, refetch version authoritative,
 rồi mới gọi confirm parking trong cùng một thao tác chủ đích. Chọn slot trong LocationPicker
 riêng lẻ vẫn không tự động xác nhận đỗ.
+
+Recommendation nhận `floor_id` tùy chọn. Khi user nói “tầng 1/2/3” hoặc F1/F2/F3,
+Agent truyền hard constraint này vào Core Service và không bắt user chọn thêm khu A/B/C/D.
+Các nút preference có sạc/dễ tiếp cận/gần thang máy cũng gửi tầng suy ra từ vị trí đã xác nhận.
 
 Reservation/session, lỗi và thông báo mutation được giữ trong priority dock sticky dưới
 header, nên vẫn thao tác được khi lịch sử chat dài. Sau khi xác nhận đỗ, user có thể tùy chọn

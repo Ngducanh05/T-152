@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 
 import { ApiError, formatApiErrorForOperator } from "@/lib/api";
+import {
+  clearIdempotencyKey,
+  getOrCreateIdempotencyKey,
+  type IdempotencyAttempt,
+} from "@/lib/idempotency";
 import { formatParkingLocation } from "@/lib/parking-display";
 import type {
   ParkingSlot,
@@ -24,7 +29,10 @@ interface WrongParkingReportDialogProps {
   initialSlotId?: string | null;
   rewardPoints: number;
   onClose: () => void;
-  onSubmit: (draft: WrongParkingReportDraft) => Promise<WrongParkingReport>;
+  onSubmit: (
+    draft: WrongParkingReportDraft,
+    idempotencyKey: string,
+  ) => Promise<WrongParkingReport>;
 }
 
 const STANDARD_REASONS: Array<{
@@ -67,6 +75,7 @@ export function WrongParkingReportDialog({
     useState<WrongParkingReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submittingRef = useRef(false);
+  const reportIdempotencyRef = useRef<IdempotencyAttempt | null>(null);
 
   async function submitReport() {
     const normalizedDescription = description.trim();
@@ -79,19 +88,47 @@ export function WrongParkingReportDialog({
       return;
     }
 
+    const draft: WrongParkingReportDraft = {
+      slotId,
+      reasonCode: selectedReason,
+      observedPlateNumber: observedPlateNumber.trim().toUpperCase() || null,
+      description: normalizedDescription || null,
+      evidence,
+    };
+    const fingerprint = JSON.stringify({
+      slotId: draft.slotId,
+      reasonCode: draft.reasonCode,
+      observedPlateNumber: draft.observedPlateNumber,
+      description: draft.description,
+      evidence: draft.evidence
+        ? {
+            name: draft.evidence.name,
+            size: draft.evidence.size,
+            type: draft.evidence.type,
+            lastModified: draft.evidence.lastModified,
+          }
+        : null,
+    });
+    const idempotencyKey = getOrCreateIdempotencyKey(
+      reportIdempotencyRef,
+      fingerprint,
+    );
+
     submittingRef.current = true;
     setPending(true);
     setErrorMessage(null);
     try {
-      const report = await onSubmit({
-        slotId,
-        reasonCode: selectedReason,
-        observedPlateNumber: observedPlateNumber.trim().toUpperCase() || null,
-        description: normalizedDescription || null,
-        evidence,
-      });
+      const report = await onSubmit(draft, idempotencyKey);
+      clearIdempotencyKey(reportIdempotencyRef);
       setSubmittedReport(report);
     } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.status >= 400 &&
+        error.status < 500
+      ) {
+        clearIdempotencyKey(reportIdempotencyRef);
+      }
       setErrorMessage(
         error instanceof ApiError && error.code === "REPORT_DAILY_LIMIT_REACHED"
           ? "Bạn đã gửi hết số báo cáo cho hôm nay. Vui lòng thử lại vào ngày mai."

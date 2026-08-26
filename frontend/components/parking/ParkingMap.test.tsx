@@ -16,7 +16,7 @@ afterEach(cleanup);
 
 function fixture() {
   const map: ParkingMapData = canonicalMap;
-  return { map, slots: map.slots, status: parkingStatus };
+  return { map, slots: canonicalMap.slots, status: parkingStatus };
 }
 
 describe("ParkingMap", () => {

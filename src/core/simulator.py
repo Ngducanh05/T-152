@@ -109,9 +109,7 @@ class SimulatorService:
                 )
             ]
             parked_a04 = await self._manual_park("F1-A04", "SIM-CAR-01")
-            steps.append(
-                self._transition_step(2, SimulatorAction.PARK, parked_a04, "SIM-CAR-01")
-            )
+            steps.append(self._transition_step(2, SimulatorAction.PARK, parked_a04, "SIM-CAR-01"))
             released_b03 = await self._manual_leave(BASELINE_SLOT_ID, BASELINE_VEHICLE_ID)
             steps.append(
                 self._transition_step(
@@ -122,9 +120,7 @@ class SimulatorService:
                 )
             )
             parked_d07 = await self._manual_park("F1-D07", "SIM-CAR-03")
-            steps.append(
-                self._transition_step(4, SimulatorAction.PARK, parked_d07, "SIM-CAR-03")
-            )
+            steps.append(self._transition_step(4, SimulatorAction.PARK, parked_d07, "SIM-CAR-03"))
             return steps
 
     async def _manual_park(self, slot_id: str, vehicle_id: str) -> ParkingSlot:
@@ -146,11 +142,7 @@ class SimulatorService:
         )
 
     async def _reset_demo(self) -> None:
-        slots = list(
-            await self.session.scalars(
-                select(ParkingSlot).order_by(ParkingSlot.id).with_for_update()
-            )
-        )
+        slots = list(await self.session.scalars(select(ParkingSlot).order_by(ParkingSlot.id).with_for_update()))
         await self._refuse_protected_state(slots)
 
         baseline_is_ready = any(
@@ -177,9 +169,7 @@ class SimulatorService:
 
     async def _refuse_protected_state(self, slots: list[ParkingSlot]) -> None:
         active_reservation = await self.session.scalar(
-            select(ParkingReservation)
-            .where(ParkingReservation.status == ReservationStatus.ACTIVE)
-            .with_for_update()
+            select(ParkingReservation).where(ParkingReservation.status == ReservationStatus.ACTIVE).with_for_update()
         )
         if active_reservation is not None:
             self._raise_protected(
@@ -188,9 +178,7 @@ class SimulatorService:
             )
 
         active_session = await self.session.scalar(
-            select(ParkingSession)
-            .where(ParkingSession.status == ParkingSessionStatus.ACTIVE)
-            .with_for_update()
+            select(ParkingSession).where(ParkingSession.status == ParkingSessionStatus.ACTIVE).with_for_update()
         )
         if active_session is not None:
             self._raise_protected(
@@ -258,11 +246,7 @@ class SimulatorService:
 
     @asynccontextmanager
     async def _mutation_transaction(self) -> AsyncIterator[None]:
-        transaction = (
-            self.session.begin_nested()
-            if self.session.in_transaction()
-            else self.session.begin()
-        )
+        transaction = self.session.begin_nested() if self.session.in_transaction() else self.session.begin()
         async with transaction:
             yield
 

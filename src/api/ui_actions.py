@@ -1,6 +1,5 @@
 """Deterministic, allowlisted UI actions derived from verified Agent state."""
 
-import re
 from collections.abc import Sequence, Set
 
 from src.models.schemas import (
@@ -8,18 +7,14 @@ from src.models.schemas import (
     ChatUIActionStyle,
     ChatUIActionType,
     RouteResult,
+    is_slot_id,
 )
 
-_CANONICAL_SLOT_ID = re.compile(r"^F1-[A-D](?:0[1-9]|10)$")
 _MAX_UI_ACTIONS = 5
 
 
 def _slot_ids(values: Sequence[str]) -> list[str]:
-    return [
-        slot_id
-        for slot_id in dict.fromkeys(values)
-        if _CANONICAL_SLOT_ID.fullmatch(slot_id)
-    ]
+    return [slot_id for slot_id in dict.fromkeys(values) if is_slot_id(slot_id)]
 
 
 def _action(
@@ -31,6 +26,8 @@ def _action(
     style: ChatUIActionStyle = ChatUIActionStyle.SECONDARY,
     requires_confirmation: bool = False,
 ) -> ChatUIAction:
+    if action_type is ChatUIActionType.SELECT_LOCATION:
+        style = ChatUIActionStyle.SECONDARY
     return ChatUIAction(
         id=action_id,
         type=action_type,
@@ -54,32 +51,31 @@ def derive_chat_ui_actions(
 ) -> list[ChatUIAction]:
     """Build safe actions without inspecting LLM text or accepting arbitrary targets."""
     actions: list[ChatUIAction] = []
-    canonical_selected_slot = (
-        selected_slot
-        if selected_slot is not None and _CANONICAL_SLOT_ID.fullmatch(selected_slot)
-        else None
-    )
+    canonical_selected_slot = selected_slot if is_slot_id(selected_slot) else None
 
     if not current_location:
         return [
             _action(
+                action_id="scan-location-qr",
+                action_type=ChatUIActionType.SCAN_LOCATION_QR,
+                label="Quét QR vị trí",
+                style=ChatUIActionStyle.PRIMARY,
+            ),
+            _action(
                 action_id="select-location",
                 action_type=ChatUIActionType.SELECT_LOCATION,
-                label="Chọn vị trí hiện tại",
-                style=ChatUIActionStyle.PRIMARY,
-            )
+                label="Chọn vị trí thủ công",
+                style=ChatUIActionStyle.SECONDARY,
+            ),
         ]
 
-    if (
-        "recommend_parking_slot" in successful_tool_names
-        and recommended_slot_ids
-    ):
+    if "recommend_parking_slot" in successful_tool_names and recommended_slot_ids:
         for slot_id in _slot_ids(recommended_slot_ids)[:3]:
             actions.append(
                 _action(
                     action_id=f"select-slot:{slot_id.lower()}",
                     action_type=ChatUIActionType.SELECT_SLOT,
-                    label=f"Chọn ô {slot_id.removeprefix('F1-')}",
+                    label=f"Chọn {slot_id}",
                     payload={"slot_id": slot_id},
                     style=ChatUIActionStyle.PRIMARY,
                 )
@@ -101,11 +97,7 @@ def derive_chat_ui_actions(
                 action_id="cancel-reservation",
                 action_type=ChatUIActionType.CANCEL,
                 label="Hủy chỗ đã giữ",
-                payload=(
-                    {"slot_id": canonical_selected_slot}
-                    if canonical_selected_slot is not None
-                    else None
-                ),
+                payload=({"slot_id": canonical_selected_slot} if canonical_selected_slot is not None else None),
                 style=ChatUIActionStyle.DANGER,
                 requires_confirmation=True,
             )
@@ -138,7 +130,7 @@ def derive_chat_ui_actions(
             _action(
                 action_id=f"reserve-and-route:{canonical_selected_slot.lower()}",
                 action_type=ChatUIActionType.RESERVE_AND_ROUTE,
-                label=f"Giữ ô {canonical_selected_slot.removeprefix('F1-')} và chỉ đường",
+                label=f"Giữ ô {canonical_selected_slot} và chỉ đường",
                 payload={"slot_id": canonical_selected_slot},
                 style=ChatUIActionStyle.PRIMARY,
                 requires_confirmation=True,
@@ -158,7 +150,7 @@ def derive_chat_ui_actions(
             _action(
                 action_id=f"report-wrong-parking:{canonical_selected_slot.lower()}",
                 action_type=ChatUIActionType.OPEN_WRONG_PARKING_REPORT,
-                label=f"Báo xe đỗ sai tại {canonical_selected_slot.removeprefix('F1-')}",
+                label=f"Báo xe đỗ sai tại {canonical_selected_slot}",
                 payload={"slot_id": canonical_selected_slot},
             )
         )

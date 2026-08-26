@@ -285,7 +285,7 @@ describe("user chat page", () => {
     mocks.useParkingWorkflow.mockReturnValue(workflow);
 
     render(<Home />);
-    await user.click(screen.getByRole("button", { name: "Tôi đã đến nơi" }));
+    await user.click(screen.getByRole("button", { name: "Xác nhận đã đỗ" }));
 
     expect(workflow.confirmParking).toHaveBeenCalledOnce();
     expect(

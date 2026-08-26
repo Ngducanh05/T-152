@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +12,10 @@ from src.api.dependencies import (
     resolve_parking_user_id,
     resolve_vehicle_id,
 )
+from src.api.errors import domain_http_error
 from src.core.database import get_db_session
+from src.core.errors import DomainError
+from src.core.idempotency import IdempotencyService
 from src.core.parking_session import ParkingSessionError, ParkingSessionService
 from src.core.parking_state import ParkingStateError, ParkingStateService
 from src.core.reservation import ReservationService
@@ -56,34 +59,30 @@ class ParkedVehicleResponse(BaseModel):
     destination_node_id: str
 
 
-def _error(status_code: int, code: ErrorCode, message: str) -> HTTPException:
+def _error(
+    status_code: int,
+    code: ErrorCode,
+    message: str,
+    *,
+    details: dict[str, object] | None = None,
+) -> HTTPException:
     return HTTPException(
         status_code=status_code,
-        detail={"code": code.value, "message": message},
+        detail={"code": code.value, "message": message, "details": details},
     )
 
 
 def _session_error(error: ParkingSessionError, *, completing: bool = False) -> HTTPException:
-    message = error.message
-    if "Reservation" in message and "not found" in message:
-        return _error(404, ErrorCode.RESERVATION_NOT_FOUND, message)
-    if "Parking user" in message and "not found" in message:
-        return _error(404, ErrorCode.USER_NOT_FOUND, message)
-    if "Vehicle" in message and "not found" in message:
-        return _error(404, ErrorCode.VEHICLE_NOT_FOUND, message)
-    if "active parking session already exists" in message:
-        return _error(409, ErrorCode.ACTIVE_SESSION_EXISTS, message)
     if error.code is ErrorCode.ACTIVE_SESSION_NOT_FOUND:
-        code = ErrorCode.SESSION_NOT_FOUND if completing else error.code
-        return _error(404, code, message)
-    return _error(409, error.code, message)
+        return domain_http_error(
+            error,
+            code=ErrorCode.SESSION_NOT_FOUND if completing else error.code,
+        )
+    return domain_http_error(error)
 
 
 def _state_error(error: ParkingStateError) -> HTTPException:
-    if "Reservation" in error.message and "not found" in error.message:
-        return _error(404, ErrorCode.RESERVATION_NOT_FOUND, error.message)
-    status_code = 404 if error.code is ErrorCode.SLOT_NOT_FOUND else 409
-    return _error(status_code, error.code, error.message)
+    return domain_http_error(error)
 
 
 def _response(parking_session: object) -> ParkingSessionResponse:
@@ -99,6 +98,10 @@ async def confirm_parking(
     request: ConfirmParkingRequest,
     session: SessionDependency,
     current_user: ParkingUserDependency,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    ] = None,
 ) -> SuccessResponse[ParkingSessionResponse]:
     user_id = resolve_parking_user_id(request.user_id, current_user)
     expired = False
@@ -111,34 +114,61 @@ async def confirm_parking(
                 required=True,
             )
             assert vehicle_id is not None
+            idempotency = IdempotencyService(session)
+            claim = await idempotency.claim(
+                user_id=user_id,
+                operation="confirm_parking",
+                key=idempotency_key,
+                payload={
+                    "vehicle_id": vehicle_id,
+                    "reservation_id": request.reservation_id,
+                    "expected_version": request.expected_version,
+                },
+            )
+            replay = idempotency.replay(claim)
+            if replay is not None:
+                response_data = ParkingSessionResponse.model_validate(replay)
+                parking_session = None
+                expired = False
+            else:
+                response_data = None
             current_time = datetime.now(UTC)
-            state_service = ParkingStateService(session)
-            reservation_service = ReservationService(session, state_service)
-            reservation = await reservation_service.get_reservation(request.reservation_id)
-            expired = reservation.status is ReservationStatus.EXPIRED
-            if not expired:
-                expired = await reservation_service.expire_reservation_if_needed(
-                    reservation,
-                    now=current_time,
-                )
-            if not expired:
-                parking_session = await ParkingSessionService(
-                    session,
-                    state_service,
-                    clock=lambda: current_time,
-                ).confirm_parking(
-                    user_id,
-                    vehicle_id,
-                    request.reservation_id,
-                    expected_version=request.expected_version,
-                )
+            if response_data is None:
+                state_service = ParkingStateService(session)
+                reservation_service = ReservationService(session, state_service)
+                reservation = await reservation_service.get_reservation(request.reservation_id)
+                expired = reservation.status is ReservationStatus.EXPIRED
+                if not expired:
+                    expired = await reservation_service.expire_reservation_if_needed(
+                        reservation,
+                        now=current_time,
+                    )
+                if not expired:
+                    parking_session = await ParkingSessionService(
+                        session,
+                        state_service,
+                        clock=lambda: current_time,
+                    ).confirm_parking(
+                        user_id,
+                        vehicle_id,
+                        request.reservation_id,
+                        expected_version=request.expected_version,
+                    )
+                    response_data = _response(parking_session)
+                    await idempotency.complete(
+                        claim,
+                        response_data.model_dump(mode="json"),
+                    )
     except ParkingSessionError as error:
         raise _session_error(error) from error
     except ParkingStateError as error:
         raise _state_error(error) from error
+    except DomainError as error:
+        raise domain_http_error(error) from error
     if expired:
         raise _error(409, ErrorCode.RESERVATION_EXPIRED, "Reservation has expired.")
-    return SuccessResponse(data=_response(parking_session))
+    assert response_data is not None
+    return SuccessResponse(data=response_data)
 
 
 @router.get(
@@ -156,9 +186,7 @@ async def active_vehicle(
         vehicle = await ParkingSessionService(session).find_parked_vehicle(user_id)
     except ParkingSessionError as error:
         raise _session_error(error) from error
-    return SuccessResponse(
-        data=ParkedVehicleResponse.model_validate(vehicle, from_attributes=True)
-    )
+    return SuccessResponse(data=ParkedVehicleResponse.model_validate(vehicle, from_attributes=True))
 
 
 @router.post(
@@ -171,22 +199,45 @@ async def complete_session(
     request: CompleteSessionRequest,
     session: SessionDependency,
     current_user: ParkingUserDependency,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    ] = None,
 ) -> SuccessResponse[ParkingSessionResponse]:
     user_id = resolve_parking_user_id(request.user_id, current_user)
     try:
         async with session.begin():
-            parking_session = await ParkingSessionService(
-                session, ParkingStateService(session)
-            ).complete_session(
-                session_id,
+            idempotency = IdempotencyService(session)
+            claim = await idempotency.claim(
                 user_id=user_id,
-                expected_version=request.expected_version,
+                operation="complete_parking_session",
+                key=idempotency_key,
+                payload={
+                    "session_id": session_id,
+                    "expected_version": request.expected_version,
+                },
             )
+            replay = idempotency.replay(claim)
+            if replay is not None:
+                response_data = ParkingSessionResponse.model_validate(replay)
+            else:
+                parking_session = await ParkingSessionService(session, ParkingStateService(session)).complete_session(
+                    session_id,
+                    user_id=user_id,
+                    expected_version=request.expected_version,
+                )
+                response_data = _response(parking_session)
+                await idempotency.complete(
+                    claim,
+                    response_data.model_dump(mode="json"),
+                )
     except ParkingSessionError as error:
         raise _session_error(error, completing=True) from error
     except ParkingStateError as error:
         raise _state_error(error) from error
-    return SuccessResponse(data=_response(parking_session))
+    except DomainError as error:
+        raise domain_http_error(error) from error
+    return SuccessResponse(data=response_data)
 
 
 __all__ = ["router"]

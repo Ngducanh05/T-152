@@ -34,12 +34,22 @@ const DEMO_PROFILE: AuthenticatedProfile = {
 };
 
 interface SignInResult {
+  state: "authenticated" | "confirmation_required" | "failed";
   profile: AuthenticatedProfile | null;
   error: string | null;
+  email?: string;
 }
 
-interface SignUpResult extends SignInResult {
-  confirmationRequired?: boolean;
+interface SignUpResult {
+  state: "authenticated" | "confirmation_required" | "rate_limited" | "failed";
+  profile: AuthenticatedProfile | null;
+  error: string | null;
+  email: string;
+}
+
+interface ResendConfirmationResult {
+  state: "sent" | "rate_limited" | "failed";
+  error: string | null;
 }
 
 interface AuthContextValue {
@@ -52,6 +62,7 @@ interface AuthContextValue {
     email: string;
     password: string;
   }) => Promise<SignUpResult>;
+  resendSignUpConfirmation: (email: string) => Promise<ResendConfirmationResult>;
   refreshProfile: () => Promise<AuthenticatedProfile | null>;
   signOut: () => Promise<void>;
 }
@@ -128,6 +139,12 @@ function safeSignUpError(error: unknown) {
   }
 
   return "Không thể tạo tài khoản. Vui lòng kiểm tra email và mật khẩu rồi thử lại.";
+}
+
+function authErrorCode(error: unknown): string | null {
+  return error && typeof error === "object" && "code" in error
+    ? String(error.code)
+    : null;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -356,6 +373,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus("authenticated");
 
         return {
+          state: "authenticated",
           profile: DEMO_PROFILE,
           error: null,
         };
@@ -366,6 +384,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (emailError) {
         console.warn("[Auth] Đăng nhập bị chặn: email không hợp lệ.");
         return {
+          state: "failed",
           profile: null,
           error: emailError,
         };
@@ -375,6 +394,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (passwordError) {
         console.warn("[Auth] Đăng nhập bị chặn: mật khẩu không hợp lệ.");
         return {
+          state: "failed",
           profile: null,
           error: passwordError,
         };
@@ -384,6 +404,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!supabase) {
         return {
+          state: "failed",
           profile: null,
           error: "Dịch vụ đăng nhập chưa sẵn sàng. Vui lòng thử lại.",
         };
@@ -399,9 +420,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (error || !data.session) {
           accessTokenRef.current = null;
-          console.warn("[Auth] Đăng nhập thất bại: email hoặc mật khẩu không đúng.");
+          const code = authErrorCode(error);
+          console.warn(`[Auth] Đăng nhập thất bại. Mã lỗi: ${code ?? "unknown"}.`);
+
+          if (code === "email_not_confirmed") {
+            return {
+              state: "confirmation_required",
+              profile: null,
+              error: "Email chưa được xác nhận. Vui lòng kiểm tra hộp thư hoặc gửi lại email xác nhận.",
+              email: normalizedEmail,
+            };
+          }
 
           return {
+            state: "failed",
             profile: null,
             error: "Email hoặc mật khẩu không đúng.",
           };
@@ -417,6 +449,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const currentProfile = await loadBackendProfile();
 
           return {
+            state: "authenticated",
             profile: currentProfile,
             error: null,
           };
@@ -428,6 +461,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           becomeGuest(message);
 
           return {
+            state: "failed",
             profile: null,
             error: message,
           };
@@ -447,9 +481,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }): Promise<SignUpResult> => {
       if (demoMode) {
         return {
+          state: "authenticated",
           profile: DEMO_PROFILE,
           error: null,
-          confirmationRequired: false,
+          email: normalizeEmail(input.email),
         };
       }
 
@@ -460,9 +495,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (fullNameError) {
         console.warn("[Auth] Đăng ký bị chặn: họ và tên không hợp lệ.");
         return {
+          state: "failed",
           profile: null,
           error: fullNameError,
-          confirmationRequired: false,
+          email: normalizedEmail,
         };
       }
 
@@ -470,9 +506,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (emailError) {
         console.warn("[Auth] Đăng ký bị chặn: email không hợp lệ.");
         return {
+          state: "failed",
           profile: null,
           error: emailError,
-          confirmationRequired: false,
+          email: normalizedEmail,
         };
       }
 
@@ -480,17 +517,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (passwordError) {
         console.warn("[Auth] Đăng ký bị chặn: mật khẩu không hợp lệ.");
         return {
+          state: "failed",
           profile: null,
           error: passwordError,
-          confirmationRequired: false,
+          email: normalizedEmail,
         };
       }
 
       const supabase = supabaseRef.current;
       if (!supabase) {
         return {
+          state: "failed",
           profile: null,
           error: "Dịch vụ đăng ký chưa sẵn sàng. Vui lòng thử lại.",
+          email: normalizedEmail,
         };
       }
 
@@ -515,17 +555,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.warn(`[Auth] Supabase từ chối đăng ký. Mã lỗi: ${errorCode}.`);
 
           return {
+            state: errorCode === "over_email_send_rate_limit" ? "rate_limited" : "failed",
             profile: null,
             error: safeSignUpError(error),
-            confirmationRequired: false,
+            email: normalizedEmail,
           };
         }
 
         if (!data.session) {
           return {
+            state: "confirmation_required",
             profile: null,
             error: null,
-            confirmationRequired: true,
+            email: normalizedEmail,
           };
         }
 
@@ -533,9 +575,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const currentProfile = await loadBackendProfile();
           return {
+            state: "authenticated",
             profile: currentProfile,
             error: null,
-            confirmationRequired: false,
+            email: normalizedEmail,
           };
         } catch (profileError) {
           accessTokenRef.current = null;
@@ -545,23 +588,71 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           becomeGuest(message);
 
           return {
+            state: "failed",
             profile: null,
             error: message,
-            confirmationRequired: false,
+            email: normalizedEmail,
           };
         }
       } catch (error) {
         console.error("[Auth] Có lỗi không mong muốn khi tạo tài khoản.", error);
 
         return {
+          state: "failed",
           profile: null,
           error: "Không thể tạo tài khoản. Vui lòng thử lại.",
+          email: normalizedEmail,
         };
       } finally {
         signInInFlightRef.current = false;
       }
     },
     [becomeGuest, demoMode, loadBackendProfile],
+  );
+
+  const resendSignUpConfirmation = useCallback(
+    async (email: string): Promise<ResendConfirmationResult> => {
+      const normalizedEmail = normalizeEmail(email);
+      const emailError = validateEmail(normalizedEmail);
+      if (emailError) {
+        return { state: "failed", error: emailError };
+      }
+      if (demoMode) {
+        return { state: "sent", error: null };
+      }
+      const supabase = supabaseRef.current;
+      if (!supabase) {
+        return {
+          state: "failed",
+          error: "Dịch vụ xác nhận email chưa sẵn sàng. Vui lòng thử lại.",
+        };
+      }
+      try {
+        const { error } = await supabase.auth.resend({
+          type: "signup",
+          email: normalizedEmail,
+        });
+        if (!error) {
+          return { state: "sent", error: null };
+        }
+        if (authErrorCode(error) === "over_email_send_rate_limit") {
+          return {
+            state: "rate_limited",
+            error: "Email xác nhận đang bị giới hạn tạm thời. Vui lòng chờ rồi gửi lại.",
+          };
+        }
+        return {
+          state: "failed",
+          error: "Không thể gửi lại email xác nhận. Vui lòng thử lại.",
+        };
+      } catch {
+        return {
+          state: "failed",
+          error: "Không thể gửi lại email xác nhận. Vui lòng thử lại.",
+        };
+      }
+    },
+    [demoMode],
   );
 
   const signOut = useCallback(async () => {
@@ -583,10 +674,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       initializationError,
       signIn,
       signUp,
+      resendSignUpConfirmation,
       refreshProfile: loadBackendProfile,
       signOut,
     }),
-    [initializationError, loadBackendProfile, profile, signIn, signOut, signUp, status],
+    [
+      initializationError,
+      loadBackendProfile,
+      profile,
+      resendSignUpConfirmation,
+      signIn,
+      signOut,
+      signUp,
+      status,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

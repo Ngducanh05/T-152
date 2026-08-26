@@ -20,6 +20,7 @@ def _route() -> RouteResult:
 
 def test_ui_action_type_allowlist_is_stable():
     assert {action_type.value for action_type in ChatUIActionType} == {
+        "SCAN_LOCATION_QR",
         "SELECT_LOCATION",
         "SELECT_PARKING_PREFERENCE",
         "SELECT_SLOT",
@@ -32,7 +33,7 @@ def test_ui_action_type_allowlist_is_stable():
     }
 
 
-def test_missing_location_only_offers_safe_location_picker():
+def test_missing_location_offers_qr_then_manual_location_picker():
     actions = derive_chat_ui_actions(
         current_location=None,
         recommended_slot_ids=["F1-D01"],
@@ -41,8 +42,28 @@ def test_missing_location_only_offers_safe_location_picker():
         successful_tool_names={"recommend_parking_slot"},
     )
 
-    assert [action.type for action in actions] == [ChatUIActionType.SELECT_LOCATION]
-    assert actions[0].payload == {}
+    assert [action.type for action in actions] == [
+        ChatUIActionType.SCAN_LOCATION_QR,
+        ChatUIActionType.SELECT_LOCATION,
+    ]
+    assert [action.style.value for action in actions] == ["primary", "secondary"]
+    assert [action.label for action in actions] == [
+        "Quét QR vị trí",
+        "Chọn vị trí thủ công",
+    ]
+    assert all(action.payload == {} for action in actions)
+
+
+def test_f2_and_f3_recommendations_are_canonical_ui_actions():
+    actions = derive_chat_ui_actions(
+        current_location="F3-D-W",
+        recommended_slot_ids=["F2-C01", "F3-D03"],
+        selected_slot=None,
+        intent="RECOMMEND_SLOT",
+        successful_tool_names={"recommend_parking_slot"},
+    )
+    assert [action.payload["slot_id"] for action in actions] == ["F2-C01", "F3-D03"]
+    assert [action.label for action in actions] == ["Chọn F2-C01", "Chọn F3-D03"]
 
 
 def test_recommendation_actions_use_only_canonical_verified_slot_ids():
@@ -107,6 +128,8 @@ def test_verified_route_can_offer_reserve_and_report_without_business_logic():
     ]
     assert actions[0].payload == {"slot_id": "F1-D01"}
     assert actions[0].requires_confirmation is True
+    assert actions[0].label == "Giữ ô F1-D01 và chỉ đường"
+    assert actions[1].label == "Báo xe đỗ sai tại F1-D01"
 
 
 def test_active_session_offers_find_complete_and_verified_report_actions():

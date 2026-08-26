@@ -60,6 +60,11 @@ export interface ParkingSlot {
   occupied_by_vehicle_id: EntityId | null;
 }
 
+export type ParkingSlotDefinition = Omit<
+  ParkingSlot,
+  "status" | "version" | "occupied_by_vehicle_id"
+>;
+
 export type AdjacentSlotObservedStatus = "AVAILABLE" | "OCCUPIED";
 
 export interface AdjacentSlotObservationRequest {
@@ -142,7 +147,7 @@ export interface MapEdge {
 export interface ParkingMap {
   nodes: MapNode[];
   edges: MapEdge[];
-  slots: ParkingSlot[];
+  slots: ParkingSlotDefinition[];
 }
 
 export interface ParkingStatus {
@@ -153,9 +158,18 @@ export interface ParkingStatus {
   by_zone: Record<ZoneId, Record<SlotStatus, number>>;
 }
 
+export interface ParkingSnapshot {
+  slots: ParkingSlot[];
+  status: ParkingStatus;
+  state_version: number;
+}
+
 export interface Location {
   user_id: EntityId;
   node_id: FloorScopedId;
+  verified_node_id?: FloorScopedId | null;
+  verified_at?: string | null;
+  verified_marker_id?: string | null;
 }
 
 export interface ConfirmLocationRequest {
@@ -175,6 +189,9 @@ export interface ScannedLocation {
   floor_id: FloorId;
   zone_id: ZoneId;
   label: string;
+  verified_node_id?: FloorScopedId | null;
+  verified_at?: string | null;
+  verified_marker_id?: string | null;
 }
 
 export interface RecommendationRequest {
@@ -226,7 +243,7 @@ export interface RouteResult {
 export interface RouteRequest {
   start_node_id: FloorScopedId;
   destination_node_id: FloorScopedId;
-  mode?: RouteMode | null;
+  mode: RouteMode;
 }
 
 export interface RouteResponse extends RouteResult {
@@ -261,6 +278,14 @@ export interface ActiveParkingSession {
 export interface CompleteSessionRequest {
   user_id: EntityId;
   expected_version?: number | null;
+}
+
+export interface UserParkingState {
+  current_location: Location | null;
+  active_reservation: ParkingReservation | null;
+  active_session: ActiveParkingSession | null;
+  reward_summary: RewardSummary;
+  reward_configuration: RewardConfiguration;
 }
 
 export interface ChatRequest {

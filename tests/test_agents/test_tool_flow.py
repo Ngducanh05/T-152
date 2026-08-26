@@ -135,9 +135,7 @@ async def agent_flow() -> AsyncGenerator[AgentFlow, None]:
 
 def _tool_names(state: dict[str, Any]) -> list[str]:
     return [
-        message.name
-        for message in state["messages"]
-        if isinstance(message, ToolMessage) and message.name is not None
+        message.name for message in state["messages"] if isinstance(message, ToolMessage) and message.name is not None
     ]
 
 
@@ -462,9 +460,7 @@ async def test_missing_location_vehicle_and_active_session_use_stable_errors(
         ],
         thread_id="USER-001:MISSING-LOCATION",
     )
-    assert missing_location["tool_result"]["error"]["code"] == (
-        "CURRENT_LOCATION_NOT_FOUND"
-    )
+    assert missing_location["tool_result"]["error"]["code"] == ("CURRENT_LOCATION_NOT_FOUND")
     assert "current_location" in missing_location["missing_fields"]
     assert missing_location["recommended_slot_ids"] == []
 

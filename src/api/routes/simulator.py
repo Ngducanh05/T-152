@@ -20,7 +20,7 @@ from src.core.simulator import (
     SimulatorStep,
 )
 from src.models.common import ErrorResponse, SuccessResponse
-from src.models.schemas import ErrorCode, FloorScopedId, ParkingSlot, SlotStatus
+from src.models.schemas import ErrorCode, ParkingSlot, SlotId, SlotStatus
 
 router = APIRouter(
     prefix="/simulator",
@@ -41,7 +41,7 @@ ERROR_RESPONSES = {
 class ManualSimulatorRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    slot_id: FloorScopedId
+    slot_id: SlotId
     vehicle_id: str = Field(pattern=SIMULATED_VEHICLE_ID_PATTERN.pattern)
 
 
@@ -52,7 +52,7 @@ class SimulatorControlRequest(BaseModel):
 class SimulatorStepResponse(BaseModel):
     sequence: int = Field(ge=1)
     action: SimulatorAction
-    slot_id: FloorScopedId | None
+    slot_id: SlotId | None
     vehicle_id: str | None
     resulting_status: SlotStatus | None
 

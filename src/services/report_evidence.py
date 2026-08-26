@@ -16,6 +16,7 @@ class StoredReportEvidence:
     storage_path: str
     content_type: str
     size_bytes: int
+    storage_mode: str = "real"
 
 
 def _storage_error(code: str, message: str, status_code: int = 422) -> HTTPException:
@@ -25,18 +26,50 @@ def _storage_error(code: str, message: str, status_code: int = 422) -> HTTPExcep
 def validate_report_image(
     *,
     content_type: str | None,
-    size_bytes: int,
+    data: bytes,
     max_bytes: int,
 ) -> str:
     normalized_type = (content_type or "").split(";")[0].strip().lower()
     if normalized_type not in ALLOWED_IMAGE_TYPES:
-        raise _storage_error("REPORT_EVIDENCE_INVALID", "Report evidence must be an image.")
-    if size_bytes <= 0 or size_bytes > max_bytes:
         raise _storage_error(
             "REPORT_EVIDENCE_INVALID",
-            f"Report evidence must be between 1 byte and {max_bytes} bytes.",
+            "Report evidence must be a supported image.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    if len(data) > max_bytes:
+        raise _storage_error(
+            "REPORT_EVIDENCE_TOO_LARGE",
+            f"Report evidence must not exceed {max_bytes} bytes.",
+            status.HTTP_413_CONTENT_TOO_LARGE,
+        )
+    if not data or not _signature_matches(normalized_type, data):
+        raise _storage_error(
+            "REPORT_EVIDENCE_INVALID",
+            "Report evidence content does not match its declared image type.",
+            status.HTTP_400_BAD_REQUEST,
         )
     return normalized_type
+
+
+def _signature_matches(content_type: str, data: bytes) -> bool:
+    if content_type == "image/jpeg":
+        return data.startswith(b"\xff\xd8\xff")
+    if content_type == "image/png":
+        return data.startswith(b"\x89PNG\r\n\x1a\n")
+    if content_type == "image/webp":
+        return len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+    if content_type not in {"image/heic", "image/heif"} or len(data) < 16:
+        return False
+
+    box_size = int.from_bytes(data[:4], "big")
+    if data[4:8] != b"ftyp" or box_size < 16 or box_size > len(data):
+        return False
+    brands = {data[8:12]}
+    brands.update(data[offset : offset + 4] for offset in range(16, box_size, 4))
+    expected_brands = (
+        {b"heic", b"heix", b"hevc", b"hevx"} if content_type == "image/heic" else {b"mif1", b"msf1", b"heif"}
+    )
+    return bool(brands & expected_brands)
 
 
 class ReportEvidenceStorage:
@@ -50,10 +83,10 @@ class ReportEvidenceStorage:
             and self.settings.supabase_report_evidence_bucket
         )
 
-    def _require_configured(self) -> bool:
+    def _require_configured(self, *, allow_demo_fallback: bool) -> bool:
         if self._configured():
             return True
-        if self.settings.demo_mode:
+        if self.settings.demo_mode and allow_demo_fallback:
             return False
         raise _storage_error(
             "REPORT_EVIDENCE_STORAGE_UNCONFIGURED",
@@ -67,10 +100,11 @@ class ReportEvidenceStorage:
         report_id: str,
         data: bytes,
         content_type: str,
+        allow_demo_fallback: bool = False,
     ) -> StoredReportEvidence:
         content_type = validate_report_image(
             content_type=content_type,
-            size_bytes=len(data),
+            data=data,
             max_bytes=self.settings.report_evidence_max_bytes,
         )
         extension = {
@@ -82,8 +116,13 @@ class ReportEvidenceStorage:
         }[content_type]
         storage_path = f"reports/{report_id}/{uuid4()}.{extension}"
 
-        if not self._require_configured():
-            return StoredReportEvidence(storage_path, content_type, len(data))
+        if not self._require_configured(allow_demo_fallback=allow_demo_fallback):
+            return StoredReportEvidence(
+                storage_path,
+                content_type,
+                len(data),
+                storage_mode="demo-synthetic",
+            )
 
         base_url = self.settings.supabase_url.rstrip("/")
         service_key = self.settings.supabase_service_role_key
@@ -97,10 +136,7 @@ class ReportEvidenceStorage:
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
                 response = await client.post(
-                    (
-                        f"{base_url}/storage/v1/object/"
-                        f"{self.settings.supabase_report_evidence_bucket}/{storage_path}"
-                    ),
+                    (f"{base_url}/storage/v1/object/{self.settings.supabase_report_evidence_bucket}/{storage_path}"),
                     headers=headers,
                     content=data,
                 )
@@ -119,7 +155,7 @@ class ReportEvidenceStorage:
         return StoredReportEvidence(storage_path, content_type, len(data))
 
     async def create_signed_url(self, storage_path: str, *, expires_in: int = 300) -> str:
-        if not self._require_configured():
+        if not self._require_configured(allow_demo_fallback=True):
             return f"demo-private://{storage_path}"
 
         base_url = self.settings.supabase_url.rstrip("/")
@@ -163,15 +199,18 @@ class ReportEvidenceStorage:
         return f"{base_url}/storage/v1{signed_url}"
 
     async def delete(self, storage_path: str | None) -> bool:
-        if not storage_path or not self._configured():
+        if not storage_path:
             return True
+        if not self._configured():
+            return self.settings.demo_mode
 
         base_url = self.settings.supabase_url.rstrip("/")
         service_key = self.settings.supabase_service_role_key
         assert service_key is not None
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.delete(
+                response = await client.request(
+                    "DELETE",
                     f"{base_url}/storage/v1/object/{self.settings.supabase_report_evidence_bucket}",
                     headers={
                         "apikey": service_key,

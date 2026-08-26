@@ -14,6 +14,8 @@ from src.core.db_models import (
     ParkingSession,
     ParkingSlot,
     ParkingUser,
+    RewardTransaction,
+    SlotObservation,
     Vehicle,
     WrongParkingReport,
 )
@@ -33,6 +35,8 @@ async def seed_session() -> AsyncGenerator[AsyncSession, None]:
         )
         async with factory() as session:
             for model in (
+                RewardTransaction,
+                SlotObservation,
                 WrongParkingReport,
                 ParkingEvent,
                 ParkingSession,
@@ -108,30 +112,17 @@ async def test_seeded_ids_ev_baseline_and_graph_references(seed_session: AsyncSe
     assert vehicle.user_id == user.id
     assert vehicle.requires_charging is True
     assert {slot.id for slot in slots} == {
-        f"{floor}-{zone}{number:02d}"
-        for floor in ("F1", "F2", "F3")
-        for zone in "ABCD"
-        for number in range(1, 11)
+        f"{floor}-{zone}{number:02d}" for floor in ("F1", "F2", "F3") for zone in "ABCD" for number in range(1, 11)
     }
     assert {slot.id for slot in slots if slot.has_charger} == {
-        f"{floor}-{zone}{number:02d}"
-        for floor in ("F1", "F2", "F3")
-        for zone in "CD"
-        for number in range(1, 6)
+        f"{floor}-{zone}{number:02d}" for floor in ("F1", "F2", "F3") for zone in "CD" for number in range(1, 6)
     }
     assert all(slot.node_id in nodes for slot in slots)
     assert all(edge.from_node in nodes and edge.to_node in nodes for edge in edges)
     assert all(edge.bidirectional for edge in edges)
     assert {
-        node.id
-        for node in await seed_session.scalars(
-            select(MapNode).where(MapNode.type == MapNodeType.CHECKPOINT)
-        )
-    } == {
-        f"{floor}-CP{n}"
-        for floor in ("F1", "F2", "F3")
-        for n in (1, 2, 3)
-    }
+        node.id for node in await seed_session.scalars(select(MapNode).where(MapNode.type == MapNodeType.CHECKPOINT))
+    } == {f"{floor}-CP{n}" for floor in ("F1", "F2", "F3") for n in (1, 2, 3)}
 
     adjacency = {node_id: set() for node_id in nodes}
     for edge in edges:
@@ -146,11 +137,7 @@ async def test_seeded_ids_ev_baseline_and_graph_references(seed_session: AsyncSe
             pending.append(neighbor)
     assert visited == nodes
 
-    available_ev_ids = {
-        slot.id
-        for slot in slots
-        if slot.has_charger and slot.status is SlotStatus.AVAILABLE
-    }
+    available_ev_ids = {slot.id for slot in slots if slot.has_charger and slot.status is SlotStatus.AVAILABLE}
     assert "F1-D01" in available_ev_ids
     assert len(available_ev_ids) >= 2
 

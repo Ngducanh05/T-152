@@ -64,10 +64,7 @@ async def test_parking_status_returns_seeded_baseline(parking_client: AsyncClien
             "available": 120,
             "reserved": 0,
             "occupied": 0,
-            "by_zone": {
-                zone: {"AVAILABLE": 30, "RESERVED": 0, "OCCUPIED": 0}
-                for zone in "ABCD"
-            },
+            "by_zone": {zone: {"AVAILABLE": 30, "RESERVED": 0, "OCCUPIED": 0} for zone in "ABCD"},
         },
         "message": None,
     }
@@ -159,10 +156,7 @@ async def test_parking_map_returns_canonical_graph_and_current_slots(
     assert frozenset(("F1-C-E", "F1-ELEVATOR")) in elevator_edges_f1
     assert frozenset(("F1-D-W", "F1-ELEVATOR")) in elevator_edges_f1
     # F1 is the only floor with entrance and exit
-    gate_node_ids = {
-        node["id"] for node in parking_map["nodes"]
-        if node["type"] in ("ENTRANCE", "EXIT")
-    }
+    gate_node_ids = {node["id"] for node in parking_map["nodes"] if node["type"] in ("ENTRANCE", "EXIT")}
     assert gate_node_ids == {"F1-ENTRANCE", "F1-EXIT"}
 
 
@@ -178,4 +172,3 @@ async def test_parking_filters_validate_contract_and_health_routes_remain(
     openapi = (await parking_client.get("/openapi.json")).json()["paths"]
     assert "/health" in openapi
     assert "/api/v1/health/database" in openapi
-

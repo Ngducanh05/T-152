@@ -78,9 +78,7 @@ async def _seed_if_missing(session: AsyncSession) -> SeedResult:
     await session.flush()
 
     canonical_edges = {(edge.from_node, edge.to_node): edge for edge in canonical_map.edges}
-    existing_edges = {
-        (edge.from_node, edge.to_node): edge for edge in await session.scalars(select(MapEdge))
-    }
+    existing_edges = {(edge.from_node, edge.to_node): edge for edge in await session.scalars(select(MapEdge))}
     _require(
         set(existing_edges) <= set(canonical_edges),
         "existing map_edges contain endpoints outside the canonical F1-F3 contract",
@@ -88,8 +86,7 @@ async def _seed_if_missing(session: AsyncSession) -> SeedResult:
     for edge_key, existing in existing_edges.items():
         expected = canonical_edges[edge_key]
         _require(
-            (existing.distance_m, existing.bidirectional)
-            == (expected.distance_m, expected.bidirectional),
+            (existing.distance_m, existing.bidirectional) == (expected.distance_m, expected.bidirectional),
             f"existing map edge {edge_key} does not match the canonical contract",
         )
 
@@ -123,9 +120,7 @@ async def _seed_if_missing(session: AsyncSession) -> SeedResult:
         )
 
     demo_vehicle = await session.get(Vehicle, DEMO_VEHICLE_ID)
-    vehicle_with_demo_plate = await session.scalar(
-        select(Vehicle).where(Vehicle.plate_number == DEMO_PLATE_NUMBER)
-    )
+    vehicle_with_demo_plate = await session.scalar(select(Vehicle).where(Vehicle.plate_number == DEMO_PLATE_NUMBER))
     _require(
         vehicle_with_demo_plate is None or vehicle_with_demo_plate.id == DEMO_VEHICLE_ID,
         f"plate {DEMO_PLATE_NUMBER} is already assigned to another vehicle",

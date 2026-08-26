@@ -67,10 +67,6 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
       : null;
   const initialReportSlotId =
     currentLocationSlot?.id ?? requestedReportSlot ?? workflow.selectedSlotId;
-  const reservationLocationMatches = Boolean(
-    data.activeReservation &&
-      workflow.currentLocationId === data.activeReservation.slot_id,
-  );
   const routeInstructions = workflow.activeRoute
     ? buildRouteInstructions(workflow.activeRoute, data.map)
     : [];
@@ -100,17 +96,25 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
     workflow.clearRequestedPanel();
   }
 
-  async function submitWrongParkingReport(draft: WrongParkingReportDraft) {
-    const report = await parkSmartApi.reportWrongParking({
-      user_id: identity.userId,
-      slot_id: draft.slotId,
-      reason_code: draft.reasonCode,
-      observed_plate_number: draft.observedPlateNumber,
-      description: draft.description,
-      evidence: draft.evidence ?? undefined,
-    });
-    await data.refresh();
+  async function submitWrongParkingReport(
+    draft: WrongParkingReportDraft,
+    idempotencyKey: string,
+  ) {
+    const report = await parkSmartApi.reportWrongParking(
+      {
+        user_id: identity.userId,
+        slot_id: draft.slotId,
+        reason_code: draft.reasonCode,
+        observed_plate_number: draft.observedPlateNumber,
+        description: draft.description,
+        evidence: draft.evidence ?? undefined,
+      },
+      undefined,
+      idempotencyKey,
+    );
+
     notifyWrongParkingReportCreated();
+    await data.refresh().catch(() => undefined);
     return report;
   }
 
@@ -217,32 +221,19 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
                 <small>CHỖ ĐỖ ĐÃ GIỮ</small>
                 <h2>{formatParkingLocation(data.activeReservation.slot_id)}</h2>
                 <p>
-                  {reservationLocationMatches
-                    ? "Vị trí của bạn trùng với ô đã giữ."
-                    : "Khi đến cạnh đúng ô, hãy cập nhật vị trí để xác nhận đã đỗ."}
+                  Để hoàn tất phiên đỗ, ParkSmart cần một mã QR vị trí hợp lệ
+                  gần ô đã giữ.
                 </p>
               </div>
-              {reservationLocationMatches ? (
-                <button
-                  type="button"
-                  onClick={() => requireVehicle(() => void workflow.confirmParking())}
-                  disabled={workflow.pending === "confirm-parking"}
-                >
-                  {workflow.pending === "confirm-parking"
-                    ? "Đang xác nhận…"
-                    : "Xác nhận đã đỗ"}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => requireVehicle(() => void workflow.confirmParking())}
-                  disabled={workflow.pending === "confirm-parking"}
-                >
-                  {workflow.pending === "confirm-parking"
-                    ? "Đang xác nhận đến nơi…"
-                    : "Tôi đã đến nơi"}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => requireVehicle(() => void workflow.confirmParking())}
+                disabled={workflow.pending === "confirm-parking"}
+              >
+                {workflow.pending === "confirm-parking"
+                  ? "Đang xác nhận…"
+                  : "Xác nhận đã đỗ"}
+              </button>
                 </article>
               )}
 

@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from langchain_core.messages import ToolMessage
 from pydantic import TypeAdapter, ValidationError
 
 from src.agents.state import AgentState
-from src.models.schemas import FloorScopedId, RouteResult
+from src.models.schemas import RouteResult, SlotId, is_slot_id
 
-_FLOOR_SCOPED_ID_ADAPTER = TypeAdapter(FloorScopedId)
-_PARKING_SLOT_ID = re.compile(r"^F1-[A-D]\d{2}$")
+_SLOT_ID_ADAPTER = TypeAdapter(SlotId)
 
 
 def _tool_messages(state: AgentState) -> list[ToolMessage]:
@@ -60,9 +58,7 @@ def _intent_for_tool(
     update: dict[str, object],
 ) -> str | None:
     if tool_name == "get_route":
-        active_session_id = update.get("active_session_id") or state.get(
-            "active_session_id"
-        )
+        active_session_id = update.get("active_session_id") or state.get("active_session_id")
         return "GET_ROUTE_TO_CAR" if active_session_id else "GET_ROUTE_TO_SLOT"
     return {
         "get_parking_status": "GET_PARKING_STATUS",
@@ -95,9 +91,7 @@ def _apply_success(
                 if not isinstance(candidate, dict):
                     continue
                 try:
-                    slot_id = _FLOOR_SCOPED_ID_ADAPTER.validate_python(
-                        candidate.get("slot_id")
-                    )
+                    slot_id = _SLOT_ID_ADAPTER.validate_python(candidate.get("slot_id"))
                 except ValidationError:
                     continue
                 slot_ids.append(slot_id)
@@ -116,9 +110,7 @@ def _apply_success(
             pass
         else:
             destination_node_id = data.get("destination_node_id")
-            if isinstance(destination_node_id, str) and _PARKING_SLOT_ID.fullmatch(
-                destination_node_id
-            ):
+            if is_slot_id(destination_node_id):
                 update["selected_slot"] = destination_node_id
     elif tool_name == "reserve_parking_slot":
         if isinstance(data.get("slot_id"), str):
@@ -197,9 +189,5 @@ def observe_tool_result(state: AgentState) -> dict[str, object]:
         if error_fields.get(code) not in resolved_fields
     }
     update["error"] = " | ".join(sorted(effective_errors))
-    update["missing_fields"] = [
-        field
-        for field in dict.fromkeys(missing_fields)
-        if field not in resolved_fields
-    ]
+    update["missing_fields"] = [field for field in dict.fromkeys(missing_fields) if field not in resolved_fields]
     return update

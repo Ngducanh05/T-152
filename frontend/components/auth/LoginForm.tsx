@@ -14,7 +14,14 @@ export function LoginForm({
   initialMode?: "login" | "register";
 }) {
   const router = useRouter();
-  const { status, profile, initializationError, signIn, signUp } = useAuth();
+  const {
+    status,
+    profile,
+    initializationError,
+    signIn,
+    signUp,
+    resendSignUpConfirmation,
+  } = useAuth();
   const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -23,6 +30,7 @@ export function LoginForm({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [checkEmail, setCheckEmail] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === "authenticated" && profile) {
@@ -43,8 +51,14 @@ export function LoginForm({
           return;
         }
         const result = await signUp({ fullName, email, password });
-        if (result.confirmationRequired) {
+        if (result.state === "confirmation_required") {
+          setCheckEmail(result.email);
           setNotice("Vui lòng xác nhận email trước khi đăng nhập ParkSmart.");
+          return;
+        }
+        if (result.state === "rate_limited") {
+          setCheckEmail(result.email);
+          setError(result.error);
           return;
         }
         if (!result.profile) {
@@ -57,6 +71,11 @@ export function LoginForm({
       }
 
       const result = await signIn(email, password);
+      if (result.state === "confirmation_required") {
+        setCheckEmail(result.email ?? email.trim().toLowerCase());
+        setError(result.error);
+        return;
+      }
       if (!result.profile) {
         setError(result.error ?? "Không thể đăng nhập.");
         return;
@@ -68,12 +87,66 @@ export function LoginForm({
     }
   }
 
+  async function resendConfirmation() {
+    if (!checkEmail || pending) return;
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await resendSignUpConfirmation(checkEmail);
+      if (result.state === "sent") {
+        setNotice("Đã gửi lại email xác nhận. Vui lòng kiểm tra hộp thư.");
+      } else {
+        setError(result.error ?? "Không thể gửi lại email xác nhận.");
+      }
+    } finally {
+      setPending(false);
+    }
+  }
+
   if (status === "loading" || (status === "authenticated" && profile)) {
     return (
       <div className={styles.loginCard} role="status">
         <strong>ParkSmart AI</strong>
         <p>Đang xác minh phiên đăng nhập...</p>
       </div>
+    );
+  }
+
+  if (checkEmail) {
+    return (
+      <section className={styles.loginCard} aria-labelledby="check-email-title">
+        <div className={styles.loginHeading}>
+          <span className={styles.logoMark} aria-hidden="true">P</span>
+          <div>
+            <h1 id="check-email-title">Kiểm tra email</h1>
+            <p>Email cần được xác nhận trước khi đăng nhập:</p>
+            <strong>{checkEmail}</strong>
+          </div>
+        </div>
+        {error && <p className={styles.loginError} role="alert">{error}</p>}
+        {notice && <p className={styles.securityNote} role="status">{notice}</p>}
+        <button
+          className={styles.loginButton}
+          type="button"
+          disabled={pending}
+          onClick={() => void resendConfirmation()}
+        >
+          {pending ? "Đang gửi..." : "Gửi lại email xác nhận"}
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            setMode("login");
+            setCheckEmail(null);
+            setError(null);
+            setNotice(null);
+          }}
+        >
+          Đi tới đăng nhập
+        </button>
+      </section>
     );
   }
 

@@ -146,6 +146,7 @@ def _parking_session(*, status: ParkingSessionStatus = ParkingSessionStatus.ACTI
         (
             recommend_parking_slot,
             {
+                "floor_id",
                 "zone_id",
                 "charging_required",
                 "accessible_required",
@@ -255,6 +256,7 @@ async def test_recommendation_uses_confirmed_location_and_never_reserves():
         result = await _invoke(
             recommend_parking_slot,
             runtime,
+            floor_id="F1",
             zone_id="D",
             charging_required=True,
             accessible_required=False,
@@ -266,6 +268,7 @@ async def test_recommendation_uses_confirmed_location_and_never_reserves():
     request = core_call.await_args.args[0]
     assert request.user_id == "USER-001"
     assert request.start_node_id == "F1-CP3"
+    assert request.floor_id == "F1"
     assert request.zone_id == "D"
     reservation_service.assert_not_called()
     assert result["data"]["recommendations"][0]["slot_id"] == "F1-D01"

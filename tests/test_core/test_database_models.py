@@ -1,4 +1,4 @@
-﻿from datetime import UTC, datetime
+from datetime import UTC, datetime
 from io import StringIO
 from unittest.mock import Mock, patch
 
@@ -11,10 +11,15 @@ from sqlalchemy.dialects.postgresql import JSONB
 from alembic import command
 from src.core import database as core_database
 from src.core.db_models import (
+    AgentDailyUsage,
     Base,
+    IdempotencyRecord,
+    MapNode,
     ParkingEvent,
     ParkingSlot,
     Profile,
+    ReportDailyUsage,
+    Vehicle,
     WrongParkingReport,
 )
 from src.models.schemas import ErrorCode, WrongParkingReason, WrongParkingReportStatus
@@ -24,6 +29,8 @@ from src.services import database as compatibility_database
 from src.services import db_models as compatibility_models
 
 EXPECTED_TABLES = {
+    "agent_daily_usage",
+    "report_daily_usage",
     "profiles",
     "parking_users",
     "vehicles",
@@ -33,7 +40,10 @@ EXPECTED_TABLES = {
     "parking_reservations",
     "parking_sessions",
     "parking_events",
+    "idempotency_records",
     "wrong_parking_reports",
+    "slot_observations",
+    "reward_transactions",
 }
 
 
@@ -59,41 +69,105 @@ def test_parking_migration_follows_profiles_revision():
     nearest_aisle_revision = scripts.get_revision("20260813_0004")
     wrong_parking_report_revision = scripts.get_revision("20260815_0005")
     report_lifecycle_revision = scripts.get_revision("20260819_0006")
-    multi_floor_revision = scripts.get_revision("0007")
-    role_auth_revision = scripts.get_revision("20260819_0007")
-    report_review_revision = scripts.get_revision("20260821_0008")
-    merge_revision = scripts.get_revision("20260822_0009")
+    contribution_revision = scripts.get_revision("0008")
+    auth_report_merge_revision = scripts.get_revision("20260822_0009")
+    integration_merge_revision = scripts.get_revision("20260824_0010")
+    agent_quota_revision = scripts.get_revision("20260824_0011")
+    report_quota_revision = scripts.get_revision("20260824_0012")
+    verified_location_revision = scripts.get_revision("20260826_0013")
+    idempotency_revision = scripts.get_revision("20260826_0014")
+    invariant_revision = scripts.get_revision("20260826_0015")
 
-    assert scripts.get_current_head() == "20260822_0009"
+    assert scripts.get_current_head() == "20260826_0015"
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
-
     assert location_cleanup_revision is not None
     assert location_cleanup_revision.down_revision == "20260811_0002"
-
     assert nearest_aisle_revision is not None
     assert nearest_aisle_revision.down_revision == "20260812_0003"
-
     assert wrong_parking_report_revision is not None
     assert wrong_parking_report_revision.down_revision == "20260813_0004"
-
     assert report_lifecycle_revision is not None
     assert report_lifecycle_revision.down_revision == "20260815_0005"
+    assert contribution_revision is not None
+    assert contribution_revision.down_revision == "0007"
+    assert auth_report_merge_revision is not None
+    assert set(auth_report_merge_revision.down_revision) == {"0007", "20260821_0008"}
+    assert integration_merge_revision is not None
+    assert set(integration_merge_revision.down_revision) == {"0008", "20260822_0009"}
+    assert agent_quota_revision is not None
+    assert agent_quota_revision.down_revision == "20260824_0010"
+    assert report_quota_revision is not None
+    assert report_quota_revision.down_revision == "20260824_0011"
+    assert verified_location_revision is not None
+    assert verified_location_revision.down_revision == "20260824_0012"
+    assert idempotency_revision is not None
+    assert idempotency_revision.down_revision == "20260826_0013"
+    assert invariant_revision is not None
+    assert invariant_revision.down_revision == "20260826_0014"
 
-    assert multi_floor_revision is not None
-    assert multi_floor_revision.down_revision == "20260819_0006"
 
-    assert role_auth_revision is not None
-    assert role_auth_revision.down_revision == "20260819_0006"
+def test_agent_daily_usage_model_and_migration_constraints_match():
+    table = AgentDailyUsage.__table__
+    assert tuple(column.name for column in table.primary_key.columns) == (
+        "user_id",
+        "usage_date",
+    )
+    assert table.c.user_id.type.length == 64
+    assert table.c.request_count.nullable is False
+    assert table.c.created_at.type.timezone is True
+    assert table.c.updated_at.type.timezone is True
+    assert {constraint.name for constraint in table.constraints} >= {"ck_agent_daily_usage_request_count_nonnegative"}
+    assert {index.name: tuple(column.name for column in index.columns) for index in table.indexes}[
+        "ix_agent_daily_usage_usage_date"
+    ] == ("usage_date",)
+    assert {foreign_key.target_fullname for foreign_key in table.c.user_id.foreign_keys} == {"parking_users.id"}
 
-    assert report_review_revision is not None
-    assert report_review_revision.down_revision == "20260819_0007"
+    output = StringIO()
+    config = Config("alembic.ini", output_buffer=output)
+    config.attributes["configure_logger"] = False
+    command.upgrade(config, "20260824_0010:20260824_0011", sql=True)
+    migration_sql = output.getvalue()
+    assert "CREATE TABLE agent_daily_usage" in migration_sql
+    assert "PRIMARY KEY (user_id, usage_date)" in migration_sql
+    assert "request_count >= 0" in migration_sql
+    assert "FOREIGN KEY(user_id) REFERENCES parking_users (id) ON DELETE CASCADE" in migration_sql
+    assert "CREATE INDEX ix_agent_daily_usage_usage_date" in migration_sql
 
-    assert merge_revision is not None
-    assert set(merge_revision.down_revision) == {"0007", "20260821_0008"}
+
+def test_report_daily_usage_model_and_migration_constraints_match():
+    table = ReportDailyUsage.__table__
+    assert tuple(column.name for column in table.primary_key.columns) == (
+        "user_id",
+        "usage_date",
+    )
+    assert table.c.user_id.type.length == 64
+    assert table.c.submission_count.nullable is False
+    assert table.c.created_at.type.timezone is True
+    assert table.c.updated_at.type.timezone is True
+    assert {constraint.name for constraint in table.constraints} >= {
+        "ck_report_daily_usage_submission_count_nonnegative"
+    }
+    assert {index.name: tuple(column.name for column in index.columns) for index in table.indexes}[
+        "ix_report_daily_usage_usage_date"
+    ] == ("usage_date",)
+    user_foreign_key = next(iter(table.c.user_id.foreign_keys))
+    assert user_foreign_key.target_fullname == "parking_users.id"
+    assert user_foreign_key.ondelete == "CASCADE"
+
+    output = StringIO()
+    config = Config("alembic.ini", output_buffer=output)
+    config.attributes["configure_logger"] = False
+    command.upgrade(config, "20260824_0011:20260824_0012", sql=True)
+    migration_sql = output.getvalue()
+    assert "CREATE TABLE report_daily_usage" in migration_sql
+    assert "PRIMARY KEY (user_id, usage_date)" in migration_sql
+    assert "submission_count >= 0" in migration_sql
+    assert "FOREIGN KEY(user_id) REFERENCES parking_users (id) ON DELETE CASCADE" in migration_sql
+    assert "CREATE INDEX ix_report_daily_usage_usage_date" in migration_sql
 
 
-def test_cold_start_sql_rebuilds_profile_enum_for_role_normalization():
+def test_cold_start_sql_replaces_legacy_profile_enum_once():
     output = StringIO()
     config = Config("alembic.ini", output_buffer=output)
     config.attributes["configure_logger"] = False
@@ -101,14 +175,9 @@ def test_cold_start_sql_rebuilds_profile_enum_for_role_normalization():
     command.upgrade(config, "head", sql=True)
 
     migration_sql = output.getvalue()
-
-    # Initial enum + intentional Phase 1.1 replacement enum.
     assert migration_sql.count("CREATE TYPE app_role_enum") == 2
-    assert (
-        "ALTER TYPE app_role_enum RENAME TO app_role_enum_legacy"
-        in migration_sql
-    )
-    assert "DROP TYPE app_role_enum_legacy" in migration_sql
+    assert migration_sql.count("ALTER TYPE app_role_enum RENAME TO app_role_enum_legacy") == 1
+    assert migration_sql.count("DROP TYPE app_role_enum_legacy") == 1
 
 
 def test_report_lifecycle_migration_backfills_before_required_constraints():
@@ -125,9 +194,7 @@ def test_report_lifecycle_migration_backfills_before_required_constraints():
     assert "version = 0" in migration_sql
     assert "updated_at = created_at" in migration_sql
     for column_name in ("reason_code", "status", "updated_at", "version"):
-        not_null_position = migration_sql.index(
-            f"ALTER COLUMN {column_name} SET NOT NULL"
-        )
+        not_null_position = migration_sql.index(f"ALTER COLUMN {column_name} SET NOT NULL")
         assert backfill_position < not_null_position
 
 
@@ -157,14 +224,8 @@ def test_nearest_aisle_data_migration_rewrites_seeded_canonical_slots():
     revision = scripts.get_revision("20260813_0004")
     assert revision is not None
     migration = revision.module
-    slot_ids = {
-        f"F1-{zone}{slot_number:02d}"
-        for zone in "ABCD"
-        for slot_number in range(1, 11)
-    }
-    node_ids = slot_ids | {
-        f"F1-{zone}-{side}" for zone in "ABCD" for side in ("W", "E")
-    }
+    slot_ids = {f"F1-{zone}{slot_number:02d}" for zone in "ABCD" for slot_number in range(1, 11)}
+    node_ids = slot_ids | {f"F1-{zone}-{side}" for zone in "ABCD" for side in ("W", "E")}
     slot_result = Mock()
     slot_result.scalars.return_value = slot_ids
     node_result = Mock()
@@ -184,9 +245,7 @@ def test_nearest_aisle_data_migration_rewrites_seeded_canonical_slots():
     bulk_insert.assert_called_once()
     inserted_edges = bulk_insert.call_args.args[1]
     assert len(inserted_edges) == 40
-    assert {
-        (edge["from_node"], edge["to_node"]) for edge in inserted_edges
-    } >= {
+    assert {(edge["from_node"], edge["to_node"]) for edge in inserted_edges} >= {
         ("F1-A-W", "F1-A01"),
         ("F1-A-E", "F1-A04"),
         ("F1-D-W", "F1-D08"),
@@ -234,30 +293,48 @@ def test_multiple_slots_can_reference_the_same_aisle_node():
     assert node_id.unique is not True
 
 
+def test_vehicle_model_keeps_display_plate_and_sets_canonical_identity() -> None:
+    vehicle = Vehicle(
+        id="VEHICLE-PLATE",
+        user_id="USER-001",
+        plate_number=" 51a 12345 ",
+        requires_charging=False,
+    )
+
+    assert vehicle.plate_number == "51A 12345"
+    assert vehicle.normalized_plate_number == "51A12345"
+    assert Vehicle.__table__.c.normalized_plate_number.unique is True
+    assert Vehicle.__table__.c.plate_number.unique is not True
+
+
+def test_map_slot_and_idempotency_constraints_match_hardened_contract() -> None:
+    assert {constraint.name for constraint in MapNode.__table__.constraints} >= {"ck_map_nodes_id_matches_floor"}
+    assert {constraint.name for constraint in ParkingSlot.__table__.constraints} >= {
+        "ck_parking_slots_id_canonical",
+        "ck_parking_slots_id_matches_floor",
+        "ck_parking_slots_id_matches_zone",
+    }
+    assert tuple(column.name for column in IdempotencyRecord.__table__.primary_key.columns) == (
+        "user_id",
+        "operation",
+        "key",
+    )
+
+
 def test_wrong_parking_report_lifecycle_model_has_required_contract_shape():
     table = WrongParkingReport.__table__
 
     assert table.c.description.nullable is True
     assert table.c.reason_code.nullable is False
     assert table.c.status.nullable is False
-    assert table.c.review_status.nullable is False
     assert table.c.updated_at.nullable is False
     assert table.c.version.nullable is False
     assert table.c.reason_code.type.name == "wrong_parking_reason_enum"
     assert table.c.status.type.name == "wrong_parking_report_status_enum"
-    assert table.c.review_status.type.name == "wrong_parking_review_status_enum"
-    assert table.c.evidence_storage_path.nullable is True
-    assert table.c.evidence_content_type.nullable is True
-    assert table.c.evidence_size_bytes.nullable is True
     assert table.c.resolved_by.foreign_keys == set()
-    assert {
-        constraint.name for constraint in table.constraints
-    } >= {"ck_wrong_parking_reports_version_nonnegative"}
+    assert {constraint.name for constraint in table.constraints} >= {"ck_wrong_parking_reports_version_nonnegative"}
 
-    index_columns = {
-        index.name: tuple(column.name for column in index.columns)
-        for index in table.indexes
-    }
+    index_columns = {index.name: tuple(column.name for column in index.columns) for index in table.indexes}
     assert index_columns["ix_wrong_parking_reports_status_created"] == (
         "status",
         "created_at",
@@ -265,10 +342,6 @@ def test_wrong_parking_report_lifecycle_model_has_required_contract_shape():
     assert index_columns["ix_wrong_parking_reports_slot_status_created"] == (
         "slot_id",
         "status",
-        "created_at",
-    )
-    assert index_columns["ix_wrong_parking_reports_review_status_created"] == (
-        "review_status",
         "created_at",
     )
 
@@ -280,16 +353,9 @@ def test_wrong_parking_report_schema_exposes_lifecycle_and_rejects_negative_vers
         "slot_id": "F1-D01",
         "reason_code": WrongParkingReason.CROSSED_LINE,
         "status": WrongParkingReportStatus.OPEN,
-        "review_status": "PENDING",
         "description": None,
-        "evidence_storage_path": None,
-        "evidence_content_type": None,
-        "evidence_size_bytes": None,
         "created_at": datetime(2026, 8, 19, 8, 0, tzinfo=UTC),
         "updated_at": datetime(2026, 8, 19, 8, 0, tzinfo=UTC),
-        "reviewed_at": None,
-        "reviewed_by": None,
-        "review_note": None,
         "resolved_at": None,
         "resolved_by": None,
         "resolution_note": None,

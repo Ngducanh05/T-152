@@ -20,9 +20,7 @@ async def test_agent_messages_accumulate_with_add_messages():
     graph = build_graph(FakeListChatModel(responses=["Xin chào", "Tạm biệt"]))
 
     first = await graph.ainvoke({"messages": [HumanMessage(content="Chào")]})
-    second = await graph.ainvoke(
-        {**first, "messages": [*first["messages"], HumanMessage(content="Tạm biệt")]}
-    )
+    second = await graph.ainvoke({**first, "messages": [*first["messages"], HumanMessage(content="Tạm biệt")]})
 
     assert [message.content for message in second["messages"]] == [
         "Chào",

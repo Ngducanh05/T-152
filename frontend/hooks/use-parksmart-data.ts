@@ -77,13 +77,13 @@ export async function loadAuthoritativeState(
   userId: string | null,
   signal?: AbortSignal,
 ): Promise<ParkSmartSnapshot> {
-  const [map, slots, status, rewardConfiguration] = await Promise.all([
+  const [map, parkingSnapshot] = await Promise.all([
     api.getMap(signal),
-    api.getSlots({}, signal),
-    api.getParkingStatus(signal),
-    api.getRewardConfiguration(signal),
+    api.getParkingSnapshot(signal),
   ]);
+  const { slots, status } = parkingSnapshot;
   if (!userId) {
+    const rewardConfiguration = await api.getRewardConfiguration(signal);
     return {
       map,
       slots,
@@ -96,28 +96,19 @@ export async function loadAuthoritativeState(
       contributions: [],
     };
   }
-  const [
-    currentLocation,
-    activeReservation,
-    activeSession,
-    rewardSummary,
-    contributions,
-  ] = await Promise.all([
-    api.getCurrentLocation(userId, signal),
-    api.getActiveReservation(userId, signal),
-    api.getActiveSession(userId, signal),
-    api.getRewardSummary(userId, signal),
+  const [userState, contributions] = await Promise.all([
+    api.getUserParkingState(userId, signal),
     api.getUserContributions(userId, signal),
   ]);
   return {
     map,
     slots,
     status,
-    currentLocation,
-    activeReservation,
-    activeSession,
-    rewardSummary,
-    rewardConfiguration,
+    currentLocation: userState.current_location,
+    activeReservation: userState.active_reservation,
+    activeSession: userState.active_session,
+    rewardSummary: userState.reward_summary,
+    rewardConfiguration: userState.reward_configuration,
     contributions,
   };
 }
@@ -195,23 +186,12 @@ export function useParkSmartData(
       const controller = new AbortController();
       pollControllerRef.current = controller;
       try {
-        const [slots, status] = await Promise.all([
-          api.getSlots({}, controller.signal),
-          api.getParkingStatus(controller.signal),
-        ]);
-        const [rewardSummary, contributions] = userId
-          ? await Promise.all([
-              api.getRewardSummary(userId, controller.signal),
-              api.getUserContributions(userId, controller.signal),
-            ])
-          : [null, []];
+        const snapshot = await api.getParkingSnapshot(controller.signal);
         if (mountedRef.current) {
           setState((current) => ({
             ...current,
-            slots,
-            status,
-            rewardSummary,
-            contributions,
+            slots: snapshot.slots,
+            status: snapshot.status,
             lastUpdatedAt: new Date().toISOString(),
             error: null,
           }));

@@ -119,6 +119,66 @@ describe("LoginForm", () => {
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 
+  it("shows CHECK_EMAIL and resends confirmation without signing up again", async () => {
+    const signUp = vi.fn(async () => ({
+      state: "confirmation_required" as const,
+      profile: null,
+      error: null,
+      email: "user@example.com",
+    }));
+    const resendSignUpConfirmation = vi.fn(async () => ({
+      state: "sent" as const,
+      error: null,
+    }));
+    mocks.useAuth.mockReturnValue({
+      status: "guest",
+      profile: null,
+      initializationError: null,
+      signIn: vi.fn(),
+      signUp,
+      resendSignUpConfirmation,
+      signOut: vi.fn(),
+    });
+    const user = userEvent.setup();
+    render(<LoginForm initialMode="register" />);
+    await user.type(screen.getByLabelText("Họ tên"), "User");
+    await user.type(screen.getByLabelText("Email"), "user@example.com");
+    await user.type(screen.getByLabelText("Mật khẩu"), "safe-password");
+    await user.type(screen.getByLabelText("Xác nhận mật khẩu"), "safe-password");
+    await user.click(screen.getByRole("button", { name: "Đăng ký" }));
+
+    expect(await screen.findByRole("heading", { name: "Kiểm tra email" })).toBeVisible();
+    expect(screen.getByText("user@example.com")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Gửi lại email xác nhận" }));
+    expect(resendSignUpConfirmation).toHaveBeenCalledWith("user@example.com");
+    expect(signUp).toHaveBeenCalledOnce();
+    expect(await screen.findByRole("status")).toHaveTextContent("Đã gửi lại");
+  });
+
+  it("sends email_not_confirmed login to CHECK_EMAIL recovery", async () => {
+    mocks.useAuth.mockReturnValue({
+      status: "guest",
+      profile: null,
+      initializationError: null,
+      signIn: vi.fn(async () => ({
+        state: "confirmation_required",
+        profile: null,
+        error: "Email chưa được xác nhận.",
+        email: "user@example.com",
+      })),
+      signUp: vi.fn(),
+      resendSignUpConfirmation: vi.fn(),
+      signOut: vi.fn(),
+    });
+    const user = userEvent.setup();
+    render(<LoginForm />);
+    await user.type(screen.getByLabelText("Email"), "user@example.com");
+    await user.type(screen.getByLabelText("Mật khẩu"), "safe-password");
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+    expect(await screen.findByRole("heading", { name: "Kiểm tra email" })).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("chưa được xác nhận");
+  });
+
   it.each([
     ["login" as const, "Đăng nhập ParkSmart"],
     ["register" as const, "Đăng ký ParkSmart"],

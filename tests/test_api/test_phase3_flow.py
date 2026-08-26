@@ -83,6 +83,7 @@ async def test_phase3_recommend_route_park_and_recommend_again(
         json={
             "start_node_id": "F1-ENTRANCE",
             "destination_node_id": candidate_id,
+            "mode": "VEHICLE",
         },
     )
     assert route.status_code == 200

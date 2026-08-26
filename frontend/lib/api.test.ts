@@ -93,6 +93,97 @@ describe("optional resources", () => {
   });
 });
 
+describe("mutation idempotency headers", () => {
+  it("forwards caller-supplied keys on protected mutations", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope({})),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+    });
+
+    await api.createReservation(
+      {
+        user_id: "USER-001",
+        vehicle_id: "VEHICLE-001",
+        slot_id: "F1-D01",
+        expected_version: 7,
+      },
+      undefined,
+      "reserve-key",
+    );
+    await api.confirmParking(
+      {
+        user_id: "USER-001",
+        vehicle_id: "VEHICLE-001",
+        reservation_id: "RESERVATION-001",
+        expected_version: 8,
+      },
+      undefined,
+      "confirm-key",
+    );
+    await api.completeSession(
+      "SESSION-001",
+      {
+        user_id: "USER-001",
+        expected_version: 9,
+      },
+      undefined,
+      "complete-key",
+    );
+    await api.reportWrongParking(
+      {
+        user_id: "USER-001",
+        slot_id: "F1-D01",
+        reason_code: "CROSSED_LINE",
+      },
+      undefined,
+      "report-key",
+    );
+
+    const keys = fetcher.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get("Idempotency-Key"),
+    );
+    expect(keys).toEqual([
+      "reserve-key",
+      "confirm-key",
+      "complete-key",
+      "report-key",
+    ]);
+  });
+
+  it("keeps multipart content-type browser-managed while adding the key", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope({ id: "REPORT-IMAGE" })),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+    });
+    const evidence = new File(["image-bytes"], "scene.jpg", {
+      type: "image/jpeg",
+    });
+
+    await api.reportWrongParking(
+      {
+        user_id: "USER-001",
+        slot_id: "F2-D03",
+        reason_code: "BLOCKING_ACCESS",
+        evidence,
+      },
+      undefined,
+      "report-image-key",
+    );
+
+    const request = fetcher.mock.calls[0]?.[1];
+    const headers = new Headers(request?.headers);
+    expect(request?.body).toBeInstanceOf(FormData);
+    expect(headers.get("Idempotency-Key")).toBe("report-image-key");
+    expect(headers.has("Content-Type")).toBe(false);
+  });
+});
+
 describe("operator-safe errors", () => {
   it("shows the stable API code and request ID with understandable Vietnamese wording", () => {
     const error = new ApiError({

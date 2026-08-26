@@ -83,9 +83,7 @@ async def test_create_reservation_uses_server_id_configured_ttl_and_state_servic
     assert reservation.expires_at == created_at + timedelta(seconds=45)
     async with factory() as session:
         slot = await session.get(ParkingSlot, "F1-C01")
-        event = await session.scalar(
-            select(ParkingEvent).where(ParkingEvent.slot_id == "F1-C01")
-        )
+        event = await session.scalar(select(ParkingEvent).where(ParkingEvent.slot_id == "F1-C01"))
     assert slot is not None and slot.status is SlotStatus.RESERVED
     assert event is not None and event.event_type is ParkingEventType.SLOT_RESERVED
 
@@ -116,9 +114,7 @@ async def test_cancel_reservation_updates_reservation_slot_and_event_atomically(
     factory = async_sessionmaker(reservation_db.engine, expire_on_commit=False)
     async with factory() as session, session.begin():
         service = ReservationService(session)
-        reservation = await service.create_reservation(
-            "USER-001", "VEHICLE-001", "F1-B01"
-        )
+        reservation = await service.create_reservation("USER-001", "VEHICLE-001", "F1-B01")
         cancelled = await service.cancel_reservation(reservation.id, user_id="USER-001")
 
     assert cancelled.status is ReservationStatus.CANCELLED
@@ -144,12 +140,8 @@ async def test_get_active_reservation_expires_elapsed_hold(
     settings = Settings(reservation_ttl_seconds=1)
     async with factory() as session, session.begin():
         service = ReservationService(session, settings=settings)
-        reservation = await service.create_reservation(
-            "USER-001", "VEHICLE-001", "F1-C02", now=base_time
-        )
-        active = await service.get_active_reservation(
-            "USER-001", now=base_time + timedelta(seconds=1)
-        )
+        reservation = await service.create_reservation("USER-001", "VEHICLE-001", "F1-C02", now=base_time)
+        active = await service.get_active_reservation("USER-001", now=base_time + timedelta(seconds=1))
 
     assert active is None
     assert reservation.status is ReservationStatus.EXPIRED
@@ -173,9 +165,7 @@ async def test_create_reservation_replaces_users_expired_hold(
     settings = Settings(reservation_ttl_seconds=1)
     async with factory() as session, session.begin():
         service = ReservationService(session, settings=settings)
-        expired = await service.create_reservation(
-            "USER-001", "VEHICLE-001", "F1-D01", now=base_time
-        )
+        expired = await service.create_reservation("USER-001", "VEHICLE-001", "F1-D01", now=base_time)
         current = await service.create_reservation(
             "USER-001",
             "VEHICLE-001",
@@ -251,16 +241,12 @@ async def test_caller_rollback_removes_complete_reservation_transition(
     factory = async_sessionmaker(reservation_db.engine, expire_on_commit=False)
     with pytest.raises(RuntimeError, match="rollback"):
         async with factory() as session, session.begin():
-            await ReservationService(session).create_reservation(
-                "USER-001", "VEHICLE-001", "F1-A10"
-            )
+            await ReservationService(session).create_reservation("USER-001", "VEHICLE-001", "F1-A10")
             raise RuntimeError("rollback")
 
     async with factory() as session:
         slot = await session.get(ParkingSlot, "F1-A10")
-        reservation_count = await session.scalar(
-            select(func.count()).select_from(ParkingReservation)
-        )
+        reservation_count = await session.scalar(select(func.count()).select_from(ParkingReservation))
         event_count = await session.scalar(
             select(func.count()).select_from(ParkingEvent).where(ParkingEvent.slot_id == "F1-A10")
         )

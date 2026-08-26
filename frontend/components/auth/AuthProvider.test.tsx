@@ -61,6 +61,7 @@ function createSupabaseMock(
     signInWithPassword: vi.fn(),
     signOut: vi.fn(async () => ({ error: null })),
     signUp: vi.fn(async () => signUpResult),
+    resend: vi.fn(async () => ({ error: null })),
   };
 
   return { auth };
@@ -73,6 +74,7 @@ type SupabaseAuthMock = {
   signInWithPassword: ReturnType<typeof vi.fn>;
   signOut: ReturnType<typeof vi.fn>;
   signUp: ReturnType<typeof vi.fn>;
+  resend: ReturnType<typeof vi.fn>;
 };
 
 type AuthValue = ReturnType<typeof useAuth>;
@@ -181,9 +183,10 @@ describe("AuthProvider signup", () => {
     });
 
     expect(result).toEqual({
+      state: "authenticated",
       profile,
       error: null,
-      confirmationRequired: false,
+      email: "user@example.com",
     });
     expect(mocks.getCurrentUser).toHaveBeenCalledOnce();
     expect(mocks.onboardCurrentUser).toHaveBeenCalledOnce();
@@ -219,9 +222,10 @@ describe("AuthProvider signup", () => {
     });
 
     expect(result).toEqual({
+      state: "confirmation_required",
       profile: null,
       error: null,
-      confirmationRequired: true,
+      email: "user@example.com",
     });
     expect(mocks.getCurrentUser).not.toHaveBeenCalled();
     expect(mocks.onboardCurrentUser).not.toHaveBeenCalled();
@@ -259,14 +263,87 @@ describe("AuthProvider signup", () => {
     });
 
     expect(result).toEqual({
+      state: "rate_limited",
       profile: null,
       error:
-        "Supabase dang tam gioi han so email xac nhan. Vui long cho mot luc roi thu lai.",
-      confirmationRequired: false,
+        "Supabase đang tạm giới hạn số email xác nhận. Vui lòng chờ một lúc rồi thử lại.",
+      email: "user@example.com",
     });
     expect(supabase.auth.signUp).toHaveBeenCalledOnce();
     expect(mocks.getCurrentUser).not.toHaveBeenCalled();
     expect(mocks.onboardCurrentUser).not.toHaveBeenCalled();
     expect(supabase.auth.signOut).not.toHaveBeenCalled();
+  });
+
+  it("resends signup confirmation without calling signUp again", async () => {
+    const supabase = createSupabaseMock({
+      data: { user: null, session: null },
+      error: null,
+    });
+    mocks.createBrowserSupabaseClient.mockReturnValue(supabase);
+    let authValue = null as unknown as AuthValue;
+    render(
+      <AuthProvider>
+        <AuthProbe onValue={(value) => { authValue = value; }} />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(mocks.createBrowserSupabaseClient).toHaveBeenCalledOnce());
+
+    const result = await authValue.resendSignUpConfirmation(" User@Example.com ");
+
+    expect(result).toEqual({ state: "sent", error: null });
+    expect(supabase.auth.resend).toHaveBeenCalledWith({
+      type: "signup",
+      email: "user@example.com",
+    });
+    expect(supabase.auth.signUp).not.toHaveBeenCalled();
+  });
+
+  it("returns a distinct resend rate-limit state", async () => {
+    const supabase = createSupabaseMock({
+      data: { user: null, session: null },
+      error: null,
+    });
+    supabase.auth.resend.mockResolvedValue({
+      error: { code: "over_email_send_rate_limit" },
+    });
+    mocks.createBrowserSupabaseClient.mockReturnValue(supabase);
+    let authValue = null as unknown as AuthValue;
+    render(
+      <AuthProvider>
+        <AuthProbe onValue={(value) => { authValue = value; }} />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(mocks.createBrowserSupabaseClient).toHaveBeenCalledOnce());
+
+    const result = await authValue.resendSignUpConfirmation("user@example.com");
+
+    expect(result.state).toBe("rate_limited");
+    expect(result.error).toContain("giới hạn");
+  });
+
+  it("distinguishes an unconfirmed email from invalid credentials", async () => {
+    const supabase = createSupabaseMock({
+      data: { user: null, session: null },
+      error: null,
+    });
+    supabase.auth.signInWithPassword.mockResolvedValue({
+      data: { session: null },
+      error: { code: "email_not_confirmed" },
+    });
+    mocks.createBrowserSupabaseClient.mockReturnValue(supabase);
+    let authValue = null as unknown as AuthValue;
+    render(
+      <AuthProvider>
+        <AuthProbe onValue={(value) => { authValue = value; }} />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(mocks.createBrowserSupabaseClient).toHaveBeenCalledOnce());
+
+    const result = await authValue.signIn("user@example.com", "safe-test-password");
+
+    expect(result.state).toBe("confirmation_required");
+    expect(result.email).toBe("user@example.com");
+    expect(result.error).toContain("chưa được xác nhận");
   });
 });
