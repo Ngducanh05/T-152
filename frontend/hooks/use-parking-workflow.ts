@@ -19,7 +19,6 @@ import { isAgentEnabled } from "@/lib/public-config";
 import type {
   ChatUiAction,
   AdjacentSlotObservedStatus,
-  FloorId,
   FloorScopedId,
   ParkingPreference,
   RecommendationCandidate,
@@ -225,13 +224,6 @@ function preferencesFor(value: ParkingPreference) {
   };
 }
 
-function floorIdFromNode(nodeId: FloorScopedId): FloorId | undefined {
-  const floorId = nodeId.slice(0, 2);
-  return floorId === "F1" || floorId === "F2" || floorId === "F3"
-    ? floorId
-    : undefined;
-}
-
 export function useParkingWorkflow(
   data: WorkflowData,
   api: WorkflowApi = parkSmartApi,
@@ -348,7 +340,6 @@ export function useParkingWorkflow(
       const result = await api.recommend({
         user_id: identity.userId,
         start_node_id: nodeId,
-        floor_id: floorIdFromNode(nodeId),
         charging_required: deferredPreference === "EV",
         accessible_required: deferredPreference === "ACCESSIBLE",
         near_elevator: deferredPreference === "NEAR_ELEVATOR",
@@ -437,7 +428,6 @@ export function useParkingWorkflow(
       const result = await api.recommend({
         user_id: identity.userId,
         start_node_id: startNodeId,
-        floor_id: floorIdFromNode(startNodeId),
         charging_required: preferences.chargingRequired,
         accessible_required: preferences.accessibleRequired,
         near_elevator: preferences.nearElevator,
@@ -532,6 +522,7 @@ export function useParkingWorkflow(
       const route = await api.getRoute({
         start_node_id: snapshot.currentLocation?.node_id ?? startNodeId,
         destination_node_id: slot.id,
+        mode: "VEHICLE",
       });
       setActiveRoute(route);
       setNotice(`Đã giữ ô ${slot.id} và tải chỉ đường.`);
@@ -586,6 +577,7 @@ export function useParkingWorkflow(
       const route = await api.getRoute({
         start_node_id: startNodeId,
         destination_node_id: selectedSlotId,
+        mode: "VEHICLE",
       });
       setActiveRoute(route);
     } catch (error) {
@@ -612,29 +604,23 @@ export function useParkingWorkflow(
     setNotice(null);
     clearRecommendations();
     try {
-      let authoritativeSlot = initialSlot;
-      if (data.currentLocation?.node_id !== reservation.slot_id) {
-        await api.confirmLocation({
-          user_id: identity.userId,
-          node_id: reservation.slot_id,
-        });
-        const arrivalSnapshot = await data.refresh();
-        authoritativeSlot =
-          arrivalSnapshot.slots.find(
-            (candidate) => candidate.id === reservation.slot_id,
-          ) ?? initialSlot;
-        setAgentCurrentLocationId(null);
-      }
       await api.confirmParking({
         user_id: identity.userId,
         vehicle_id: identity.vehicleId,
         reservation_id: reservation.id,
-        expected_version: authoritativeSlot.version,
+        expected_version: initialSlot.version,
       });
       await data.refresh();
       setActiveRoute(null);
       setNotice(`Đã xác nhận bạn đến ${reservation.slot_id} và hoàn tất đỗ xe.`);
     } catch (error) {
+      if (error instanceof ApiError && error.code === "PARKING_ARRIVAL_NOT_VERIFIED") {
+        scanCompletedRef.current = false;
+        resumeAgentAfterLocationRef.current = false;
+        setRequestedPanel({ kind: "qr-location" });
+        setNotice("Hãy quét mã QR gần ô đã giữ để xác minh bạn đã đến nơi.");
+        return;
+      }
       await handleMutationFailure(error);
     } finally {
       setPending(null);
@@ -659,6 +645,7 @@ export function useParkingWorkflow(
       const route = await api.getRoute({
         start_node_id: startNodeId,
         destination_node_id: session.destination_node_id || session.slot_id,
+        mode: "PEDESTRIAN",
       });
       await data.refresh();
       setSelectedSlotId(session.slot_id);

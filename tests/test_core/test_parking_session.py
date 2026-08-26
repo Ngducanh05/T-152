@@ -1,3 +1,4 @@
+import asyncio
 import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
@@ -22,8 +23,11 @@ from src.core.db_models import (
     ParkingUser,
     Vehicle,
 )
+from src.core.location import LocationService
 from src.core.parking_session import ParkingSessionError, ParkingSessionService
+from src.core.parking_state import ParkingStateError, ParkingStateService
 from src.core.reservation import ReservationService
+from src.core.reservation_expiry import ReservationExpiryService
 from src.core.seed import seed_if_missing
 from src.models.schemas import (
     ErrorCode,
@@ -85,12 +89,23 @@ async def _reserve(
     settings: Settings | None = None,
     now: datetime | None = None,
 ) -> ParkingReservation:
-    return await ReservationService(session, settings=settings).create_reservation(
+    reservation = await ReservationService(session, settings=settings).create_reservation(
         user_id,
         vehicle_id,
         slot_id,
         now=now,
     )
+    slot = await session.get(ParkingSlot, slot_id)
+    assert slot is not None
+    verification_time = now or datetime.now(UTC)
+    await LocationService(
+        session,
+        clock=lambda: verification_time,
+    ).confirm_scanned_location(
+        user_id,
+        f"parksmart:location:v1:PSLOC-{slot.node_id}",
+    )
+    return reservation
 
 
 @pytest.mark.asyncio
@@ -101,9 +116,7 @@ async def test_confirm_valid_reservation_creates_active_session_atomically(
     parked_at = datetime(2026, 8, 12, 6, 0, tzinfo=UTC)
     async with factory() as session, session.begin():
         reservation = await _reserve(session, "F1-D01", now=parked_at - timedelta(seconds=1))
-        parking_session = await ParkingSessionService(
-            session, clock=lambda: parked_at
-        ).confirm_parking(
+        parking_session = await ParkingSessionService(session, clock=lambda: parked_at).confirm_parking(
             "USER-001",
             "VEHICLE-001",
             reservation.id,
@@ -141,9 +154,7 @@ async def test_confirm_rejects_reservation_owned_by_another_user(
             vehicle_id="VEHICLE-002",
         )
         with pytest.raises(ParkingSessionError, match="does not own") as error:
-            await ParkingSessionService(session).confirm_parking(
-                "USER-001", "VEHICLE-001", reservation.id
-            )
+            await ParkingSessionService(session).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
     assert error.value.code is ErrorCode.INVALID_TRANSITION
 
 
@@ -163,9 +174,9 @@ async def test_confirm_rejects_expired_reservation_without_occupying_slot(
 
     async with factory() as session, session.begin():
         with pytest.raises(ParkingSessionError, match="expired") as error:
-            await ParkingSessionService(
-                session, clock=lambda: created_at + timedelta(seconds=1)
-            ).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
+            await ParkingSessionService(session, clock=lambda: created_at + timedelta(seconds=1)).confirm_parking(
+                "USER-001", "VEHICLE-001", reservation.id
+            )
     assert error.value.code is ErrorCode.INVALID_TRANSITION
     async with factory() as session:
         slot = await session.get(ParkingSlot, "F1-C02")
@@ -175,27 +186,61 @@ async def test_confirm_rejects_expired_reservation_without_occupying_slot(
 
 
 @pytest.mark.asyncio
+async def test_manual_location_does_not_verify_parking_arrival(
+    session_db: SessionDatabase,
+):
+    factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        reservation = await ReservationService(session).create_reservation("USER-001", "VEHICLE-001", "F2-C09")
+        await LocationService(session).confirm_location("USER-001", "F2-C09")
+        with pytest.raises(ParkingSessionError) as error:
+            await ParkingSessionService(session).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
+
+    assert error.value.code is ErrorCode.PARKING_ARRIVAL_NOT_VERIFIED
+    assert error.value.details["reason"] == "missing"
+
+
+@pytest.mark.asyncio
+async def test_expired_qr_verification_does_not_confirm_parking(
+    session_db: SessionDatabase,
+):
+    factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
+    verified_at = datetime(2026, 8, 12, 10, 0, tzinfo=UTC)
+    settings = Settings(parking_arrival_verification_ttl_seconds=60)
+    async with factory() as session, session.begin():
+        reservation = await ReservationService(session, settings=settings).create_reservation(
+            "USER-001", "VEHICLE-001", "F2-C09", now=verified_at
+        )
+        await LocationService(session, clock=lambda: verified_at).confirm_scanned_location(
+            "USER-001", "parksmart:location:v1:PSLOC-F2-C-E"
+        )
+        with pytest.raises(ParkingSessionError) as error:
+            await ParkingSessionService(
+                session,
+                clock=lambda: verified_at + timedelta(seconds=61),
+                settings=settings,
+            ).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
+
+    assert error.value.code is ErrorCode.PARKING_ARRIVAL_NOT_VERIFIED
+    assert error.value.details["reason"] == "expired"
+
+
+@pytest.mark.asyncio
 async def test_user_cannot_create_two_active_sessions(session_db: SessionDatabase):
     factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
     async with factory() as session, session.begin():
         first_reservation = await _reserve(session, "F1-A01")
-        await ParkingSessionService(session).confirm_parking(
-            "USER-001", "VEHICLE-001", first_reservation.id
-        )
+        await ParkingSessionService(session).confirm_parking("USER-001", "VEHICLE-001", first_reservation.id)
     async with factory() as session, session.begin():
         second_reservation = await _reserve(session, "F1-A02")
 
     async with factory() as session, session.begin():
         with pytest.raises(ParkingSessionError, match="already exists") as error:
-            await ParkingSessionService(session).confirm_parking(
-                "USER-001", "VEHICLE-001", second_reservation.id
-            )
+            await ParkingSessionService(session).confirm_parking("USER-001", "VEHICLE-001", second_reservation.id)
     assert error.value.code is ErrorCode.INVALID_TRANSITION
     async with factory() as session:
         active_count = await session.scalar(
-            select(func.count())
-            .select_from(ParkingSession)
-            .where(ParkingSession.status == ParkingSessionStatus.ACTIVE)
+            select(func.count()).select_from(ParkingSession).where(ParkingSession.status == ParkingSessionStatus.ACTIVE)
         )
         slot = await session.get(ParkingSlot, "F1-A02")
     assert active_count == 1
@@ -227,9 +272,7 @@ async def test_session_insert_failure_rolls_back_slot_reservation_and_event(
     monkeypatch.setattr(parking_session_module, "uuid4", lambda: "duplicate")
     with pytest.raises(IntegrityError):
         async with factory() as session, session.begin():
-            await ParkingSessionService(session).confirm_parking(
-                "USER-001", "VEHICLE-001", reservation.id
-            )
+            await ParkingSessionService(session).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
 
     async with factory() as session:
         stored_reservation = await session.get(ParkingReservation, reservation.id)
@@ -276,12 +319,12 @@ async def test_complete_session_releases_slot_and_marks_session_completed(
     completed_at = datetime(2026, 8, 12, 9, 0, tzinfo=UTC)
     async with factory() as session, session.begin():
         reservation = await _reserve(session, "F1-D02", now=completed_at - timedelta(seconds=1))
-        parking_session = await ParkingSessionService(
-            session, clock=lambda: completed_at
-        ).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
-        completed = await ParkingSessionService(
-            session, clock=lambda: completed_at
-        ).complete_session(parking_session.id, user_id="USER-001")
+        parking_session = await ParkingSessionService(session, clock=lambda: completed_at).confirm_parking(
+            "USER-001", "VEHICLE-001", reservation.id
+        )
+        completed = await ParkingSessionService(session, clock=lambda: completed_at).complete_session(
+            parking_session.id, user_id="USER-001"
+        )
 
     assert completed.status is ParkingSessionStatus.COMPLETED
     assert completed.completed_at == completed_at
@@ -311,9 +354,7 @@ async def test_other_user_cannot_complete_session(session_db: SessionDatabase):
 
     async with factory() as session, session.begin():
         with pytest.raises(ParkingSessionError, match="does not own") as error:
-            await ParkingSessionService(session).complete_session(
-                parking_session.id, user_id="USER-002"
-            )
+            await ParkingSessionService(session).complete_session(parking_session.id, user_id="USER-002")
     assert error.value.code is ErrorCode.INVALID_TRANSITION
     async with factory() as session:
         stored_session = await session.get(ParkingSession, parking_session.id)
@@ -321,3 +362,180 @@ async def test_other_user_cannot_complete_session(session_db: SessionDatabase):
     assert stored_session is not None
     assert stored_session.status is ParkingSessionStatus.ACTIVE
     assert slot is not None and slot.status is SlotStatus.OCCUPIED
+
+
+@pytest.mark.asyncio
+async def test_confirm_vs_cancel_has_no_deadlock_and_keeps_valid_state(
+    session_db: SessionDatabase,
+):
+    factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        reservation = await _reserve(session, "F2-C09")
+
+    async def confirm() -> str:
+        try:
+            async with factory() as session, session.begin():
+                await ParkingSessionService(session).confirm_parking(
+                    "USER-001", "VEHICLE-001", reservation.id
+                )
+            return "confirmed"
+        except (ParkingSessionError, ParkingStateError):
+            return "rejected"
+
+    async def cancel() -> str:
+        try:
+            async with factory() as session, session.begin():
+                await ReservationService(session).cancel_reservation(
+                    reservation.id, user_id="USER-001"
+                )
+            return "cancelled"
+        except ParkingStateError:
+            return "rejected"
+
+    outcomes = await asyncio.wait_for(asyncio.gather(confirm(), cancel()), timeout=5)
+    assert outcomes.count("rejected") == 1
+    async with factory() as session:
+        stored = await session.get(ParkingReservation, reservation.id)
+        slot = await session.get(ParkingSlot, "F2-C09")
+        sessions = list(await session.scalars(select(ParkingSession)))
+    assert stored is not None and slot is not None
+    if stored.status is ReservationStatus.CONFIRMED:
+        assert slot.status is SlotStatus.OCCUPIED
+        assert len(sessions) == 1 and sessions[0].status is ParkingSessionStatus.ACTIVE
+    else:
+        assert stored.status is ReservationStatus.CANCELLED
+        assert slot.status is SlotStatus.AVAILABLE
+        assert sessions == []
+
+
+@pytest.mark.asyncio
+async def test_confirm_vs_expiry_has_no_deadlock_and_one_terminal_winner(
+    session_db: SessionDatabase,
+):
+    factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
+    base = datetime(2026, 8, 26, 4, 0, tzinfo=UTC)
+    settings = Settings(reservation_ttl_seconds=2)
+    async with factory() as session, session.begin():
+        reservation = await _reserve(
+            session,
+            "F2-D09",
+            settings=settings,
+            now=base,
+        )
+
+    async def confirm() -> str:
+        try:
+            async with factory() as session, session.begin():
+                await ParkingSessionService(
+                    session,
+                    clock=lambda: base + timedelta(seconds=1),
+                    settings=settings,
+                ).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
+            return "confirmed"
+        except (ParkingSessionError, ParkingStateError):
+            return "rejected"
+
+    async def expire() -> str:
+        async with factory() as session, session.begin():
+            count = await ReservationExpiryService(
+                session, clock=lambda: base + timedelta(seconds=3)
+            ).expire_batch()
+        return "expired" if count else "skipped"
+
+    await asyncio.wait_for(asyncio.gather(confirm(), expire()), timeout=5)
+    async with factory() as session:
+        stored = await session.get(ParkingReservation, reservation.id)
+        slot = await session.get(ParkingSlot, "F2-D09")
+        active_count = await session.scalar(
+            select(func.count())
+            .select_from(ParkingSession)
+            .where(ParkingSession.status == ParkingSessionStatus.ACTIVE)
+        )
+    assert stored is not None and slot is not None
+    assert (stored.status, slot.status, active_count) in {
+        (ReservationStatus.CONFIRMED, SlotStatus.OCCUPIED, 1),
+        (ReservationStatus.EXPIRED, SlotStatus.AVAILABLE, 0),
+    }
+
+
+@pytest.mark.asyncio
+async def test_two_confirm_attempts_create_one_active_session_without_deadlock(
+    session_db: SessionDatabase,
+):
+    factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        reservation = await _reserve(session, "F3-A01")
+
+    async def attempt() -> bool:
+        try:
+            async with factory() as session, session.begin():
+                await ParkingSessionService(session).confirm_parking(
+                    "USER-001", "VEHICLE-001", reservation.id
+                )
+            return True
+        except (ParkingSessionError, ParkingStateError, IntegrityError):
+            return False
+
+    results = await asyncio.wait_for(asyncio.gather(attempt(), attempt()), timeout=5)
+    assert sorted(results) == [False, True]
+    async with factory() as session:
+        active_count = await session.scalar(
+            select(func.count())
+            .select_from(ParkingSession)
+            .where(ParkingSession.status == ParkingSessionStatus.ACTIVE)
+        )
+        slot = await session.get(ParkingSlot, "F3-A01")
+    assert active_count == 1
+    assert slot is not None and slot.status is SlotStatus.OCCUPIED
+
+
+@pytest.mark.asyncio
+async def test_complete_vs_admin_slot_mutation_has_no_deadlock(
+    session_db: SessionDatabase,
+):
+    factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        reservation = await _reserve(session, "F3-B01")
+        parked = await ParkingSessionService(session).confirm_parking(
+            "USER-001", "VEHICLE-001", reservation.id
+        )
+        slot = await session.get(ParkingSlot, "F3-B01")
+        assert slot is not None
+        expected_version = slot.version
+
+    async def complete() -> bool:
+        try:
+            async with factory() as session, session.begin():
+                await ParkingSessionService(session).complete_session(
+                    parked.id,
+                    user_id="USER-001",
+                    expected_version=expected_version,
+                )
+            return True
+        except (ParkingSessionError, ParkingStateError):
+            return False
+
+    async def admin_clear() -> bool:
+        try:
+            async with factory() as session, session.begin():
+                await ParkingStateService(session).set_slot_status_by_admin(
+                    "F3-B01",
+                    SlotStatus.AVAILABLE,
+                    admin_id="ADMIN-001",
+                    expected_version=expected_version,
+                )
+            return True
+        except ParkingStateError:
+            return False
+
+    results = await asyncio.wait_for(
+        asyncio.gather(complete(), admin_clear()),
+        timeout=5,
+    )
+    assert results == [True, False]
+    async with factory() as session:
+        stored_session = await session.get(ParkingSession, parked.id)
+        slot = await session.get(ParkingSlot, "F3-B01")
+    assert stored_session is not None
+    assert stored_session.status is ParkingSessionStatus.COMPLETED
+    assert slot is not None and slot.status is SlotStatus.AVAILABLE

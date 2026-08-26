@@ -126,9 +126,7 @@ async def test_manual_park_available_slot(simulator_db: SimulatorDatabase):
     try:
         await simulator.manual_park("F1-A02", "SIM-CAR-02")
         slot = await session.get(ParkingSlot, "F1-A02")
-        event = await session.scalar(
-            select(ParkingEvent).where(ParkingEvent.slot_id == "F1-A02")
-        )
+        event = await session.scalar(select(ParkingEvent).where(ParkingEvent.slot_id == "F1-A02"))
         vehicle = await session.get(Vehicle, "SIM-CAR-02")
     finally:
         await session.close()
@@ -152,9 +150,7 @@ async def test_manual_leave_occupied_slot(simulator_db: SimulatorDatabase):
         slot = await session.get(ParkingSlot, "F1-A03")
         events = list(
             await session.scalars(
-                select(ParkingEvent)
-                .where(ParkingEvent.slot_id == "F1-A03")
-                .order_by(ParkingEvent.created_at)
+                select(ParkingEvent).where(ParkingEvent.slot_id == "F1-A03").order_by(ParkingEvent.created_at)
             )
         )
     finally:
@@ -268,9 +264,7 @@ async def test_failed_transition_rolls_back(simulator_db: SimulatorDatabase):
         slot = await session.get(ParkingSlot, "F1-D10")
         vehicle = await session.get(Vehicle, "SIM-CAR-10")
         event_count = await session.scalar(
-            select(func.count())
-            .select_from(ParkingEvent)
-            .where(ParkingEvent.slot_id == "F1-D10")
+            select(func.count()).select_from(ParkingEvent).where(ParkingEvent.slot_id == "F1-D10")
         )
     finally:
         await session.close()
@@ -291,18 +285,14 @@ async def test_reset_is_idempotent(simulator_db: SimulatorDatabase):
         first_slot = await session.get(ParkingSlot, "F1-B03")
         first_version = first_slot.version if first_slot is not None else None
         first_event_count = await session.scalar(
-            select(func.count())
-            .select_from(ParkingEvent)
-            .where(ParkingEvent.slot_id == "F1-B03")
+            select(func.count()).select_from(ParkingEvent).where(ParkingEvent.slot_id == "F1-B03")
         )
         await session.rollback()
 
         second_steps = await simulator.reset_demo()
         second_slot = await session.get(ParkingSlot, "F1-B03")
         second_event_count = await session.scalar(
-            select(func.count())
-            .select_from(ParkingEvent)
-            .where(ParkingEvent.slot_id == "F1-B03")
+            select(func.count()).select_from(ParkingEvent).where(ParkingEvent.slot_id == "F1-B03")
         )
     finally:
         await session.close()
@@ -339,11 +329,7 @@ async def test_reset_produces_expected_baseline(simulator_db: SimulatorDatabase)
     assert slots["F1-A02"].status is SlotStatus.AVAILABLE
     assert slots["F1-D07"].status is SlotStatus.AVAILABLE
     assert slots["F1-D01"].status is SlotStatus.AVAILABLE
-    assert all(
-        slot.status is SlotStatus.AVAILABLE
-        for slot_id, slot in slots.items()
-        if slot_id != "F1-B03"
-    )
+    assert all(slot.status is SlotStatus.AVAILABLE for slot_id, slot in slots.items() if slot_id != "F1-B03")
 
 
 @pytest.mark.asyncio
@@ -389,9 +375,7 @@ async def test_reset_refuses_protected_state(
         await session.close()
 
     assert protected_slot is not None
-    assert protected_slot.status is (
-        SlotStatus.RESERVED if protected_kind == "reservation" else SlotStatus.OCCUPIED
-    )
+    assert protected_slot.status is (SlotStatus.RESERVED if protected_kind == "reservation" else SlotStatus.OCCUPIED)
     assert baseline_slot is not None and baseline_slot.status is SlotStatus.AVAILABLE
 
 
@@ -400,16 +384,12 @@ async def test_fixed_scenario_is_repeatable(simulator_db: SimulatorDatabase):
     session, simulator, state_service = await _service(simulator_db)
     try:
         first_steps = await simulator.run_fixed_scenario()
-        first_state = {
-            slot.id: (slot.status, slot.occupied_by_vehicle_id)
-            for slot in await state_service.list_slots()
-        }
+        first_state = {slot.id: (slot.status, slot.occupied_by_vehicle_id) for slot in await state_service.list_slots()}
         await session.rollback()
 
         second_steps = await simulator.run_fixed_scenario()
         second_state = {
-            slot.id: (slot.status, slot.occupied_by_vehicle_id)
-            for slot in await state_service.list_slots()
+            slot.id: (slot.status, slot.occupied_by_vehicle_id) for slot in await state_service.list_slots()
         }
     finally:
         await session.close()
@@ -471,9 +451,7 @@ async def test_scenario_failure_rolls_back(simulator_db: SimulatorDatabase):
         await session.rollback()
         slots = list(await session.scalars(select(ParkingSlot)))
         simulated_vehicle_count = await session.scalar(
-            select(func.count())
-            .select_from(Vehicle)
-            .where(Vehicle.id.like("SIM-CAR-%"))
+            select(func.count()).select_from(Vehicle).where(Vehicle.id.like("SIM-CAR-%"))
         )
         event_count = await session.scalar(select(func.count()).select_from(ParkingEvent))
     finally:

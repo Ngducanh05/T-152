@@ -55,17 +55,11 @@ def build_assistant_node(model_provider: ModelProvider, *, max_steps: int):
             model = model_provider()
         except LLMConfigurationError as exc:
             return {
-                "messages": [
-                    _safe_error_message(
-                        "Trợ lý đỗ xe hiện chưa được cấu hình. Vui lòng thử lại sau."
-                    )
-                ],
+                "messages": [_safe_error_message("Trợ lý đỗ xe hiện chưa được cấu hình. Vui lòng thử lại sau.")],
                 "error": f"AGENT_TOOL_UNAVAILABLE: {exc}",
             }
 
-        prompt: list[BaseMessage] = [
-            SystemMessage(content=f"{SYSTEM_PROMPT}\n\n{_context_prompt(state)}")
-        ]
+        prompt: list[BaseMessage] = [SystemMessage(content=f"{SYSTEM_PROMPT}\n\n{_context_prompt(state)}")]
         prompt.extend(state.get("messages", []))
         try:
             response = await model.ainvoke(prompt)
@@ -77,11 +71,7 @@ def build_assistant_node(model_provider: ModelProvider, *, max_steps: int):
                 type(error).__name__,
             )
             return {
-                "messages": [
-                    _safe_error_message(
-                        "Trợ lý đỗ xe tạm thời không khả dụng. Vui lòng thử lại sau."
-                    )
-                ],
+                "messages": [_safe_error_message("Trợ lý đỗ xe tạm thời không khả dụng. Vui lòng thử lại sau.")],
                 "error": "AGENT_TOOL_UNAVAILABLE: Model invocation failed.",
             }
 

@@ -50,12 +50,8 @@ class ParkingReportService:
         self.session = session
         self.settings = settings or get_settings()
         self.clock = clock or (lambda: datetime.now(UTC))
-        self.rewards = reward_service or RewardService(
-            session, settings=self.settings, clock=self.clock
-        )
-        self.quota = quota_service or ReportSubmissionQuotaService(
-            session, settings=self.settings, clock=self.clock
-        )
+        self.rewards = reward_service or RewardService(session, settings=self.settings, clock=self.clock)
+        self.quota = quota_service or ReportSubmissionQuotaService(session, settings=self.settings, clock=self.clock)
 
     def _now(self) -> datetime:
         value = self.clock()
@@ -133,9 +129,7 @@ class ParkingReportService:
                 f"Parking user {reporter_user_id} was not found",
                 slot_id=slot_id,
             )
-        slot = await self.session.scalar(
-            select(ParkingSlot).where(ParkingSlot.id == slot_id).with_for_update()
-        )
+        slot = await self.session.scalar(select(ParkingSlot).where(ParkingSlot.id == slot_id).with_for_update())
         if slot is None:
             raise ParkingReportError(
                 ErrorCode.SLOT_NOT_FOUND,
@@ -183,9 +177,7 @@ class ParkingReportService:
             user_id=reporter_user_id,
             source_type=RewardSourceType.WRONG_PARKING_REPORT,
             source_reference=report.id,
-            requested_points=(
-                0 if duplicate is not None else self.settings.wrong_parking_report_reward_points
-            ),
+            requested_points=(0 if duplicate is not None else self.settings.wrong_parking_report_reward_points),
             metadata={"slot_id": slot.id, "floor_id": slot.floor_id},
         )
         report.reward_points = reward.points if reward is not None else 0
@@ -301,13 +293,9 @@ class ParkingReportService:
         try:
             if reward is not None and reward.status is RewardTransactionStatus.PENDING:
                 if verification_outcome is WrongParkingReportVerificationOutcome.CONFIRMED:
-                    reward = await self.rewards.settle_pending(
-                        RewardSourceType.WRONG_PARKING_REPORT, report.id
-                    )
+                    reward = await self.rewards.settle_pending(RewardSourceType.WRONG_PARKING_REPORT, report.id)
                 else:
-                    reward = await self.rewards.cancel_pending(
-                        RewardSourceType.WRONG_PARKING_REPORT, report.id
-                    )
+                    reward = await self.rewards.cancel_pending(RewardSourceType.WRONG_PARKING_REPORT, report.id)
         except RewardError as error:
             raise ParkingReportError(
                 error.code,
@@ -352,9 +340,7 @@ class ParkingReportService:
             RewardSourceType.WRONG_PARKING_REPORT, report.id, for_update=True
         )
         if reward is not None and reward.status is RewardTransactionStatus.PENDING:
-            await self.rewards.cancel_pending(
-                RewardSourceType.WRONG_PARKING_REPORT, report.id
-            )
+            await self.rewards.cancel_pending(RewardSourceType.WRONG_PARKING_REPORT, report.id)
         await self.session.delete(report)
         await self.session.flush()
         return report

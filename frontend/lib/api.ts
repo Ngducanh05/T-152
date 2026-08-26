@@ -25,6 +25,7 @@ import type {
   ParkingReservation,
   ParkingSession,
   ParkingSlot,
+  ParkingSnapshot,
   ParkingStatus,
   ContributionRecord,
   RejectSlotObservationRequest,
@@ -47,6 +48,7 @@ import type {
   VerifySlotObservationRequest,
   UpdateParkingSlotStatusRequest,
   WrongParkingReport,
+  UserParkingState,
 } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
@@ -269,6 +271,17 @@ export class ParkSmartApiClient {
 
   getParkingStatus(signal?: AbortSignal) {
     return this.request<ParkingStatus>("/parking/status", { signal });
+  }
+
+  getParkingSnapshot(signal?: AbortSignal) {
+    return this.request<ParkingSnapshot>("/parking/snapshot", { signal });
+  }
+
+  getUserParkingState(userId: string, signal?: AbortSignal) {
+    return this.request<UserParkingState>(
+      `/parking/users/${encodeURIComponent(userId)}/state`,
+      { signal },
+    );
   }
 
   getSlots(filters: SlotFilters = {}, signal?: AbortSignal) {

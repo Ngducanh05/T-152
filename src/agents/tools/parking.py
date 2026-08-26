@@ -37,7 +37,9 @@ from src.models.schemas import (
     ParkingSlot,
     RecommendationRequest,
     ReservationStatus,
+    RouteMode,
     RouteResult,
+    SlotId,
     ZoneId,
 )
 
@@ -112,7 +114,7 @@ async def get_parking_status(runtime: AgentToolRuntime) -> ToolResult:
 
 @tool
 async def get_parking_slot_status(
-    slot_id: FloorScopedId,
+    slot_id: SlotId,
     *,
     runtime: AgentToolRuntime,
 ) -> ToolResult:
@@ -157,12 +159,12 @@ async def recommend_parking_slot(
         ).recommend(request)
         return tool_success(result.model_dump(mode="json"))
 
-    return await execute_tool(runtime, "recommend_parking_slot", operation, write=True)
+    return await execute_tool(runtime, "recommend_parking_slot", operation)
 
 
 @tool
 async def reserve_parking_slot(
-    slot_id: FloorScopedId,
+    slot_id: SlotId,
     expected_version: ExpectedVersion = None,
     *,
     runtime: AgentToolRuntime,
@@ -195,9 +197,16 @@ async def get_route(
 
     async def operation(session: AsyncSession) -> ToolResult:
         start_node_id = await _confirmed_location(session, runtime.context.user_id)
+        active_session = await ParkingSessionService(session).get_active_session(runtime.context.user_id)
+        mode = (
+            RouteMode.PEDESTRIAN
+            if active_session is not None and active_session.slot_id == destination_node_id
+            else RouteMode.VEHICLE
+        )
         route = await RoutingService(session).get_route(
             start_node_id,
             destination_node_id,
+            mode=mode,
         )
         return tool_success(
             _route_data(
@@ -223,9 +232,7 @@ async def set_user_location(
             runtime.context.user_id,
             node_id,
         )
-        return tool_success(
-            {"user_id": runtime.context.user_id, "node_id": confirmed_node_id}
-        )
+        return tool_success({"user_id": runtime.context.user_id, "node_id": confirmed_node_id})
 
     return await execute_tool(runtime, "set_user_location", operation, write=True)
 
@@ -277,9 +284,7 @@ async def find_parked_vehicle(runtime: AgentToolRuntime) -> ToolResult:
     """Find the vehicle using only the trusted user's active parking session."""
 
     async def operation(session: AsyncSession) -> ToolResult:
-        vehicle: ParkedVehicle = await ParkingSessionService(
-            session
-        ).find_parked_vehicle(runtime.context.user_id)
+        vehicle: ParkedVehicle = await ParkingSessionService(session).find_parked_vehicle(runtime.context.user_id)
         return tool_success(
             {
                 "session_id": vehicle.session_id,

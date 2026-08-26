@@ -24,6 +24,7 @@ from src.models.schemas import (
     ParkingEvent,
     ParkingEventType,
     ParkingSlot,
+    SlotId,
     SlotObservation,
     SlotObservationStatus,
     SlotStatus,
@@ -128,19 +129,12 @@ def _event_response(event: ParkingEventRecord) -> ParkingEvent:
 def _report_response(report: object) -> WrongParkingReport:
     values = vars(report)
     return WrongParkingReport.model_validate(
-        {
-            field_name: values.get(field_name)
-            for field_name in WrongParkingReport.model_fields
-        }
+        {field_name: values.get(field_name) for field_name in WrongParkingReport.model_fields}
     )
 
 
 def _report_http_error(error: ParkingReportError) -> HTTPException:
-    status_code = (
-        status.HTTP_404_NOT_FOUND
-        if error.code is ErrorCode.REPORT_NOT_FOUND
-        else status.HTTP_409_CONFLICT
-    )
+    status_code = status.HTTP_404_NOT_FOUND if error.code is ErrorCode.REPORT_NOT_FOUND else status.HTTP_409_CONFLICT
     return HTTPException(
         status_code=status_code,
         detail={"code": error.code.value, "message": error.message},
@@ -149,9 +143,7 @@ def _report_http_error(error: ParkingReportError) -> HTTPException:
 
 def _observation_http_error(error: SlotObservationError) -> HTTPException:
     status_code = (
-        status.HTTP_404_NOT_FOUND
-        if error.code is ErrorCode.OBSERVATION_NOT_FOUND
-        else status.HTTP_409_CONFLICT
+        status.HTTP_404_NOT_FOUND if error.code is ErrorCode.OBSERVATION_NOT_FOUND else status.HTTP_409_CONFLICT
     )
     return HTTPException(
         status_code=status_code,
@@ -160,11 +152,7 @@ def _observation_http_error(error: SlotObservationError) -> HTTPException:
 
 
 def _parking_state_http_error(error: ParkingStateError) -> HTTPException:
-    status_code = (
-        status.HTTP_404_NOT_FOUND
-        if error.code is ErrorCode.SLOT_NOT_FOUND
-        else status.HTTP_409_CONFLICT
-    )
+    status_code = status.HTTP_404_NOT_FOUND if error.code is ErrorCode.SLOT_NOT_FOUND else status.HTTP_409_CONFLICT
     return HTTPException(
         status_code=status_code,
         detail={
@@ -237,7 +225,7 @@ async def recent_parking_events(
     responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
 )
 async def update_parking_slot_status(
-    slot_id: FloorScopedId,
+    slot_id: SlotId,
     payload: UpdateParkingSlotStatusRequest,
     session: SessionDependency,
     admin_user: AdminUserDependency,
@@ -264,9 +252,7 @@ async def update_parking_slot_status(
 )
 async def recent_slot_observations(
     session: SessionDependency,
-    observation_status: Annotated[
-        SlotObservationStatus | None, Query(alias="status")
-    ] = None,
+    observation_status: Annotated[SlotObservationStatus | None, Query(alias="status")] = None,
     floor_id: Annotated[FloorId | None, Query()] = None,
     slot_id: Annotated[FloorScopedId | None, Query()] = None,
     user_id: Annotated[str | None, Query()] = None,
@@ -281,10 +267,7 @@ async def recent_slot_observations(
             limit=limit,
         )
     return SuccessResponse(
-        data=[
-            SlotObservation.model_validate(observation, from_attributes=True)
-            for observation in observations
-        ]
+        data=[SlotObservation.model_validate(observation, from_attributes=True) for observation in observations]
     )
 
 
@@ -303,9 +286,7 @@ async def get_slot_observation(
             observation = await service.get_observation(observation_id)
     except SlotObservationError as error:
         raise _observation_http_error(error) from error
-    return SuccessResponse(
-        data=SlotObservation.model_validate(observation, from_attributes=True)
-    )
+    return SuccessResponse(data=SlotObservation.model_validate(observation, from_attributes=True))
 
 
 @router.post(
@@ -456,9 +437,7 @@ async def get_wrong_parking_report_evidence_url(
         report.evidence_storage_path,
         expires_in=expires_in,
     )
-    return SuccessResponse(
-        data=ReportEvidenceUrlResponse(signed_url=signed_url, expires_in=expires_in)
-    )
+    return SuccessResponse(data=ReportEvidenceUrlResponse(signed_url=signed_url, expires_in=expires_in))
 
 
 @router.patch(
@@ -589,9 +568,7 @@ async def delete_wrong_parking_report(
     )
     cleanup_succeeded = False
     try:
-        cleanup_succeeded = await ReportEvidenceStorage(settings).delete(
-            report.evidence_storage_path
-        )
+        cleanup_succeeded = await ReportEvidenceStorage(settings).delete(report.evidence_storage_path)
     except Exception:  # noqa: BLE001 - cleanup is best effort after DB deletion
         cleanup_succeeded = False
     if not cleanup_succeeded:
@@ -600,9 +577,7 @@ async def delete_wrong_parking_report(
             report.id,
             getattr(request.state, "request_id", "unknown"),
         )
-    return SuccessResponse(
-        data=DeletedWrongParkingReportResponse(deleted_report_id=report.id)
-    )
+    return SuccessResponse(data=DeletedWrongParkingReportResponse(deleted_report_id=report.id))
 
 
 __all__ = ["router"]

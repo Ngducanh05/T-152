@@ -56,9 +56,7 @@ class RewardService:
         return start, start + timedelta(days=1)
 
     async def _lock_user(self, user_id: str) -> ParkingUser:
-        user = await self.session.scalar(
-            select(ParkingUser).where(ParkingUser.id == user_id).with_for_update()
-        )
+        user = await self.session.scalar(select(ParkingUser).where(ParkingUser.id == user_id).with_for_update())
         if user is None:
             raise RewardError(
                 ErrorCode.USER_NOT_FOUND,
@@ -95,8 +93,7 @@ class RewardService:
             await self.session.scalar(
                 select(func.coalesce(func.sum(RewardTransaction.points), 0)).where(
                     RewardTransaction.user_id == user_id,
-                    RewardTransaction.transaction_type
-                    == RewardTransactionType.CONTRIBUTION_REWARD,
+                    RewardTransaction.transaction_type == RewardTransactionType.CONTRIBUTION_REWARD,
                     RewardTransaction.status.in_(
                         (
                             RewardTransactionStatus.PENDING,
@@ -148,9 +145,7 @@ class RewardService:
         source_type: RewardSourceType,
         source_reference: str,
     ) -> RewardTransaction | None:
-        transaction = await self.get_source_transaction(
-            source_type, source_reference, for_update=True
-        )
+        transaction = await self.get_source_transaction(source_type, source_reference, for_update=True)
         if transaction is None:
             return None
         if transaction.status is not RewardTransactionStatus.PENDING:
@@ -169,9 +164,7 @@ class RewardService:
         source_type: RewardSourceType,
         source_reference: str,
     ) -> RewardTransaction | None:
-        transaction = await self.get_source_transaction(
-            source_type, source_reference, for_update=True
-        )
+        transaction = await self.get_source_transaction(source_type, source_reference, for_update=True)
         if transaction is None:
             return None
         if transaction.status is RewardTransactionStatus.CANCELLED:
@@ -195,8 +188,7 @@ class RewardService:
                 select(RewardTransaction)
                 .where(
                     RewardTransaction.user_id == user_id,
-                    RewardTransaction.transaction_type
-                    == RewardTransactionType.CONTRIBUTION_REWARD,
+                    RewardTransaction.transaction_type == RewardTransactionType.CONTRIBUTION_REWARD,
                 )
                 .order_by(
                     RewardTransaction.created_at.desc(),
@@ -215,12 +207,8 @@ class RewardService:
             available_points=sum(tx.points for tx in earned),
             pending_points=sum(tx.points for tx in pending),
             verified_contributions=len(earned),
-            daily_pending_points=sum(
-                tx.points for tx in pending if start <= tx.created_at < end
-            ),
-            daily_earned_points=sum(
-                tx.points for tx in earned if start <= tx.created_at < end
-            ),
+            daily_pending_points=sum(tx.points for tx in pending if start <= tx.created_at < end),
+            daily_earned_points=sum(tx.points for tx in earned if start <= tx.created_at < end),
             daily_limit_points=self.settings.contribution_daily_points_limit,
         )
 

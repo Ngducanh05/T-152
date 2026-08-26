@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +29,7 @@ def _access_error(status_code: int, code: str, message: str) -> HTTPException:
 
 async def get_optional_current_user(
     credentials: CredentialsDependency,
+    request: Request,
 ) -> CurrentUser | None:
     """Resolve an optional bearer identity in an isolated auth DB session.
 
@@ -39,8 +40,13 @@ async def get_optional_current_user(
     """
     if credentials is None:
         return None
+    verifier = getattr(request.app.state, "auth_token_verifier", None)
     async with get_session_factory()() as auth_session:
-        return await auth_service.get_current_user(credentials, auth_session)
+        return await auth_service.get_current_user(
+            credentials,
+            auth_session,
+            verifier=verifier,
+        )
 
 
 async def require_authenticated_or_demo(

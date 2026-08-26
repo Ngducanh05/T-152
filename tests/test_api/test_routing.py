@@ -67,6 +67,7 @@ async def test_shortest_route_returns_contract(routing_api: RoutingApi):
         json={
             "start_node_id": "F1-ENTRANCE",
             "destination_node_id": "F1-C01",
+            "mode": "VEHICLE",
         },
     )
 
@@ -76,6 +77,7 @@ async def test_shortest_route_returns_contract(routing_api: RoutingApi):
         "data": {
             "start_node_id": "F1-ENTRANCE",
             "destination_node_id": "F1-C01",
+            "mode": "VEHICLE",
             "path": ["F1-ENTRANCE", "F1-CP1", "F1-C-W", "F1-C01"],
             "distance_m": 41.0,
             "polyline": [[0.0, 50.0], [15.0, 50.0], [25.0, 70.0], [25.0, 74.0]],
@@ -94,6 +96,7 @@ async def test_route_node_not_found_returns_404_with_request_id(routing_api: Rou
         json={
             "start_node_id": "F1-UNKNOWN",
             "destination_node_id": "F1-C01",
+            "mode": "VEHICLE",
         },
     )
 

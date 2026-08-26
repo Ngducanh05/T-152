@@ -2,8 +2,6 @@ from typing import Generic, TypeVar
 
 from pydantic import BaseModel
 
-from src.models.schemas import ErrorCode
-
 T = TypeVar("T")
 
 
@@ -14,7 +12,7 @@ class SuccessResponse(BaseModel, Generic[T]):
 
 
 class ErrorDetail(BaseModel):
-    code: ErrorCode
+    code: str
     message: str
     request_id: str
     details: dict[str, object] | None = None

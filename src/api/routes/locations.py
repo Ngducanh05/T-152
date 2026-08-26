@@ -3,10 +3,11 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import ParkingUserDependency, resolve_parking_user_id
+from src.api.errors import domain_http_error
 from src.core.database import get_db_session
 from src.core.location import LocationError, LocationService
 from src.models.common import ErrorResponse, SuccessResponse
@@ -34,6 +35,9 @@ class LocationResponse(BaseModel):
 
     user_id: EntityId
     node_id: FloorScopedId
+    verified_node_id: FloorScopedId | None = None
+    verified_at: AwareDatetime | None = None
+    verified_marker_id: str | None = None
 
 
 class ScanLocationRequest(BaseModel):
@@ -58,18 +62,7 @@ def _error(status_code: int, code: ErrorCode, message: str) -> HTTPException:
 
 
 def _domain_error(error: LocationError) -> HTTPException:
-    message = error.message
-    if "Parking user" in message and "not found" in message:
-        return _error(404, ErrorCode.USER_NOT_FOUND, message)
-    if error.code is ErrorCode.INVALID_LOCATION_QR:
-        return _error(422, error.code, message)
-    if error.code is ErrorCode.LOCATION_MARKER_NOT_FOUND:
-        return _error(404, error.code, message)
-    if error.code in {ErrorCode.ROUTE_NODE_NOT_FOUND, ErrorCode.SLOT_NOT_FOUND}:
-        return _error(404, ErrorCode.LOCATION_NODE_NOT_FOUND, message)
-    if "internal routing aisle" in message:
-        return _error(422, ErrorCode.INVALID_LOCATION_NODE_TYPE, message)
-    return _error(422, error.code, message)
+    return domain_http_error(error)
 
 
 @router.post(
@@ -88,7 +81,16 @@ async def confirm_location(
             node_id = await LocationService(session).confirm_location(user_id, request.node_id)
     except LocationError as error:
         raise _domain_error(error) from error
-    return SuccessResponse(data=LocationResponse(user_id=user_id, node_id=node_id))
+    state = await LocationService(session).get_location_state(user_id)
+    return SuccessResponse(
+        data=LocationResponse(
+            user_id=user_id,
+            node_id=node_id,
+            verified_node_id=state.verified_node_id,
+            verified_at=state.verified_at,
+            verified_marker_id=state.verified_marker_id,
+        )
+    )
 
 
 @router.post(
@@ -104,9 +106,7 @@ async def scan_location(
     user_id = resolve_parking_user_id(request.user_id, current_user)
     try:
         async with session.begin():
-            marker = await LocationService(session).confirm_scanned_location(
-                user_id, request.qr_payload
-            )
+            marker = await LocationService(session).confirm_scanned_location(user_id, request.qr_payload)
     except LocationError as error:
         raise _domain_error(error) from error
     return SuccessResponse(
@@ -117,6 +117,9 @@ async def scan_location(
             floor_id=marker.floor_id,
             zone_id=marker.zone_id,
             label=marker.label,
+            verified_node_id=marker.node_id,
+            verified_at=(await LocationService(session).get_location_state(user_id)).verified_at,
+            verified_marker_id=marker.marker_id,
         )
     )
 
@@ -133,7 +136,8 @@ async def current_location(
 ) -> SuccessResponse[LocationResponse]:
     user_id = resolve_parking_user_id(user_id, current_user)
     try:
-        node_id = await LocationService(session).get_current_location(user_id)
+        state = await LocationService(session).get_location_state(user_id)
+        node_id = state.current_node_id
     except LocationError as error:
         raise _domain_error(error) from error
     if node_id is None:
@@ -142,7 +146,15 @@ async def current_location(
             ErrorCode.CURRENT_LOCATION_NOT_FOUND,
             f"No confirmed current location exists for user {user_id}",
         )
-    return SuccessResponse(data=LocationResponse(user_id=user_id, node_id=node_id))
+    return SuccessResponse(
+        data=LocationResponse(
+            user_id=user_id,
+            node_id=node_id,
+            verified_node_id=state.verified_node_id,
+            verified_at=state.verified_at,
+            verified_marker_id=state.verified_marker_id,
+        )
+    )
 
 
 __all__ = ["router"]

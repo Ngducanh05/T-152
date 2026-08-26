@@ -70,7 +70,7 @@ async def test_auth_me_returns_backend_owned_profile_identity() -> None:
         parking_user_id="USER-101",
         default_vehicle_id="VEHICLE-101",
     )
-    app.dependency_overrides[auth_service.get_current_user] = lambda: current_user
+    app.dependency_overrides[auth_service.get_current_user_from_request] = lambda: current_user
     transport = httpx.ASGITransport(app=app)
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -350,6 +350,7 @@ async def test_onboarding_is_idempotent_under_concurrent_requests(
     assert parking_user_count == 1
     assert profile is not None
     assert profile.app_role is AppRoleEnum.USER
+
 
 @pytest.mark.asyncio
 async def test_new_user_can_add_first_vehicle_and_link_default_vehicle(

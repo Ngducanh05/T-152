@@ -22,9 +22,7 @@ def prepare_context(
     resolved_fields = {"vehicle_id"}
     if context.current_location:
         resolved_fields.add("current_location")
-    missing_fields = [
-        field for field in state.get("missing_fields", []) if field not in resolved_fields
-    ]
+    missing_fields = [field for field in state.get("missing_fields", []) if field not in resolved_fields]
     if context.vehicle_id is None:
         missing_fields.append("vehicle_id")
 
@@ -37,6 +35,9 @@ def prepare_context(
         # context such as the confirmed location remains durable.
         "recommended_slot_ids": [],
         "route": None,
+        "tool_result": {},
+        "active_reservation_id": "",
+        "active_session_id": "",
         "agent_step_count": 0,
         "error": "",
     }

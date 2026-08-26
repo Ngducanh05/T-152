@@ -118,11 +118,14 @@ def test_report_evidence_accepts_matching_image_signatures(
     content_type: str,
     data: bytes,
 ) -> None:
-    assert validate_report_image(
-        content_type=content_type,
-        data=data,
-        max_bytes=5_000_000,
-    ) == content_type
+    assert (
+        validate_report_image(
+            content_type=content_type,
+            data=data,
+            max_bytes=5_000_000,
+        )
+        == content_type
+    )
 
 
 @pytest.mark.parametrize(

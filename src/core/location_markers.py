@@ -59,11 +59,7 @@ def get_location_marker(marker_id: str) -> LocationMarker:
 def resolve_location_qr(qr_payload: str) -> LocationMarker:
     """Resolve a bounded ParkSmart v1 QR payload through the marker allowlist."""
     payload = qr_payload.strip()
-    if (
-        not payload
-        or len(payload) > MAX_LOCATION_QR_PAYLOAD_LENGTH
-        or not payload.startswith(LOCATION_QR_PREFIX)
-    ):
+    if not payload or len(payload) > MAX_LOCATION_QR_PAYLOAD_LENGTH or not payload.startswith(LOCATION_QR_PREFIX):
         raise InvalidLocationQrError("QR payload is not a valid ParkSmart location QR")
     marker_id = payload.removeprefix(LOCATION_QR_PREFIX)
     if not _MARKER_ID_PATTERN.fullmatch(marker_id):

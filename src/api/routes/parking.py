@@ -1,18 +1,38 @@
 """Read-only ParkSmart parking-state and canonical-map routes."""
 
 import logging
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, HTTPException, Query, Response
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from sqlalchemy import select
 
 from src.api.dependencies import (
     ParkingUserDependency,
     SessionDependency,
     resolve_parking_user_id,
 )
-from src.core.parking_map import build_canonical_parking_map
+from src.api.errors import domain_http_error
+from src.core.config import get_settings
+from src.core.db_models import (
+    MapEdge as MapEdgeRecord,
+)
+from src.core.db_models import (
+    MapNode as MapNodeRecord,
+)
+from src.core.db_models import (
+    ParkingReservation as ParkingReservationRecord,
+)
+from src.core.db_models import (
+    ParkingSession as ParkingSessionRecord,
+)
+from src.core.db_models import (
+    ParkingSlot as ParkingSlotRecord,
+)
+from src.core.location import LocationService
 from src.core.parking_state import ParkingStateError, ParkingStateService
+from src.core.reward import RewardService
 from src.core.slot_observation import SlotObservationError, SlotObservationService
 from src.models.common import SuccessResponse
 from src.models.schemas import (
@@ -20,7 +40,14 @@ from src.models.schemas import (
     FloorId,
     MapEdge,
     MapNode,
+    ParkingReservation,
+    ParkingSessionStatus,
     ParkingSlot,
+    ParkingSlotDefinition,
+    ReservationStatus,
+    RewardConfiguration,
+    RewardSummary,
+    SlotId,
     SlotObservation,
     SlotStatus,
     ZoneId,
@@ -41,7 +68,38 @@ class ParkingStatusResponse(BaseModel):
 class ParkingMapResponse(BaseModel):
     nodes: list[MapNode]
     edges: list[MapEdge]
+    slots: list[ParkingSlotDefinition]
+
+
+class ParkingSnapshotResponse(BaseModel):
     slots: list[ParkingSlot]
+    status: ParkingStatusResponse
+    state_version: int = Field(ge=0)
+
+
+class ActiveParkingSessionResponse(BaseModel):
+    session_id: str
+    vehicle_id: str
+    slot_id: SlotId
+    destination_node_id: SlotId
+
+
+class LocationStateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str
+    node_id: str
+    verified_node_id: str | None = None
+    verified_at: AwareDatetime | None = None
+    verified_marker_id: str | None = None
+
+
+class UserParkingStateResponse(BaseModel):
+    current_location: LocationStateResponse | None
+    active_reservation: ParkingReservation | None
+    active_session: ActiveParkingSessionResponse | None
+    reward_summary: RewardSummary
+    reward_configuration: RewardConfiguration
 
 
 class AdjacentSlotObservationRequest(BaseModel):
@@ -57,22 +115,13 @@ def _slot_response(slot: object) -> ParkingSlot:
 
 
 def _domain_error(error: ParkingStateError) -> HTTPException:
-    return HTTPException(
-        status_code=404 if error.code is ErrorCode.SLOT_NOT_FOUND else 409,
-        detail={"code": error.code.value, "message": error.message},
-    )
+    return domain_http_error(error)
 
 
 def _observation_error(error: SlotObservationError) -> HTTPException:
-    if error.code in {ErrorCode.SLOT_NOT_FOUND, ErrorCode.USER_NOT_FOUND}:
-        status_code = 404
-    elif error.code is ErrorCode.ACTIVE_SESSION_NOT_FOUND:
-        status_code = 409
-    else:
-        status_code = 409
-    return HTTPException(
-        status_code=status_code,
-        detail={"code": error.code.value, "message": error.message},
+    return domain_http_error(
+        error,
+        status_code=(409 if error.code is ErrorCode.ACTIVE_SESSION_NOT_FOUND else None),
     )
 
 
@@ -106,7 +155,7 @@ async def parking_slots(
 
 @router.get("/slots/{slot_id}", response_model=SuccessResponse[ParkingSlot])
 async def parking_slot(
-    slot_id: str,
+    slot_id: SlotId,
     session: SessionDependency,
 ) -> SuccessResponse[ParkingSlot]:
     try:
@@ -121,7 +170,7 @@ async def parking_slot(
     response_model=SuccessResponse[SlotObservation],
 )
 async def observe_adjacent_parking_slot(
-    slot_id: str,
+    slot_id: SlotId,
     request: AdjacentSlotObservationRequest,
     session: SessionDependency,
     current_user: ParkingUserDependency,
@@ -150,13 +199,99 @@ async def observe_adjacent_parking_slot(
 
 
 @router.get("/map", response_model=SuccessResponse[ParkingMapResponse])
-async def parking_map(session: SessionDependency) -> SuccessResponse[ParkingMapResponse]:
-    canonical_map = build_canonical_parking_map()
-    slots = await ParkingStateService(session).list_slots()
+async def parking_map(
+    session: SessionDependency,
+    response: Response,
+) -> SuccessResponse[ParkingMapResponse]:
+    nodes = list(await session.scalars(select(MapNodeRecord).order_by(MapNodeRecord.id)))
+    edges = list(await session.scalars(select(MapEdgeRecord).order_by(MapEdgeRecord.from_node, MapEdgeRecord.to_node)))
+    slots = list(await session.scalars(select(ParkingSlotRecord).order_by(ParkingSlotRecord.id)))
+    response.headers["Cache-Control"] = "public, max-age=3600"
     return SuccessResponse(
         data=ParkingMapResponse(
-            nodes=[MapNode.model_validate(node, from_attributes=True) for node in canonical_map.nodes],
-            edges=[MapEdge.model_validate(edge, from_attributes=True) for edge in canonical_map.edges],
+            nodes=[MapNode.model_validate(node, from_attributes=True) for node in nodes],
+            edges=[MapEdge.model_validate(edge, from_attributes=True) for edge in edges],
+            slots=[ParkingSlotDefinition.model_validate(slot, from_attributes=True) for slot in slots],
+        )
+    )
+
+
+@router.get("/snapshot", response_model=SuccessResponse[ParkingSnapshotResponse])
+async def parking_snapshot(
+    session: SessionDependency,
+) -> SuccessResponse[ParkingSnapshotResponse]:
+    state = ParkingStateService(session)
+    slots = await state.list_slots()
+    status = await state.get_parking_status()
+    return SuccessResponse(
+        data=ParkingSnapshotResponse(
             slots=[_slot_response(slot) for slot in slots],
+            status=ParkingStatusResponse.model_validate(status, from_attributes=True),
+            state_version=sum(slot.version for slot in slots),
+        )
+    )
+
+
+@router.get(
+    "/users/{user_id}/state",
+    response_model=SuccessResponse[UserParkingStateResponse],
+)
+async def user_parking_state(
+    user_id: str,
+    session: SessionDependency,
+    current_user: ParkingUserDependency,
+) -> SuccessResponse[UserParkingStateResponse]:
+    user_id = resolve_parking_user_id(user_id, current_user)
+    user = await LocationService(session).get_location_state(user_id)
+    now = datetime.now(UTC)
+    reservation = await session.scalar(
+        select(ParkingReservationRecord).where(
+            ParkingReservationRecord.user_id == user_id,
+            ParkingReservationRecord.status == ReservationStatus.ACTIVE,
+            ParkingReservationRecord.expires_at > now,
+        )
+    )
+    parking_session = await session.scalar(
+        select(ParkingSessionRecord).where(
+            ParkingSessionRecord.user_id == user_id,
+            ParkingSessionRecord.status == ParkingSessionStatus.ACTIVE,
+        )
+    )
+    reward_summary = await RewardService(session).get_summary(user_id)
+    settings = get_settings()
+    return SuccessResponse(
+        data=UserParkingStateResponse(
+            current_location=(
+                LocationStateResponse(
+                    user_id=user_id,
+                    node_id=user.current_node_id,
+                    verified_node_id=user.verified_node_id,
+                    verified_at=user.verified_at,
+                    verified_marker_id=user.verified_marker_id,
+                )
+                if user.current_node_id is not None
+                else None
+            ),
+            active_reservation=(
+                ParkingReservation.model_validate(reservation, from_attributes=True)
+                if reservation is not None
+                else None
+            ),
+            active_session=(
+                ActiveParkingSessionResponse(
+                    session_id=parking_session.id,
+                    vehicle_id=parking_session.vehicle_id,
+                    slot_id=parking_session.slot_id,
+                    destination_node_id=parking_session.slot_id,
+                )
+                if parking_session is not None
+                else None
+            ),
+            reward_summary=reward_summary,
+            reward_configuration=RewardConfiguration(
+                adjacent_observation_reward_points=(settings.adjacent_observation_reward_points),
+                wrong_parking_report_reward_points=(settings.wrong_parking_report_reward_points),
+                contribution_daily_points_limit=(settings.contribution_daily_points_limit),
+            ),
         )
     )

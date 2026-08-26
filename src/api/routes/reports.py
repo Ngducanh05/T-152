@@ -1,5 +1,6 @@
 """User-facing API for reporting vehicles parked in the wrong position."""
 
+import hashlib
 import logging
 from datetime import UTC, datetime
 from json import JSONDecodeError
@@ -23,13 +24,16 @@ from src.api.dependencies import (
     SettingsDependency,
     resolve_parking_user_id,
 )
+from src.api.errors import domain_http_error
+from src.core.errors import DomainError
+from src.core.idempotency import IdempotencyService
 from src.core.parking_report import ParkingReportError, ParkingReportService
 from src.core.report_quota import ReportQuotaExceeded
 from src.models.common import ErrorResponse, SuccessResponse
 from src.models.schemas import (
     EntityId,
     ErrorCode,
-    FloorScopedId,
+    SlotId,
     WrongParkingReason,
     WrongParkingReport,
 )
@@ -95,10 +99,7 @@ async def _read_bounded_evidence(evidence: UploadFile, max_bytes: int) -> bytes:
 def _report_response(report: object) -> WrongParkingReport:
     values = vars(report)
     return WrongParkingReport.model_validate(
-        {
-            field_name: values.get(field_name)
-            for field_name in WrongParkingReport.model_fields
-        }
+        {field_name: values.get(field_name) for field_name in WrongParkingReport.model_fields}
     )
 
 
@@ -106,7 +107,7 @@ class WrongParkingReportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     user_id: EntityId
-    slot_id: FloorScopedId
+    slot_id: SlotId
     reason_code: WrongParkingReason
     observed_plate_number: str | None = Field(default=None, max_length=32)
     description: str | None = Field(default=None, max_length=500)
@@ -121,9 +122,7 @@ class WrongParkingReportRequest(BaseModel):
     @model_validator(mode="after")
     def other_reason_requires_description(self) -> "WrongParkingReportRequest":
         if self.reason_code is WrongParkingReason.OTHER and len(self.description or "") < 5:
-            raise ValueError(
-                "description must contain at least five characters for reason OTHER"
-            )
+            raise ValueError("description must contain at least five characters for reason OTHER")
         return self
 
     @field_validator("observed_plate_number")
@@ -198,10 +197,7 @@ async def create_wrong_parking_report(
             declared_length = int(content_length)
         except ValueError:
             declared_length = None
-        if (
-            declared_length is not None
-            and declared_length > settings.report_evidence_max_bytes + EVIDENCE_CHUNK_BYTES
-        ):
+        if declared_length is not None and declared_length > settings.report_evidence_max_bytes + EVIDENCE_CHUNK_BYTES:
             raise _evidence_too_large(settings.report_evidence_max_bytes)
 
     evidence_bytes: bytes | None = None
@@ -232,15 +228,9 @@ async def create_wrong_parking_report(
                 slot_id=str(form.get("slot_id") or ""),
                 reason_code=form.get("reason_code"),
                 observed_plate_number=(
-                    str(form.get("observed_plate_number"))
-                    if form.get("observed_plate_number") is not None
-                    else None
+                    str(form.get("observed_plate_number")) if form.get("observed_plate_number") is not None else None
                 ),
-                description=(
-                    str(form.get("description"))
-                    if form.get("description") is not None
-                    else None
-                ),
+                description=(str(form.get("description")) if form.get("description") is not None else None),
             )
         else:
             request = WrongParkingReportRequest.model_validate(await http_request.json())
@@ -254,16 +244,9 @@ async def create_wrong_parking_report(
 
     try:
         user_id = resolve_parking_user_id(request.user_id, current_user)
-        report_id = f"REPORT-{uuid4()}"
         stored_evidence = None
         evidence_storage = ReportEvidenceStorage(settings)
         report_service = ParkingReportService(session, settings=settings)
-
-        async with session.begin():
-            await report_service.preflight_wrong_parking_report(
-                reporter_user_id=user_id,
-                slot_id=request.slot_id,
-            )
 
         if evidence_upload is not None:
             evidence_content_type = evidence_upload.content_type
@@ -276,12 +259,10 @@ async def create_wrong_parking_report(
                 data=evidence_bytes,
                 max_bytes=settings.report_evidence_max_bytes,
             )
-            stored_evidence = await evidence_storage.upload(
-                report_id=report_id,
-                data=evidence_bytes,
-                content_type=normalized_content_type,
-                allow_demo_fallback=current_user is None,
-            )
+        else:
+            normalized_content_type = None
+
+        report_id = f"REPORT-{uuid4()}"
 
         async def cleanup_uploaded_evidence() -> None:
             if stored_evidence is None:
@@ -295,24 +276,49 @@ async def create_wrong_parking_report(
 
         try:
             async with session.begin():
-                report = await report_service.create_wrong_parking_report(
-                    report_id=report_id,
-                    reporter_user_id=user_id,
-                    slot_id=request.slot_id,
-                    reason_code=request.reason_code,
-                    description=request.description,
-                    observed_plate_number=request.observed_plate_number,
-                    evidence_storage_path=(
-                        stored_evidence.storage_path if stored_evidence is not None else None
-                    ),
-                    evidence_content_type=(
-                        stored_evidence.content_type if stored_evidence is not None else None
-                    ),
-                    evidence_size_bytes=(
-                        stored_evidence.size_bytes if stored_evidence is not None else None
-                    ),
+                idempotency = IdempotencyService(session, settings=settings)
+                claim = await idempotency.claim(
+                    user_id=user_id,
+                    operation="create_wrong_parking_report",
+                    key=http_request.headers.get("Idempotency-Key"),
+                    payload={
+                        **request.model_dump(mode="json"),
+                        "evidence_sha256": (
+                            hashlib.sha256(evidence_bytes).hexdigest() if evidence_bytes is not None else None
+                        ),
+                    },
                 )
-                response_report = _report_response(report)
+                replay = idempotency.replay(claim)
+                if replay is not None:
+                    response_report = WrongParkingReport.model_validate(replay)
+                else:
+                    await report_service.preflight_wrong_parking_report(
+                        reporter_user_id=user_id,
+                        slot_id=request.slot_id,
+                    )
+                    if evidence_bytes is not None and normalized_content_type is not None:
+                        stored_evidence = await evidence_storage.upload(
+                            report_id=report_id,
+                            data=evidence_bytes,
+                            content_type=normalized_content_type,
+                            allow_demo_fallback=current_user is None,
+                        )
+                    report = await report_service.create_wrong_parking_report(
+                        report_id=report_id,
+                        reporter_user_id=user_id,
+                        slot_id=request.slot_id,
+                        reason_code=request.reason_code,
+                        description=request.description,
+                        observed_plate_number=request.observed_plate_number,
+                        evidence_storage_path=(stored_evidence.storage_path if stored_evidence is not None else None),
+                        evidence_content_type=(stored_evidence.content_type if stored_evidence is not None else None),
+                        evidence_size_bytes=(stored_evidence.size_bytes if stored_evidence is not None else None),
+                    )
+                    response_report = _report_response(report)
+                    await idempotency.complete(
+                        claim,
+                        response_report.model_dump(mode="json"),
+                    )
         except ReportQuotaExceeded as error:
             await cleanup_uploaded_evidence()
             raise _daily_limit_reached(error) from error
@@ -328,6 +334,9 @@ async def create_wrong_parking_report(
                 error.code.value,
             )
             raise _report_http_error(error) from error
+        except DomainError as error:
+            await cleanup_uploaded_evidence()
+            raise domain_http_error(error) from error
         except Exception:
             await cleanup_uploaded_evidence()
             raise
@@ -339,10 +348,9 @@ async def create_wrong_parking_report(
         if evidence_upload is not None:
             await evidence_upload.close()
     logger.info(
-        "wrong_parking_report_action action=create report_id=%s slot_id=%s "
-        "actor_id=%s outcome=success request_id=%s",
-        report.id,
-        report.slot_id,
+        "wrong_parking_report_action action=create report_id=%s slot_id=%s actor_id=%s outcome=success request_id=%s",
+        response_report.id,
+        response_report.slot_id,
         user_id,
         getattr(http_request.state, "request_id", "unknown"),
     )

@@ -32,11 +32,7 @@ INTER_FLOOR_EDGE_COUNT = 4
 
 EXPECTED_SLOT_COUNT = SLOTS_PER_FLOOR * len(FLOOR_IDS)
 EXPECTED_NODE_COUNT = NODES_PER_FLOOR_WITH_GATES + NODES_PER_FLOOR_WITHOUT_GATES * 2
-EXPECTED_EDGE_COUNT = (
-    EDGES_PER_FLOOR_WITH_GATES
-    + EDGES_PER_FLOOR_WITHOUT_GATES * 2
-    + INTER_FLOOR_EDGE_COUNT
-)
+EXPECTED_EDGE_COUNT = EDGES_PER_FLOOR_WITH_GATES + EDGES_PER_FLOOR_WITHOUT_GATES * 2 + INTER_FLOOR_EDGE_COUNT
 
 RAMP_INTER_FLOOR_DISTANCE_M = 30.0
 ELEVATOR_INTER_FLOOR_DISTANCE_M = 12.0
@@ -316,9 +312,7 @@ def _validate_floor_slots(
         f"each zone on {floor_id} must have 10 slots",
     )
 
-    expected_ev_ids = {
-        _slot_id(zone, number, floor_id) for zone in ("C", "D") for number in range(1, 6)
-    }
+    expected_ev_ids = {_slot_id(zone, number, floor_id) for zone in ("C", "D") for number in range(1, 6)}
     actual_ev_ids = {slot.id for slot in floor_slots if slot.has_charger}
     _require(
         actual_ev_ids == expected_ev_ids,
@@ -355,16 +349,9 @@ def _validate_shared_structure(
     _require(len(node_ids) == len(set(node_ids)), "node IDs must be unique")
 
     expected_slot_ids = {
-        _slot_id(zone, number, floor_id)
-        for floor_id in floor_ids
-        for zone in ZONE_IDS
-        for number in range(1, 11)
+        _slot_id(zone, number, floor_id) for floor_id in floor_ids for zone in ZONE_IDS for number in range(1, 11)
     }
-    expected_core_ids = {
-        f"{floor_id}-{suffix}"
-        for floor_id in floor_ids
-        for suffix, *_ in _floor_node_specs(floor_id)
-    }
+    expected_core_ids = {f"{floor_id}-{suffix}" for floor_id in floor_ids for suffix, *_ in _floor_node_specs(floor_id)}
     _require(set(slot_ids) == expected_slot_ids, "slot IDs are not canonical")
     _require(set(node_ids) == expected_core_ids | expected_slot_ids, "node IDs are not canonical")
 
@@ -386,16 +373,12 @@ def _validate_shared_structure(
         "all canonical edges must be enabled and bidirectional",
     )
     _require(
-        all(
-            edge.from_node in node_by_id and edge.to_node in node_by_id
-            for edge in parking_map.edges
-        ),
+        all(edge.from_node in node_by_id and edge.to_node in node_by_id for edge in parking_map.edges),
         "every edge endpoint must reference an existing node",
     )
 
     actual_edges = {
-        _edge_key(edge.from_node, edge.to_node): (edge.distance_m, edge.allowed_mode)
-        for edge in parking_map.edges
+        _edge_key(edge.from_node, edge.to_node): (edge.distance_m, edge.allowed_mode) for edge in parking_map.edges
     }
     _require(
         actual_edges == expected_edges,

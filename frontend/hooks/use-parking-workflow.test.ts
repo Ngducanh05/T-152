@@ -154,7 +154,14 @@ describe("useParkingWorkflow", () => {
     });
     expect(api.scanLocation).toHaveBeenCalledOnce();
     expect(applyCurrentLocation).toHaveBeenCalledWith({ user_id: "USER-001", node_id: "F3-D-W" });
-    expect(api.recommend).toHaveBeenCalledWith(expect.objectContaining({ start_node_id: "F3-D-W", floor_id: "F3" }));
+    expect(api.recommend).toHaveBeenCalledWith({
+      user_id: "USER-001",
+      start_node_id: "F3-D-W",
+      charging_required: false,
+      accessible_required: false,
+      near_elevator: false,
+      limit: 3,
+    });
     expect(api.chat).not.toHaveBeenCalled();
   });
 
@@ -192,10 +199,14 @@ describe("useParkingWorkflow", () => {
     });
 
     expect(api.scanLocation).toHaveBeenCalledTimes(2);
-    expect(api.recommend).toHaveBeenCalledWith(expect.objectContaining({
+    expect(api.recommend).toHaveBeenCalledWith({
+      user_id: "USER-001",
       start_node_id: "F3-D-W",
-      floor_id: "F3",
-    }));
+      charging_required: false,
+      accessible_required: false,
+      near_elevator: false,
+      limit: 3,
+    });
     const recommendationMessage = result.current.messages.at(-1);
     expect(recommendationMessage?.uiActions[0].label).toBe("Chọn F3-D03");
     expect(api.chat).not.toHaveBeenCalled();
@@ -392,7 +403,6 @@ describe("useParkingWorkflow", () => {
     expect(api.recommend).toHaveBeenCalledWith({
       user_id: "USER-001",
       start_node_id: "F1-ENTRANCE",
-      floor_id: "F1",
       charging_required: true,
       accessible_required: false,
       near_elevator: true,
@@ -494,13 +504,9 @@ describe("useParkingWorkflow", () => {
     expect(result.current.candidates).toEqual([]);
   });
 
-  it("marks arrival at the reserved slot before confirming parking in one action", async () => {
+  it("confirms parking without fabricating arrival through manual location", async () => {
     const { api, data, refresh, slot } = fixture();
     data.activeReservation = { ...activeReservation, slot_id: slot.id };
-    api.confirmLocation.mockResolvedValue({
-      user_id: "USER-001",
-      node_id: slot.id,
-    });
     api.confirmParking.mockResolvedValue({
       id: "SESSION-001",
       user_id: "USER-001",
@@ -516,21 +522,37 @@ describe("useParkingWorkflow", () => {
       await result.current.confirmParking();
     });
 
-    expect(api.confirmLocation).toHaveBeenCalledWith({
-      user_id: "USER-001",
-      node_id: slot.id,
-    });
+    expect(api.confirmLocation).not.toHaveBeenCalled();
     expect(api.confirmParking).toHaveBeenCalledWith({
       user_id: "USER-001",
       vehicle_id: "VEHICLE-001",
       reservation_id: activeReservation.id,
       expected_version: slot.version,
     });
-    expect(api.confirmLocation.mock.invocationCallOrder[0]).toBeLessThan(
-      api.confirmParking.mock.invocationCallOrder[0],
-    );
-    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalledOnce();
     expect(result.current.notice).toContain("hoàn tất đỗ xe");
+  });
+
+  it("opens QR verification when the backend rejects unverified arrival", async () => {
+    const { api, data, slot } = fixture();
+    data.activeReservation = { ...activeReservation, slot_id: slot.id };
+    api.confirmParking.mockRejectedValue(
+      new ApiError({
+        code: "PARKING_ARRIVAL_NOT_VERIFIED",
+        message: "Verified arrival is required.",
+        status: 409,
+        details: { reason: "missing" },
+      }),
+    );
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      await result.current.confirmParking();
+    });
+
+    expect(api.confirmLocation).not.toHaveBeenCalled();
+    expect(result.current.requestedPanel).toEqual({ kind: "qr-location" });
+    expect(result.current.notice).toContain("quét mã QR");
   });
 
   it("updates an adjacent slot only after the backend succeeds and guards double-click", async () => {

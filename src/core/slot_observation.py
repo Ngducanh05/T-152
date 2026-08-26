@@ -1,6 +1,5 @@
 """Pending, admin-verified observations for slots beside an active session."""
 
-import re
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -16,6 +15,7 @@ from src.core.db_models import (
     RewardTransaction,
     SlotObservation,
 )
+from src.core.errors import DomainError
 from src.core.parking_state import ParkingStateError, ParkingStateService
 from src.core.reward import RewardError, RewardService
 from src.models.schemas import (
@@ -24,18 +24,17 @@ from src.models.schemas import (
     RewardSourceType,
     SlotObservationStatus,
     SlotStatus,
+    is_slot_id,
 )
-
-_SLOT_ID = re.compile(r"^(F[1-3])-([A-D])(0[1-9]|10)$")
 
 
 def adjacent_slot_ids(slot_id: str) -> tuple[str, ...]:
     """Return left/right neighbours on F1-F3 without crossing a five-slot row."""
-    match = _SLOT_ID.fullmatch(slot_id)
-    if match is None:
+    if not is_slot_id(slot_id):
         return ()
-    floor_id, zone_id, raw_number = match.groups()
-    number = int(raw_number)
+    floor_id, zone_and_number = slot_id.split("-", maxsplit=1)
+    zone_id = zone_and_number[0]
+    number = int(zone_and_number[1:])
     row_start = 1 if number <= 5 else 6
     row_end = row_start + 4
     return tuple(
@@ -45,18 +44,8 @@ def adjacent_slot_ids(slot_id: str) -> tuple[str, ...]:
     )
 
 
-class SlotObservationError(Exception):
-    def __init__(
-        self,
-        code: ErrorCode,
-        message: str,
-        *,
-        details: dict[str, object] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.details = details or {}
+class SlotObservationError(DomainError):
+    pass
 
 
 class SlotObservationService:
@@ -73,9 +62,7 @@ class SlotObservationService:
         self.settings = settings or get_settings()
         self.clock = clock or (lambda: datetime.now(UTC))
         self.parking_state = parking_state or ParkingStateService(session)
-        self.rewards = reward_service or RewardService(
-            session, settings=self.settings, clock=self.clock
-        )
+        self.rewards = reward_service or RewardService(session, settings=self.settings, clock=self.clock)
 
     def _now(self) -> datetime:
         value = self.clock()
@@ -104,33 +91,35 @@ class SlotObservationService:
                 ErrorCode.USER_NOT_FOUND,
                 f"Parking user {user_id} was not found.",
             )
-        active_session = await self.session.scalar(
-            select(ParkingSession)
-            .where(
+        active_session_snapshot = await self.session.scalar(
+            select(ParkingSession).where(
                 ParkingSession.user_id == user_id,
                 ParkingSession.status == ParkingSessionStatus.ACTIVE,
             )
-            .with_for_update()
         )
-        if active_session is None:
+        if active_session_snapshot is None:
             raise SlotObservationError(
                 ErrorCode.ACTIVE_SESSION_NOT_FOUND,
                 f"No active parking session exists for user {user_id}.",
             )
-        if slot_id == active_session.slot_id or slot_id not in adjacent_slot_ids(
-            active_session.slot_id
+        if slot_id == active_session_snapshot.slot_id or slot_id not in adjacent_slot_ids(
+            active_session_snapshot.slot_id
         ):
             raise SlotObservationError(
                 ErrorCode.INVALID_OBSERVATION_TRANSITION,
-                f"Parking slot {slot_id} is not adjacent to {active_session.slot_id}.",
-                details={"slot_id": slot_id, "parked_slot_id": active_session.slot_id},
+                f"Parking slot {slot_id} is not adjacent to {active_session_snapshot.slot_id}.",
+                details={"slot_id": slot_id, "parked_slot_id": active_session_snapshot.slot_id},
             )
-        slot = await self.session.scalar(
-            select(ParkingSlot).where(ParkingSlot.id == slot_id).with_for_update()
-        )
+        slot = await self.session.scalar(select(ParkingSlot).where(ParkingSlot.id == slot_id).with_for_update())
         if slot is None:
+            raise SlotObservationError(ErrorCode.SLOT_NOT_FOUND, f"Parking slot {slot_id} was not found.")
+        active_session = await self.session.scalar(
+            select(ParkingSession).where(ParkingSession.id == active_session_snapshot.id).with_for_update()
+        )
+        if active_session is None or active_session.status is not ParkingSessionStatus.ACTIVE:
             raise SlotObservationError(
-                ErrorCode.SLOT_NOT_FOUND, f"Parking slot {slot_id} was not found."
+                ErrorCode.ACTIVE_SESSION_NOT_FOUND,
+                f"No active parking session exists for user {user_id}.",
             )
         if slot.status is SlotStatus.RESERVED:
             raise SlotObservationError(
@@ -171,8 +160,7 @@ class SlotObservationService:
             reward_points=0,
             observed_slot_version=slot.version,
             created_at=now,
-            expires_at=now
-            + timedelta(seconds=self.settings.observation_verification_ttl_seconds),
+            expires_at=now + timedelta(seconds=self.settings.observation_verification_ttl_seconds),
             verified_at=None,
             verified_by=None,
             rejection_reason=None,
@@ -197,8 +185,7 @@ class SlotObservationService:
             await self.session.scalars(
                 select(SlotObservation)
                 .where(
-                    SlotObservation.verification_status
-                    == SlotObservationStatus.PENDING,
+                    SlotObservation.verification_status == SlotObservationStatus.PENDING,
                     SlotObservation.expires_at <= now,
                 )
                 .with_for_update()
@@ -207,9 +194,7 @@ class SlotObservationService:
         for observation in observations:
             observation.verification_status = SlotObservationStatus.EXPIRED
             observation.version += 1
-            await self.rewards.cancel_pending(
-                RewardSourceType.ADJACENT_SLOT_OBSERVATION, observation.id
-            )
+            await self.rewards.cancel_pending(RewardSourceType.ADJACENT_SLOT_OBSERVATION, observation.id)
         if observations:
             await self.session.flush()
         return len(observations)
@@ -221,8 +206,7 @@ class SlotObservationService:
         transactions = list(
             await self.session.scalars(
                 select(RewardTransaction).where(
-                    RewardTransaction.source_type
-                    == RewardSourceType.ADJACENT_SLOT_OBSERVATION,
+                    RewardTransaction.source_type == RewardSourceType.ADJACENT_SLOT_OBSERVATION,
                     RewardTransaction.source_reference.in_(ids),
                 )
             )
@@ -253,17 +237,13 @@ class SlotObservationService:
             query = query.where(SlotObservation.observer_user_id == user_id)
         observations = (
             await self.session.scalars(
-                query.order_by(
-                    SlotObservation.created_at.desc(), SlotObservation.id.desc()
-                ).limit(limit)
+                query.order_by(SlotObservation.created_at.desc(), SlotObservation.id.desc()).limit(limit)
             )
         ).all()
         await self._attach_reward_status(observations)
         return observations
 
-    async def get_observation(
-        self, observation_id: str, *, for_update: bool = False
-    ) -> SlotObservation:
+    async def get_observation(self, observation_id: str, *, for_update: bool = False) -> SlotObservation:
         query = select(SlotObservation).where(SlotObservation.id == observation_id)
         if for_update:
             query = query.with_for_update()
@@ -295,9 +275,10 @@ class SlotObservationService:
         verified_by: str,
         expected_version: int,
     ) -> SlotObservation:
-        await self.expire_pending()
+        observation_snapshot = await self.get_observation(observation_id)
+        await self.parking_state.lock_slot(observation_snapshot.slot_id)
         observation = await self.get_observation(observation_id, for_update=True)
-        if observation.verification_status is SlotObservationStatus.EXPIRED:
+        if observation.verification_status is SlotObservationStatus.EXPIRED or observation.expires_at <= self._now():
             raise SlotObservationError(
                 ErrorCode.OBSERVATION_EXPIRED,
                 f"Observation {observation.id} has expired.",
@@ -329,9 +310,7 @@ class SlotObservationService:
         observation.verified_by = verified_by
         observation.version += 1
         try:
-            reward = await self.rewards.settle_pending(
-                RewardSourceType.ADJACENT_SLOT_OBSERVATION, observation.id
-            )
+            reward = await self.rewards.settle_pending(RewardSourceType.ADJACENT_SLOT_OBSERVATION, observation.id)
         except RewardError as error:
             raise SlotObservationError(error.code, error.message, details=error.details) from error
         observation.reward_status = reward.status if reward is not None else None
@@ -364,9 +343,7 @@ class SlotObservationService:
         observation.verified_by = rejected_by
         observation.rejection_reason = reason.strip() if reason else None
         observation.version += 1
-        reward = await self.rewards.cancel_pending(
-            RewardSourceType.ADJACENT_SLOT_OBSERVATION, observation.id
-        )
+        reward = await self.rewards.cancel_pending(RewardSourceType.ADJACENT_SLOT_OBSERVATION, observation.id)
         observation.reward_status = reward.status if reward is not None else None
         await self.session.flush()
         return observation

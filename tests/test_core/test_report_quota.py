@@ -67,9 +67,7 @@ def _clock(value: datetime) -> Callable[[], datetime]:
 async def _usage_count(engine: AsyncEngine) -> int:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        return int(
-            await session.scalar(select(func.count()).select_from(ReportDailyUsage)) or 0
-        )
+        return int(await session.scalar(select(func.count()).select_from(ReportDailyUsage)) or 0)
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -96,17 +94,15 @@ async def test_requests_within_limit_succeed_and_next_is_rejected(
     now = datetime(2026, 8, 24, 8, tzinfo=UTC)
     for expected in (1, 2):
         async with factory() as session, session.begin():
-            count = await ReportSubmissionQuotaService(
-                session, settings=settings, clock=_clock(now)
-            ).consume("USER-001")
+            count = await ReportSubmissionQuotaService(session, settings=settings, clock=_clock(now)).consume(
+                "USER-001"
+            )
             assert count == expected
 
     async with factory() as session:
         with pytest.raises(ReportQuotaExceeded):
             async with session.begin():
-                await ReportSubmissionQuotaService(
-                    session, settings=settings, clock=_clock(now)
-                ).consume("USER-001")
+                await ReportSubmissionQuotaService(session, settings=settings, clock=_clock(now)).consume("USER-001")
     async with factory() as session:
         usage = await session.get(ReportDailyUsage, ("USER-001", now.date()))
     assert usage is not None
@@ -125,9 +121,7 @@ async def test_users_and_utc_days_have_independent_quotas(
         ("USER-001", datetime(2026, 8, 25, 0, 0, tzinfo=UTC)),
     ):
         async with factory() as session, session.begin():
-            await ReportSubmissionQuotaService(
-                session, settings=settings, clock=_clock(now)
-            ).consume(user_id)
+            await ReportSubmissionQuotaService(session, settings=settings, clock=_clock(now)).consume(user_id)
 
     assert await _usage_count(report_quota_engine) == 3
 
@@ -146,9 +140,9 @@ async def test_concurrent_transactions_cannot_exceed_limit(
         async with factory() as session:
             try:
                 async with session.begin():
-                    await ReportSubmissionQuotaService(
-                        session, settings=settings, clock=_clock(now)
-                    ).consume("USER-001")
+                    await ReportSubmissionQuotaService(session, settings=settings, clock=_clock(now)).consume(
+                        "USER-001"
+                    )
             except ReportQuotaExceeded:
                 return False
         return True
@@ -189,9 +183,7 @@ async def test_duplicate_report_still_consumes_quota(
     for _ in range(2):
         async with factory() as session, session.begin():
             reports.append(
-                await ParkingReportService(
-                    session, settings=settings, clock=_clock(now)
-                ).create_wrong_parking_report(
+                await ParkingReportService(session, settings=settings, clock=_clock(now)).create_wrong_parking_report(
                     reporter_user_id="USER-001",
                     slot_id="F1-D01",
                     reason_code=WrongParkingReason.CROSSED_LINE,
@@ -217,9 +209,7 @@ async def test_hard_delete_does_not_refund_quota(
     factory = async_sessionmaker(report_quota_engine, expire_on_commit=False)
     settings = Settings(wrong_parking_report_daily_limit=1)
     async with factory() as session, session.begin():
-        report = await ParkingReportService(
-            session, settings=settings
-        ).create_wrong_parking_report(
+        report = await ParkingReportService(session, settings=settings).create_wrong_parking_report(
             reporter_user_id="USER-001",
             slot_id="F1-D01",
             reason_code=WrongParkingReason.WRONG_SLOT,

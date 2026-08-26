@@ -21,9 +21,7 @@ _SAFE_DATABASE_ERROR = (
 class _EffectiveDatabaseSettings(BaseSettings):
     """Resolve only DATABASE_URL without importing application settings."""
 
-    database_url: str = (
-        "postgresql+asyncpg://parksmart:parksmart@localhost:5432/parksmart"
-    )
+    database_url: str = "postgresql+asyncpg://parksmart:parksmart@localhost:5432/parksmart"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -48,11 +46,7 @@ def assert_safe_test_database_url(database_url: str) -> None:
     except (TypeError, ValueError):
         raise RuntimeError(_SAFE_DATABASE_ERROR) from None
 
-    if (
-        parsed.scheme != "postgresql+asyncpg"
-        or hostname is None
-        or hostname.lower() not in ALLOWED_TEST_DATABASE_HOSTS
-    ):
+    if parsed.scheme != "postgresql+asyncpg" or hostname is None or hostname.lower() not in ALLOWED_TEST_DATABASE_HOSTS:
         raise RuntimeError(_SAFE_DATABASE_ERROR)
 
 

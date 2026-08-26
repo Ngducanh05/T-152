@@ -55,9 +55,7 @@ class AgentQuotaService:
             return
 
         now = self._now()
-        user = await self.session.scalar(
-            select(ParkingUser).where(ParkingUser.id == user_id).with_for_update()
-        )
+        user = await self.session.scalar(select(ParkingUser).where(ParkingUser.id == user_id).with_for_update())
         if user is None:
             raise AgentQuotaError(
                 ErrorCode.USER_NOT_FOUND,

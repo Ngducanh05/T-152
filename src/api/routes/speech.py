@@ -17,9 +17,7 @@ router = APIRouter(
 )
 logger = logging.getLogger(__name__)
 
-_ALLOWED_MEDIA_TYPES = frozenset(
-    {"audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm"}
-)
+_ALLOWED_MEDIA_TYPES = frozenset({"audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm"})
 
 
 def _speech_error(status_code: int, code: ErrorCode, message: str) -> HTTPException:

@@ -20,7 +20,9 @@ export const TEST_VEHICLE_ID = "VEHICLE-001";
 
 const zones: ZoneId[] = ["A", "B", "C", "D"];
 
-export function createCanonicalMap(): ParkingMap {
+type TestParkingMap = Omit<ParkingMap, "slots"> & { slots: ParkingSlot[] };
+
+export function createCanonicalMap(): TestParkingMap {
   const nodes: MapNode[] = [
     { id: "F1-ENTRANCE", floor_id: "F1", type: "ENTRANCE", x: 0, y: 50 },
     { id: "F1-CP1", floor_id: "F1", type: "CHECKPOINT", x: 15, y: 50 },

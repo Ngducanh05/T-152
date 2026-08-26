@@ -61,10 +61,7 @@ def _clock(value: datetime) -> Callable[[], datetime]:
 async def _usage_count(engine: AsyncEngine) -> int:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        return int(
-            await session.scalar(select(func.count()).select_from(AgentDailyUsage))
-            or 0
-        )
+        return int(await session.scalar(select(func.count()).select_from(AgentDailyUsage)) or 0)
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -88,9 +85,7 @@ async def test_requests_through_limit_are_accepted(quota_engine: AsyncEngine):
 
     for _ in range(3):
         async with factory() as session, session.begin():
-            await AgentQuotaService(
-                session, settings=settings, clock=_clock(now)
-            ).consume("USER-001")
+            await AgentQuotaService(session, settings=settings, clock=_clock(now)).consume("USER-001")
 
     async with factory() as session:
         usage = await session.get(AgentDailyUsage, ("USER-001", now.date()))
@@ -106,16 +101,12 @@ async def test_request_after_limit_is_rejected_without_increment(
     settings = Settings(agent_daily_request_limit=1)
     now = datetime(2026, 8, 24, 23, 59, tzinfo=UTC)
     async with factory() as session, session.begin():
-        await AgentQuotaService(session, settings=settings, clock=_clock(now)).consume(
-            "USER-001"
-        )
+        await AgentQuotaService(session, settings=settings, clock=_clock(now)).consume("USER-001")
 
     async with factory() as session:
         with pytest.raises(AgentQuotaExceeded) as exc_info:
             async with session.begin():
-                await AgentQuotaService(
-                    session, settings=settings, clock=_clock(now)
-                ).consume("USER-001")
+                await AgentQuotaService(session, settings=settings, clock=_clock(now)).consume("USER-001")
 
     assert exc_info.value.reset_at == datetime(2026, 8, 25, tzinfo=UTC)
     async with factory() as session:
@@ -132,9 +123,7 @@ async def test_users_have_independent_daily_quotas(quota_engine: AsyncEngine):
     for user_id in ("USER-001", "USER-002"):
         async with factory() as session, session.begin():
             await asyncio.wait_for(
-                AgentQuotaService(
-                    session, settings=settings, clock=_clock(now)
-                ).consume(user_id),
+                AgentQuotaService(session, settings=settings, clock=_clock(now)).consume(user_id),
                 timeout=5,
             )
 
@@ -150,9 +139,7 @@ async def test_new_utc_day_resets_quota(quota_engine: AsyncEngine):
         datetime(2026, 8, 25, 0, 0, tzinfo=UTC),
     ):
         async with factory() as session, session.begin():
-            await AgentQuotaService(
-                session, settings=settings, clock=_clock(now)
-            ).consume("USER-001")
+            await AgentQuotaService(session, settings=settings, clock=_clock(now)).consume("USER-001")
 
     assert await _usage_count(quota_engine) == 2
 
@@ -171,9 +158,7 @@ async def test_concurrent_transactions_cannot_exceed_limit(
         async with factory() as session:
             try:
                 async with session.begin():
-                    await AgentQuotaService(
-                        session, settings=settings, clock=_clock(now)
-                    ).consume("USER-001")
+                    await AgentQuotaService(session, settings=settings, clock=_clock(now)).consume("USER-001")
             except AgentQuotaExceeded:
                 return False
         return True

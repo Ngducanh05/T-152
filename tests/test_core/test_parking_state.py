@@ -145,16 +145,11 @@ async def test_admin_manual_slot_status_uses_guarded_state_transitions(
 
     events = list(
         await state_db.session.scalars(
-            select(ParkingEvent)
-            .where(ParkingEvent.slot_id == "F2-A01")
-            .order_by(ParkingEvent.created_at)
+            select(ParkingEvent).where(ParkingEvent.slot_id == "F2-A01").order_by(ParkingEvent.created_at)
         )
     )
     assert [event.actor_type for event in events] == [ActorType.ADMIN, ActorType.ADMIN]
-    assert all(
-        event.event_metadata == {"source": "admin_manual_status_update"}
-        for event in events
-    )
+    assert all(event.event_metadata == {"source": "admin_manual_status_update"} for event in events)
 
     reserved = await _reserve(service, "F2-A02", "RESERVATION-ADMIN-GUARD")
     with pytest.raises(ParkingStateError) as error:
@@ -175,9 +170,7 @@ async def test_reserve_available_slot_increments_version_and_creates_event(
     slot = await _reserve(service, "F1-D01")
 
     reservation = await state_db.session.get(ParkingReservation, "RESERVATION-001")
-    event = await state_db.session.scalar(
-        select(ParkingEvent).where(ParkingEvent.slot_id == "F1-D01")
-    )
+    event = await state_db.session.scalar(select(ParkingEvent).where(ParkingEvent.slot_id == "F1-D01"))
     assert slot.status is SlotStatus.RESERVED
     assert slot.version == 1
     assert reservation is not None
@@ -214,9 +207,7 @@ async def test_direct_occupy_and_owner_release_are_valid_transitions(state_db: S
     assert released.version == 2
     events = list(
         await state_db.session.scalars(
-            select(ParkingEvent)
-            .where(ParkingEvent.slot_id == "F1-A01")
-            .order_by(ParkingEvent.created_at)
+            select(ParkingEvent).where(ParkingEvent.slot_id == "F1-A01").order_by(ParkingEvent.created_at)
         )
     )
     assert [event.event_type for event in events] == [
@@ -246,9 +237,12 @@ async def test_reservation_owner_can_occupy_and_reservation_is_confirmed(
     assert slot.version == 2
     assert reservation is not None
     assert reservation.status is ReservationStatus.CONFIRMED
-    assert await state_db.session.scalar(
-        select(func.count()).select_from(ParkingEvent).where(ParkingEvent.slot_id == slot.id)
-    ) == 2
+    assert (
+        await state_db.session.scalar(
+            select(func.count()).select_from(ParkingEvent).where(ParkingEvent.slot_id == slot.id)
+        )
+        == 2
+    )
 
 
 @pytest.mark.asyncio
@@ -431,9 +425,7 @@ async def test_concurrent_reserve_allows_exactly_one_winner(state_db: StateDatab
     async with factory() as verification_session:
         slot = await verification_session.get(ParkingSlot, "F1-D10")
         reservation_count = await verification_session.scalar(
-            select(func.count())
-            .select_from(ParkingReservation)
-            .where(ParkingReservation.slot_id == "F1-D10")
+            select(func.count()).select_from(ParkingReservation).where(ParkingReservation.slot_id == "F1-D10")
         )
         event_count = await verification_session.scalar(
             select(func.count()).select_from(ParkingEvent).where(ParkingEvent.slot_id == "F1-D10")

@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -12,9 +12,11 @@ from src.core.database import get_db_session
 from src.core.db_models import AppRoleEnum, ParkingUser, Profile, Vehicle
 from src.models.auth import CurrentUser
 from src.models.common import SuccessResponse
+from src.models.schemas import normalize_vehicle_plate
 from src.services.auth_service import (
     _auth_error,
     get_current_user,
+    get_current_user_from_request,
     verify_supabase_access_token,
 )
 
@@ -31,10 +33,8 @@ class AddVehicleRequest(BaseModel):
     @field_validator("plate_number")
     @classmethod
     def normalize_plate(cls, value: str) -> str:
-        normalized = value.strip().upper()
-        if len(normalized) < 2:
-            raise ValueError("plate_number is invalid")
-        return normalized
+        display, _normalized = normalize_vehicle_plate(value)
+        return display
 
 
 async def _new_parking_user_id(session: AsyncSession) -> str:
@@ -61,7 +61,7 @@ async def _new_vehicle_id(session: AsyncSession) -> str:
 
 @router.get("/me", response_model=SuccessResponse[CurrentUser])
 async def me(
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user_from_request)],
 ) -> SuccessResponse[CurrentUser]:
     return SuccessResponse(data=current_user, message="Current user loaded.")
 
@@ -70,11 +70,16 @@ async def me(
 async def onboard_authenticated_user(
     credentials: CredentialsDependency,
     session: SessionDependency,
+    request: Request,
 ) -> SuccessResponse[CurrentUser]:
     if credentials is None:
         raise _auth_error(status.HTTP_401_UNAUTHORIZED, "AUTH_REQUIRED", "Authentication is required.")
 
-    auth_user = await verify_supabase_access_token(credentials.credentials)
+    verifier = getattr(request.app.state, "auth_token_verifier", None)
+    auth_user = await verify_supabase_access_token(
+        credentials.credentials,
+        verifier=verifier,
+    )
     try:
         auth_user_id = UUID(str(auth_user["id"]))
     except (KeyError, TypeError, ValueError) as error:
@@ -90,7 +95,7 @@ async def onboard_authenticated_user(
             existing = await session.scalar(select(Profile).where(Profile.id == auth_user_id))
             if existing is not None:
                 return SuccessResponse(
-                    data=await get_current_user(credentials, session),
+                    data=await get_current_user(credentials, session, verifier=verifier),
                     message="Existing ParkSmart profile loaded.",
                 )
 
@@ -119,7 +124,7 @@ async def onboard_authenticated_user(
         await session.rollback()
 
     return SuccessResponse(
-        data=await get_current_user(credentials, session),
+        data=await get_current_user(credentials, session, verifier=verifier),
         message="ParkSmart profile created." if created else "Existing ParkSmart profile loaded.",
     )
 
@@ -129,8 +134,10 @@ async def add_first_vehicle(
     payload: AddVehicleRequest,
     credentials: CredentialsDependency,
     session: SessionDependency,
+    request: Request,
 ) -> SuccessResponse[CurrentUser]:
-    current_user = await get_current_user(credentials, session)
+    verifier = getattr(request.app.state, "auth_token_verifier", None)
+    current_user = await get_current_user(credentials, session, verifier=verifier)
 
     if current_user.parking_user_id is None:
         raise HTTPException(
@@ -186,7 +193,7 @@ async def add_first_vehicle(
         ) from error
 
     return SuccessResponse(
-        data=await get_current_user(credentials, session),
+        data=await get_current_user(credentials, session, verifier=verifier),
         message="Vehicle added.",
     )
 

@@ -123,9 +123,7 @@ async def test_scan_location_resolves_trusted_marker_and_rejects_invalid_input(
     )
     assert malformed.status_code == 422
     assert malformed.json()["error"]["code"] == "INVALID_LOCATION_QR"
-    current_after_malformed = await client.get(
-        "/api/v1/locations/current", params={"user_id": "USER-001"}
-    )
+    current_after_malformed = await client.get("/api/v1/locations/current", params={"user_id": "USER-001"})
     assert current_after_malformed.json()["data"]["node_id"] == "F3-D-W"
 
     unknown = await client.post(
@@ -134,9 +132,7 @@ async def test_scan_location_resolves_trusted_marker_and_rejects_invalid_input(
     )
     assert unknown.status_code == 404
     assert unknown.json()["error"]["code"] == "LOCATION_MARKER_NOT_FOUND"
-    current_after_unknown = await client.get(
-        "/api/v1/locations/current", params={"user_id": "USER-001"}
-    )
+    current_after_unknown = await client.get("/api/v1/locations/current", params={"user_id": "USER-001"})
     assert current_after_unknown.json()["data"]["node_id"] == "F3-D-W"
 
     invalid_suffix = await client.post(
@@ -184,9 +180,7 @@ async def test_authenticated_user_cannot_change_another_parking_users_location(
             parking_user_id="USER-001",
         )
 
-    phase4_api.application.dependency_overrides[require_parking_user_or_demo] = (
-        authenticated_user
-    )
+    phase4_api.application.dependency_overrides[require_parking_user_or_demo] = authenticated_user
     try:
         response = await phase4_api.client.post(
             "/api/v1/locations/scan",
@@ -196,9 +190,7 @@ async def test_authenticated_user_cannot_change_another_parking_users_location(
             },
         )
     finally:
-        phase4_api.application.dependency_overrides.pop(
-            require_parking_user_or_demo, None
-        )
+        phase4_api.application.dependency_overrides.pop(require_parking_user_or_demo, None)
 
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "PARKING_OWNERSHIP_MISMATCH"
@@ -248,6 +240,7 @@ async def test_phase4_end_to_end_flow(phase4_api: Phase4Api):
         json={
             "start_node_id": "F1-ENTRANCE",
             "destination_node_id": slot_id,
+            "mode": "VEHICLE",
         },
     )
     assert route_to_slot.status_code == 200
@@ -290,6 +283,7 @@ async def test_phase4_end_to_end_flow(phase4_api: Phase4Api):
         json={
             "start_node_id": "F1-CP3",
             "destination_node_id": vehicle_data["destination_node_id"],
+            "mode": "PEDESTRIAN",
         },
     )
     assert route_to_vehicle.status_code == 200
@@ -348,14 +342,9 @@ async def test_parked_user_can_observe_only_adjacent_slots(phase4_api: Phase4Api
     assert observed.json()["data"]["reward_status"] == "PENDING"
     assert observed.json()["data"]["reward_points"] == 10
     assert non_adjacent.status_code == 409
-    assert (
-        non_adjacent.json()["error"]["code"]
-        == "INVALID_OBSERVATION_TRANSITION"
-    )
+    assert non_adjacent.json()["error"]["code"] == "INVALID_OBSERVATION_TRANSITION"
     async with phase4_api.session_factory() as session:
-        event = await session.scalar(
-            select(ParkingEvent).where(ParkingEvent.slot_id == "F1-D02")
-        )
+        event = await session.scalar(select(ParkingEvent).where(ParkingEvent.slot_id == "F1-D02"))
         slot = await session.get(ParkingSlot, "F1-D02")
     assert event is None
     assert slot is not None
@@ -411,19 +400,13 @@ async def test_observation_changes_slot_and_earns_only_after_admin_verification(
     assert created.status_code == 200
     observation = created.json()["data"]
     before = await phase4_api.client.get("/api/v1/parking/slots/F2-D02")
-    summary_before = await phase4_api.client.get(
-        "/api/v1/rewards/users/USER-001/summary"
-    )
+    summary_before = await phase4_api.client.get("/api/v1/rewards/users/USER-001/summary")
     assert before.json()["data"]["status"] == "AVAILABLE"
     assert summary_before.json()["data"]["available_points"] == 0
     assert summary_before.json()["data"]["pending_points"] == 10
-    contributions = await phase4_api.client.get(
-        "/api/v1/contributions/users/USER-001"
-    )
+    contributions = await phase4_api.client.get("/api/v1/contributions/users/USER-001")
     observation_contribution = next(
-        item
-        for item in contributions.json()["data"]
-        if item["source_reference"] == observation["id"]
+        item for item in contributions.json()["data"] if item["source_reference"] == observation["id"]
     )
     assert observation_contribution["observer_session_id"] == "SESSION-OBSERVE-F2"
 
@@ -435,9 +418,7 @@ async def test_observation_changes_slot_and_earns_only_after_admin_verification(
     assert verified.json()["data"]["verification_status"] == "VERIFIED"
     assert verified.json()["data"]["reward_status"] == "EARNED"
     after = await phase4_api.client.get("/api/v1/parking/slots/F2-D02")
-    summary_after = await phase4_api.client.get(
-        "/api/v1/rewards/users/USER-001/summary"
-    )
+    summary_after = await phase4_api.client.get("/api/v1/rewards/users/USER-001/summary")
     assert after.json()["data"]["status"] == "OCCUPIED"
     assert summary_after.json()["data"]["available_points"] == 10
     assert summary_after.json()["data"]["pending_points"] == 0
@@ -511,9 +492,7 @@ async def test_rejected_and_expired_observations_cancel_reward_without_slot_chan
     )
     assert expired.status_code == 409
     assert expired.json()["error"]["code"] == "OBSERVATION_EXPIRED"
-    detail = await phase4_api.client.get(
-        f"/api/v1/admin/slot-observations/{second_data['id']}"
-    )
+    detail = await phase4_api.client.get(f"/api/v1/admin/slot-observations/{second_data['id']}")
     assert detail.json()["data"]["verification_status"] == "EXPIRED"
     assert detail.json()["data"]["reward_status"] == "CANCELLED"
 
@@ -540,9 +519,7 @@ async def test_two_reservation_requests_for_same_slot_have_one_winner(
         ),
         phase4_api.client.post(
             "/api/v1/reservations",
-            json=_reservation_payload(
-                "F1-D10", user_id="USER-002", vehicle_id="VEHICLE-002"
-            ),
+            json=_reservation_payload("F1-D10", user_id="USER-002", vehicle_id="VEHICLE-002"),
         ),
     )
     assert sorted([first.status_code, second.status_code]) == [201, 409]
@@ -668,9 +645,7 @@ async def test_openapi_exposes_exactly_eight_phase4_operations(phase4_api: Phase
         (path, method)
         for path, operations in paths.items()
         for method in operations
-        if path.startswith(
-            ("/api/v1/reservations", "/api/v1/sessions", "/api/v1/locations")
-        )
+        if path.startswith(("/api/v1/reservations", "/api/v1/sessions", "/api/v1/locations"))
     }
     assert actual_operations == expected_operations
 

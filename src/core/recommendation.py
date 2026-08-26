@@ -1,21 +1,20 @@
-"""Deterministic parking-slot recommendation with elapsed-hold cleanup."""
+"""Read-only deterministic parking-slot recommendation."""
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.db_models import ParkingUser
+from src.core.errors import DomainError
 from src.core.parking_state import ParkingStateService
-from src.core.reservation import ReservationService
-from src.core.routing import RoutingError, RoutingGraph, RoutingNode, RoutingService
+from src.core.routing import RoutingError, RoutingGraph, RoutingService
 from src.models.schemas import (
     ErrorCode,
     ParkingSlot,
     RecommendationCandidate,
     RecommendationRequest,
     RecommendationResult,
+    RouteMode,
     SlotStatus,
 )
 
@@ -26,20 +25,8 @@ def _elevator_node_id(floor_id: str) -> str:
     return f"{floor_id}-ELEVATOR"
 
 
-class RecommendationError(Exception):
+class RecommendationError(DomainError):
     """Core recommendation error with a stable API-independent error code."""
-
-    def __init__(
-        self,
-        code: ErrorCode,
-        message: str,
-        *,
-        details: dict[str, object] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.details = details or {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,37 +55,24 @@ class RecommendationService:
         session: AsyncSession,
         parking_state: ParkingStateService,
         routing: RoutingService,
-        *,
-        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.session = session
         self.parking_state = parking_state
         self.routing = routing
-        self.clock = clock or (lambda: datetime.now(UTC))
 
     async def recommend(self, request: RecommendationRequest) -> RecommendationResult:
         await self._validate_user(request.user_id)
-        await ReservationService(
-            self.session,
-            self.parking_state,
-        ).expire_due_reservations(now=self._utc_now())
-        # Use the full unrestricted graph for recommendation scoring.
-        # Mode-restricted routing is for actual navigation (get_route);
-        # recommendation needs all paths to compute elevator distances.
-        graph = await self.routing.load_graph()
-        start_node = self._get_start_node(graph, request.start_node_id)
+        vehicle_graph = await self.routing.load_graph(mode=RouteMode.VEHICLE)
+        self._validate_start_node(vehicle_graph, request.start_node_id)
+        pedestrian_graph = await self.routing.load_graph(mode=RouteMode.PEDESTRIAN) if request.near_elevator else None
         slots = await self.parking_state.list_slots()
         parking_state_version = sum(slot.version for slot in slots)
-
-        # When request.floor_id is set, restrict candidates to that floor.
-        # Otherwise, use the start node's floor for backward compatibility.
-        target_floor_id = request.floor_id if request.floor_id is not None else start_node.floor_id
 
         eligible_slots = [
             slot
             for slot in slots
             if slot.status is SlotStatus.AVAILABLE
-            and slot.floor_id == target_floor_id
+            and (request.floor_id is None or slot.floor_id == request.floor_id)
             and (request.zone_id is None or slot.zone_id == request.zone_id)
             and (not request.charging_required or slot.has_charger)
             and (not request.accessible_required or slot.is_accessible)
@@ -109,7 +83,12 @@ class RecommendationService:
                 parking_state_version=parking_state_version,
             )
 
-        reachable = self._reachable_candidates(graph, eligible_slots, request, target_floor_id)
+        reachable = self._reachable_candidates(
+            vehicle_graph,
+            pedestrian_graph,
+            eligible_slots,
+            request,
+        )
         max_distance = self._max_relevant_distance(reachable)
         scored = [self._score_candidate(candidate, request, max_distance) for candidate in reachable]
 
@@ -135,31 +114,31 @@ class RecommendationService:
 
     def _reachable_candidates(
         self,
-        graph: RoutingGraph,
+        vehicle_graph: RoutingGraph,
+        pedestrian_graph: RoutingGraph | None,
         slots: list[ParkingSlot],
         request: RecommendationRequest,
-        target_floor_id: str,
     ) -> list[_ReachableCandidate]:
-        elevator_node_id = _elevator_node_id(target_floor_id)
         try:
             from_start = self.routing.shortest_distances(
-                graph,
+                vehicle_graph,
                 request.start_node_id,
             )
             to_exit = self.routing.shortest_distances(
-                graph,
+                vehicle_graph,
                 EXIT_NODE_ID,
                 reverse=True,
             )
-            to_elevator = (
-                self.routing.shortest_distances(
-                    graph,
-                    elevator_node_id,
-                    reverse=True,
-                )
-                if request.near_elevator and elevator_node_id in graph.nodes
-                else None
-            )
+            to_elevator_by_floor = {}
+            if request.near_elevator and pedestrian_graph is not None:
+                for floor_id in sorted({slot.floor_id for slot in slots}):
+                    elevator_node_id = _elevator_node_id(floor_id)
+                    if elevator_node_id in pedestrian_graph.nodes:
+                        to_elevator_by_floor[floor_id] = self.routing.shortest_distances(
+                            pedestrian_graph,
+                            elevator_node_id,
+                            reverse=True,
+                        )
         except RoutingError as error:
             raise RecommendationError(error.code, error.message, details=error.details) from error
 
@@ -168,7 +147,8 @@ class RecommendationService:
             slot_id = slot.id
             distance = from_start.get(slot_id)
             exit_distance = to_exit.get(slot_id)
-            elevator_distance = to_elevator.get(slot_id) if to_elevator is not None else None
+            elevator_distances = to_elevator_by_floor.get(slot.floor_id)
+            elevator_distance = elevator_distances.get(slot_id) if elevator_distances is not None else None
             if distance is None or exit_distance is None:
                 continue
             if request.near_elevator and elevator_distance is None:
@@ -217,21 +197,19 @@ class RecommendationService:
     async def _validate_user(self, user_id: str) -> None:
         if await self.session.get(ParkingUser, user_id) is None:
             raise RecommendationError(
-                ErrorCode.INVALID_TRANSITION,
+                ErrorCode.USER_NOT_FOUND,
                 f"Parking user {user_id} was not found",
                 details={"user_id": user_id},
             )
 
     @staticmethod
-    def _get_start_node(graph: RoutingGraph, start_node_id: str) -> RoutingNode:
-        node = graph.nodes.get(start_node_id)
-        if node is None:
+    def _validate_start_node(graph: RoutingGraph, start_node_id: str) -> None:
+        if start_node_id not in graph.nodes:
             raise RecommendationError(
                 ErrorCode.ROUTE_NODE_NOT_FOUND,
                 f"Route node {start_node_id} was not found",
                 details={"node_ids": [start_node_id]},
             )
-        return node
 
     @staticmethod
     def _max_relevant_distance(candidates: list[_ReachableCandidate]) -> float:
@@ -268,15 +246,6 @@ class RecommendationService:
         if near_elevator:
             reasons.append("Elevator proximity is included in the score")
         return tuple(reasons)
-
-    def _utc_now(self) -> datetime:
-        current_time = self.clock()
-        if current_time.utcoffset() != timedelta(0):
-            raise RecommendationError(
-                ErrorCode.INVALID_TRANSITION,
-                "Recommendation clock must return a timezone-aware UTC datetime",
-            )
-        return current_time
 
 
 async def recommend_parking_slots(

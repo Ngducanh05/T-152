@@ -22,7 +22,16 @@ def test_floor_change_guidance_uses_everyday_direction_without_ramp_term():
         48,
     )
 
-    assert "Đi đường dốc xuống tầng 2" in guidance
+    assert "Đi đường dốc lên tầng 2" in guidance
     assert "ramp" not in guidance.lower()
     assert "checkpoint" not in guidance.lower()
     assert "CP3" not in guidance
+
+
+def test_floor_change_guidance_descends_to_lower_floor():
+    guidance = vietnamese_route_guidance(
+        ["F2-A01", "F2-A-W", "F2-RAMP", "F1-RAMP", "F1-CP3"],
+        48,
+    )
+
+    assert "Đi đường dốc xuống tầng 1" in guidance

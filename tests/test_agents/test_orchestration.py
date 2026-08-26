@@ -158,8 +158,7 @@ class ScriptedChatModel(FakeMessagesListChatModel):
         **kwargs: Any,
     ) -> ScriptedChatModel:
         self.bound_tool_names = [
-            candidate.name if isinstance(candidate, BaseTool) else str(candidate)
-            for candidate in tools
+            candidate.name if isinstance(candidate, BaseTool) else str(candidate) for candidate in tools
         ]
         return self
 
@@ -269,8 +268,7 @@ async def test_missing_location_asks_one_question_and_does_not_invent_result():
         }
 
     question = (
-        "Tôi chưa biết vị trí hiện tại của bạn. Bạn đang ở Entrance, CP1, CP2, "
-        "CP3, Elevator hay một ô đỗ cụ thể?"
+        "Tôi chưa biết vị trí hiện tại của bạn. Bạn đang ở Entrance, CP1, CP2, CP3, Elevator hay một ô đỗ cụ thể?"
     )
     result, _ = await _run(
         [
@@ -314,7 +312,7 @@ async def test_recommendation_never_reserves_without_explicit_acceptance():
 
     assert [name for name, _ in TOOL_CALLS] == ["recommend_parking_slot"]
     assert result["recommended_slot_ids"] == ["F1-C03"]
-    assert "active_reservation_id" not in result
+    assert not result.get("active_reservation_id")
 
 
 @pytest.mark.asyncio

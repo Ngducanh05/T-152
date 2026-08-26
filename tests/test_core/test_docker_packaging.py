@@ -78,10 +78,7 @@ def test_dockerignore_is_a_strict_backend_build_context_allowlist() -> None:
         "**/*~",
     }
     assert generated_file_exclusions <= set(patterns)
-    assert all(
-        patterns.index(pattern) > patterns.index("!src/**")
-        for pattern in generated_file_exclusions
-    )
+    assert all(patterns.index(pattern) > patterns.index("!src/**") for pattern in generated_file_exclusions)
 
     forbidden_context_roots = {
         ".env",
@@ -100,19 +97,16 @@ def test_dockerignore_is_a_strict_backend_build_context_allowlist() -> None:
         "alembic",
     }
     assert all(
-        not any(
-            pattern.removeprefix("!").startswith(root)
-            for root in forbidden_context_roots
-        )
+        not any(pattern.removeprefix("!").startswith(root) for root in forbidden_context_roots)
         for pattern in allowed_negations
     )
 
 
 def test_render_runbook_uses_database_readiness_health_check() -> None:
     deployment = DEPLOYMENT_PATH.read_text(encoding="utf-8")
-    private_image_runbook = deployment.split(
-        "## Private Backend Image: Local Build to Render", maxsplit=1
-    )[1].split("## Frontend Required Build/Runtime Environment", maxsplit=1)[0]
+    private_image_runbook = deployment.split("## Private Backend Image: Local Build to Render", maxsplit=1)[1].split(
+        "## Frontend Required Build/Runtime Environment", maxsplit=1
+    )[0]
 
     assert "Health Check Path" in private_image_runbook
     assert "/api/v1/health/database" in private_image_runbook

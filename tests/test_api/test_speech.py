@@ -45,9 +45,7 @@ async def test_transcribes_supported_audio_without_persisting_it(speech_app):
 
 
 async def test_disabled_speech_returns_503_without_reading_or_transcribing_audio():
-    application = create_app(
-        Settings(_env_file=None, speech_enabled=False, llm_api_key=None)
-    )
+    application = create_app(Settings(_env_file=None, speech_enabled=False, llm_api_key=None))
     transcribe = AsyncMock()
     read_body = AsyncMock(return_value=b"voice")
     with (

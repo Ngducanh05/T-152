@@ -165,20 +165,14 @@ async def test_api_recommendation_releases_and_reuses_expired_slot(
         },
     )
     assert reserved.status_code == 201
-    expires_at = datetime.fromisoformat(
-        reserved.json()["data"]["expires_at"].replace("Z", "+00:00")
-    )
+    expires_at = datetime.fromisoformat(reserved.json()["data"]["expires_at"].replace("Z", "+00:00"))
 
     with patch("src.core.recommendation.datetime") as recommendation_datetime:
         recommendation_datetime.now.return_value = expires_at + timedelta(seconds=1)
-        refreshed = await recommendation_client.post(
-            "/api/v1/recommendations", json=payload
-        )
+        refreshed = await recommendation_client.post("/api/v1/recommendations", json=payload)
 
     current_slot = await recommendation_client.get(f"/api/v1/parking/slots/{slot_id}")
-    active = await recommendation_client.get(
-        "/api/v1/reservations/active", params={"user_id": "USER-001"}
-    )
+    active = await recommendation_client.get("/api/v1/reservations/active", params={"user_id": "USER-001"})
     assert refreshed.status_code == 200
     assert refreshed.json()["data"]["recommendations"][0]["slot_id"] == slot_id
     assert current_slot.json()["data"]["status"] == "AVAILABLE"

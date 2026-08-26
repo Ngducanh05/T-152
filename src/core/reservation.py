@@ -90,7 +90,7 @@ class ReservationService:
         reservation = await self.session.get(ParkingReservation, reservation_id)
         if reservation is None:
             raise ParkingStateError(
-                ErrorCode.INVALID_TRANSITION,
+                ErrorCode.RESERVATION_NOT_FOUND,
                 f"Reservation {reservation_id} was not found",
                 details={"reservation_id": reservation_id},
             )
@@ -107,7 +107,7 @@ class ReservationService:
         reservation = await self.session.get(ParkingReservation, reservation_id)
         if reservation is None:
             raise ParkingStateError(
-                ErrorCode.INVALID_TRANSITION,
+                ErrorCode.RESERVATION_NOT_FOUND,
                 f"Reservation {reservation_id} was not found",
                 details={"reservation_id": reservation_id},
             )
@@ -137,7 +137,7 @@ class ReservationService:
             loaded = await self.session.get(ParkingReservation, reservation)
             if loaded is None:
                 raise ParkingStateError(
-                    ErrorCode.INVALID_TRANSITION,
+                    ErrorCode.RESERVATION_NOT_FOUND,
                     f"Reservation {reservation} was not found",
                     details={"reservation_id": reservation},
                 )
@@ -176,21 +176,17 @@ class ReservationService:
             )
 
     async def _validate_and_lock_owner(self, user_id: str, vehicle_id: str) -> None:
-        user = await self.session.scalar(
-            select(ParkingUser).where(ParkingUser.id == user_id).with_for_update()
-        )
+        user = await self.session.scalar(select(ParkingUser).where(ParkingUser.id == user_id).with_for_update())
         if user is None:
             raise ParkingStateError(
-                ErrorCode.INVALID_TRANSITION,
+                ErrorCode.USER_NOT_FOUND,
                 f"Parking user {user_id} was not found",
                 details={"user_id": user_id},
             )
-        vehicle = await self.session.scalar(
-            select(Vehicle).where(Vehicle.id == vehicle_id).with_for_update()
-        )
+        vehicle = await self.session.scalar(select(Vehicle).where(Vehicle.id == vehicle_id).with_for_update())
         if vehicle is None:
             raise ParkingStateError(
-                ErrorCode.INVALID_TRANSITION,
+                ErrorCode.VEHICLE_NOT_FOUND,
                 f"Vehicle {vehicle_id} was not found",
                 details={"vehicle_id": vehicle_id},
             )
@@ -204,7 +200,7 @@ class ReservationService:
     async def _validate_user_exists(self, user_id: str) -> None:
         if await self.session.get(ParkingUser, user_id) is None:
             raise ParkingStateError(
-                ErrorCode.INVALID_TRANSITION,
+                ErrorCode.USER_NOT_FOUND,
                 f"Parking user {user_id} was not found",
                 details={"user_id": user_id},
             )

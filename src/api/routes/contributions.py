@@ -54,52 +54,40 @@ async def user_contributions(
         floor_id = str(transaction.transaction_metadata.get("floor_id", ""))
         if not slot_id or floor_id not in {"F1", "F2", "F3"}:
             continue
-        records[(transaction.source_type, transaction.source_reference)] = (
-            ContributionRecord(
-                id=transaction.id,
-                source_type=transaction.source_type,
-                source_reference=transaction.source_reference,
-                observer_session_id=None,
-                floor_id=floor_id,  # type: ignore[arg-type]
-                slot_id=slot_id,
-                points=transaction.points,
-                status=transaction.status,
-                created_at=transaction.created_at,
-                settled_at=transaction.settled_at,
-            )
+        records[(transaction.source_type, transaction.source_reference)] = ContributionRecord(
+            id=transaction.id,
+            source_type=transaction.source_type,
+            source_reference=transaction.source_reference,
+            observer_session_id=None,
+            floor_id=floor_id,  # type: ignore[arg-type]
+            slot_id=slot_id,
+            points=transaction.points,
+            status=transaction.status,
+            created_at=transaction.created_at,
+            settled_at=transaction.settled_at,
         )
 
     observations = (
-        await session.scalars(
-            select(SlotObservation).where(SlotObservation.observer_user_id == user_id)
-        )
+        await session.scalars(select(SlotObservation).where(SlotObservation.observer_user_id == user_id))
     ).all()
     reports = (
-        await session.scalars(
-            select(WrongParkingReport).where(WrongParkingReport.reporter_user_id == user_id)
-        )
+        await session.scalars(select(WrongParkingReport).where(WrongParkingReport.reporter_user_id == user_id))
     ).all()
-    contributions = [
-        (item, RewardSourceType.ADJACENT_SLOT_OBSERVATION) for item in observations
-    ] + [(item, RewardSourceType.WRONG_PARKING_REPORT) for item in reports]
+    contributions = [(item, RewardSourceType.ADJACENT_SLOT_OBSERVATION) for item in observations] + [
+        (item, RewardSourceType.WRONG_PARKING_REPORT) for item in reports
+    ]
     for contribution, source_type in contributions:
         key = (source_type, contribution.id)
         if key in records:
             if source_type is RewardSourceType.ADJACENT_SLOT_OBSERVATION:
-                records[key] = records[key].model_copy(
-                    update={
-                        "observer_session_id": contribution.observer_session_id
-                    }
-                )
+                records[key] = records[key].model_copy(update={"observer_session_id": contribution.observer_session_id})
             continue
         records[key] = ContributionRecord(
             id=contribution.id,
             source_type=source_type,
             source_reference=contribution.id,
             observer_session_id=(
-                contribution.observer_session_id
-                if source_type is RewardSourceType.ADJACENT_SLOT_OBSERVATION
-                else None
+                contribution.observer_session_id if source_type is RewardSourceType.ADJACENT_SLOT_OBSERVATION else None
             ),
             floor_id=contribution.slot_id[:2],  # type: ignore[arg-type]
             slot_id=contribution.slot_id,
@@ -108,9 +96,7 @@ async def user_contributions(
             created_at=contribution.created_at,
             settled_at=None,
         )
-    ordered = sorted(
-        records.values(), key=lambda item: (item.created_at, item.id), reverse=True
-    )
+    ordered = sorted(records.values(), key=lambda item: (item.created_at, item.id), reverse=True)
     return SuccessResponse(data=ordered)
 
 
@@ -141,15 +127,9 @@ async def reward_configuration() -> SuccessResponse[RewardConfiguration]:
     settings = get_settings()
     return SuccessResponse(
         data=RewardConfiguration(
-            adjacent_observation_reward_points=(
-                settings.adjacent_observation_reward_points
-            ),
-            wrong_parking_report_reward_points=(
-                settings.wrong_parking_report_reward_points
-            ),
-            contribution_daily_points_limit=(
-                settings.contribution_daily_points_limit
-            ),
+            adjacent_observation_reward_points=(settings.adjacent_observation_reward_points),
+            wrong_parking_report_reward_points=(settings.wrong_parking_report_reward_points),
+            contribution_daily_points_limit=(settings.contribution_daily_points_limit),
         )
     )
 

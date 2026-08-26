@@ -217,14 +217,10 @@ async def test_vietnamese_intent_eval_is_deterministic(case):
     elif case.name == "occupied_slot_is_rejected":
         final_text = "Ô đó không còn trống; tôi chưa giữ chỗ nào cho bạn."
     elif case.name == "route_to_exact_slot_with_status":
-        final_text = (
-            "Ô F1-D01 hiện đang AVAILABLE. Đây là tuyến đường tới ô. "
-            "Bạn có muốn đỗ xe ở ô F1-D01 không?"
-        )
+        final_text = "Ô F1-D01 hiện đang AVAILABLE. Đây là tuyến đường tới ô. Bạn có muốn đỗ xe ở ô F1-D01 không?"
     elif case.name == "route_to_zone_d_with_status":
         final_text = (
-            "Khu D còn 5 ô AVAILABLE; tôi đã chỉ đường tới ô F1-D01 đang trống. "
-            "Bạn có muốn đỗ xe ở ô F1-D01 không?"
+            "Khu D còn 5 ô AVAILABLE; tôi đã chỉ đường tới ô F1-D01 đang trống. Bạn có muốn đỗ xe ở ô F1-D01 không?"
         )
     else:
         final_text = "Đã xử lý yêu cầu bằng dữ liệu từ công cụ."
@@ -314,9 +310,7 @@ async def test_missing_context_and_session_errors_are_safe(
         }
 
     graph = build_graph(
-        EvalScriptedModel(
-            responses=[_tool_call(tool_name, {}, 1), AIMessage(content=question)]
-        ),
+        EvalScriptedModel(responses=[_tool_call(tool_name, {}, 1), AIMessage(content=question)]),
         tools=[failing_tool],
     )
     result = await graph.ainvoke(

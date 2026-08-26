@@ -10,9 +10,7 @@ from src.agents.nodes.observe_tool import observe_tool_result
 
 def _location_success(call_id: str) -> ToolMessage:
     return ToolMessage(
-        content=json.dumps(
-            {"ok": True, "data": {"user_id": "USER-001", "node_id": "F1-CP3"}}
-        ),
+        content=json.dumps({"ok": True, "data": {"user_id": "USER-001", "node_id": "F1-CP3"}}),
         tool_call_id=call_id,
         name="set_user_location",
     )
@@ -156,6 +154,8 @@ def test_recommendations_only_use_valid_ids_from_structured_tool_data():
                 "data": {
                     "recommendations": [
                         {"slot_id": "F1-C03"},
+                        {"slot_id": "F2-A10"},
+                        {"slot_id": "F3-D01"},
                         {"slot_id": "not-canonical"},
                         "F1-D01 appears in prose",
                     ]
@@ -168,4 +168,4 @@ def test_recommendations_only_use_valid_ids_from_structured_tool_data():
 
     result = observe_tool_result({"messages": [message]})
 
-    assert result["recommended_slot_ids"] == ["F1-C03"]
+    assert result["recommended_slot_ids"] == ["F1-C03", "F2-A10", "F3-D01"]

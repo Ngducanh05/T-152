@@ -61,12 +61,8 @@ async def test_shared_daily_cap_is_safe_for_concurrent_source_types(
             return reward.points if reward is not None else 0
 
     tasks = [
-        asyncio.create_task(
-            reserve(RewardSourceType.ADJACENT_SLOT_OBSERVATION, "OBS-1")
-        ),
-        asyncio.create_task(
-            reserve(RewardSourceType.WRONG_PARKING_REPORT, "REPORT-1")
-        ),
+        asyncio.create_task(reserve(RewardSourceType.ADJACENT_SLOT_OBSERVATION, "OBS-1")),
+        asyncio.create_task(reserve(RewardSourceType.WRONG_PARKING_REPORT, "REPORT-1")),
     ]
     start.set()
     results = await asyncio.gather(*tasks)
@@ -99,9 +95,7 @@ async def test_summary_is_derived_from_ledger_and_settlement_is_single_use(
             metadata={"slot_id": "F3-D01", "floor_id": "F3"},
         )
         assert reward is not None
-        await service.settle_pending(
-            RewardSourceType.WRONG_PARKING_REPORT, "REPORT-SUMMARY"
-        )
+        await service.settle_pending(RewardSourceType.WRONG_PARKING_REPORT, "REPORT-SUMMARY")
 
     async with factory() as session:
         summary = await RewardService(session, settings=settings).get_summary("USER-001")

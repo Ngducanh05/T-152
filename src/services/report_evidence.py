@@ -67,9 +67,7 @@ def _signature_matches(content_type: str, data: bytes) -> bool:
     brands = {data[8:12]}
     brands.update(data[offset : offset + 4] for offset in range(16, box_size, 4))
     expected_brands = (
-        {b"heic", b"heix", b"hevc", b"hevx"}
-        if content_type == "image/heic"
-        else {b"mif1", b"msf1", b"heif"}
+        {b"heic", b"heix", b"hevc", b"hevx"} if content_type == "image/heic" else {b"mif1", b"msf1", b"heif"}
     )
     return bool(brands & expected_brands)
 
@@ -138,10 +136,7 @@ class ReportEvidenceStorage:
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
                 response = await client.post(
-                    (
-                        f"{base_url}/storage/v1/object/"
-                        f"{self.settings.supabase_report_evidence_bucket}/{storage_path}"
-                    ),
+                    (f"{base_url}/storage/v1/object/{self.settings.supabase_report_evidence_bucket}/{storage_path}"),
                     headers=headers,
                     content=data,
                 )

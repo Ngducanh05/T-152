@@ -13,6 +13,17 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://parksmart:parksmart@localhost:5432/parksmart"
 
     reservation_ttl_seconds: int = Field(default=300, gt=0)
+    reservation_expiry_interval_seconds: float = Field(default=30.0, gt=0)
+    reservation_expiry_batch_size: int = Field(default=100, gt=0, le=1000)
+    idempotency_ttl_seconds: int = Field(default=86400, gt=0)
+    parking_arrival_verification_ttl_seconds: int = Field(
+        default=600,
+        gt=0,
+        description=(
+            "Maximum age of a trusted location QR scan accepted for parking "
+            "confirmation; the conservative default is 10 minutes."
+        ),
+    )
     adjacent_observation_reward_points: int = Field(default=10, ge=0)
     wrong_parking_report_reward_points: int = Field(default=20, ge=0)
     contribution_daily_points_limit: int = Field(default=100, ge=0)
@@ -34,6 +45,8 @@ class Settings(BaseSettings):
     supabase_anon_key: str | None = None
     supabase_service_role_key: str | None = None
     supabase_report_evidence_bucket: str = "wrong-parking-evidence"
+    auth_verification_cache_ttl_seconds: float = Field(default=15.0, gt=0, le=60)
+    auth_verification_cache_max_entries: int = Field(default=2048, gt=0, le=10000)
     report_evidence_max_bytes: int = Field(default=5_000_000, gt=0, le=15_000_000)
     wrong_parking_report_daily_limit: int = Field(default=0, ge=0, le=100)
 
@@ -102,10 +115,7 @@ class Settings(BaseSettings):
             failures.append("DEBUG must be false")
         if self.demo_mode:
             failures.append("DEMO_MODE must be false")
-        if (
-            self.database_url
-            == "postgresql+asyncpg://parksmart:parksmart@localhost:5432/parksmart"
-        ):
+        if self.database_url == "postgresql+asyncpg://parksmart:parksmart@localhost:5432/parksmart":
             failures.append("DATABASE_URL must not use the built-in local fallback")
         if not self.supabase_url:
             failures.append("SUPABASE_URL is required")
@@ -115,15 +125,11 @@ class Settings(BaseSettings):
             failures.append("SUPABASE_SERVICE_ROLE_KEY is required")
         if not self.supabase_report_evidence_bucket:
             failures.append("SUPABASE_REPORT_EVIDENCE_BUCKET is required")
-        if (self.agent_enabled or self.speech_enabled) and not (
-            self.llm_api_key or ""
-        ).strip():
+        if (self.agent_enabled or self.speech_enabled) and not (self.llm_api_key or "").strip():
             failures.append("LLM_API_KEY is required")
 
         if failures:
-            raise ValueError(
-                f"Unsafe production configuration: {'; '.join(failures)}"
-            )
+            raise ValueError(f"Unsafe production configuration: {'; '.join(failures)}")
         return self
 
     @property

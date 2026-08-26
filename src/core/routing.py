@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.db_models import MapEdge, MapNode
+from src.core.errors import DomainError
 from src.models.schemas import ErrorCode, RouteMode, RouteResult
 
 
@@ -29,20 +30,8 @@ class RoutingGraph:
     reverse_adjacency: dict[str, tuple[tuple[str, float], ...]]
 
 
-class RoutingError(Exception):
+class RoutingError(DomainError):
     """Core routing error with a stable API-independent error code."""
-
-    def __init__(
-        self,
-        code: ErrorCode,
-        message: str,
-        *,
-        details: dict[str, object] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.details = details or {}
 
 
 class RoutingService:
@@ -71,12 +60,8 @@ class RoutingService:
         nodes = list(await self.session.scalars(select(MapNode).order_by(MapNode.id)))
         edge_query = select(MapEdge).where(MapEdge.enabled.is_(True))
         if mode is not None:
-            edge_query = edge_query.where(
-                (MapEdge.allowed_mode.is_(None)) | (MapEdge.allowed_mode == mode)
-            )
-        edges = list(
-            await self.session.scalars(edge_query.order_by(MapEdge.from_node, MapEdge.to_node))
-        )
+            edge_query = edge_query.where((MapEdge.allowed_mode.is_(None)) | (MapEdge.allowed_mode == mode))
+        edges = list(await self.session.scalars(edge_query.order_by(MapEdge.from_node, MapEdge.to_node)))
         node_by_id = {
             node.id: RoutingNode(
                 id=node.id,

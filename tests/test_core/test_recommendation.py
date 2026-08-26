@@ -104,7 +104,7 @@ async def test_ev_required_returns_only_charger_slots(recommendation_session: As
     result = await _service(recommendation_session).recommend(_request(charging_required=True))
     slots = {slot.id: slot for slot in await ParkingStateService(recommendation_session).list_slots()}
 
-    assert len(result.recommendations) == 10
+    assert len(result.recommendations) == 30
     assert all(slots[item.slot_id].has_charger for item in result.recommendations)
 
 
@@ -125,11 +125,10 @@ async def test_reserved_never_recommended(recommendation_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_expired_reservation_is_swept_before_recommendation(
+async def test_expired_reservation_is_not_mutated_by_recommendation(
     recommendation_session: AsyncSession,
 ):
     reserved_at = datetime(2026, 8, 13, 3, 0, tzinfo=UTC)
-    recommendation_time = reserved_at + timedelta(minutes=6)
     state = ParkingStateService(recommendation_session)
 
     async with recommendation_session.begin():
@@ -146,19 +145,10 @@ async def test_expired_reservation_is_swept_before_recommendation(
             recommendation_session,
             state,
             RoutingService(recommendation_session),
-            clock=lambda: recommendation_time,
-        ).recommend(_request(charging_required=True))
-        await RecommendationService(
-            recommendation_session,
-            state,
-            RoutingService(recommendation_session),
-            clock=lambda: recommendation_time,
         ).recommend(_request(charging_required=True))
 
     async with recommendation_session.begin():
-        stored_reservation = await recommendation_session.get(
-            ParkingReservation, reservation.id
-        )
+        stored_reservation = await recommendation_session.get(ParkingReservation, reservation.id)
         slot = await recommendation_session.get(ParkingSlot, "F1-C01")
         expired_events = await recommendation_session.scalar(
             select(func.count())
@@ -166,11 +156,11 @@ async def test_expired_reservation_is_swept_before_recommendation(
             .where(ParkingEvent.event_type == ParkingEventType.RESERVATION_EXPIRED)
         )
 
-    assert slot is not None and slot.status is SlotStatus.AVAILABLE
-    assert "F1-C01" in {candidate.slot_id for candidate in result.recommendations}
+    assert slot is not None and slot.status is SlotStatus.RESERVED
+    assert "F1-C01" not in {candidate.slot_id for candidate in result.recommendations}
     assert stored_reservation is not None
-    assert stored_reservation.status is ReservationStatus.EXPIRED
-    assert expired_events == 1
+    assert stored_reservation.status is ReservationStatus.ACTIVE
+    assert expired_events == 0
 
 
 @pytest.mark.asyncio
@@ -229,9 +219,7 @@ async def test_limit(recommendation_session: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_requested_zone_is_a_hard_filter(recommendation_session: AsyncSession):
-    result = await _service(recommendation_session).recommend(
-        _request(zone_id="D", limit=10)
-    )
+    result = await _service(recommendation_session).recommend(_request(floor_id="F1", zone_id="D", limit=10))
 
     assert len(result.recommendations) == 10
     assert all(candidate.slot_id.startswith("F1-D") for candidate in result.recommendations)
@@ -276,7 +264,7 @@ async def test_recommendation_does_not_mutate_state(recommendation_session: Asyn
 
 
 @pytest.mark.asyncio
-async def test_recommendation_uses_one_graph_snapshot_and_three_sssp(
+async def test_recommendation_uses_mode_specific_graph_snapshots(
     recommendation_session: AsyncSession,
 ):
     routing = RoutingService(recommendation_session)
@@ -295,12 +283,37 @@ async def test_recommendation_uses_one_graph_snapshot_and_three_sssp(
         ) as shortest_distances,
         patch.object(routing, "get_route", wraps=routing.get_route) as get_route,
     ):
-        result = await service.recommend(_request(charging_required=True, near_elevator=True))
+        result = await service.recommend(_request(floor_id="F1", charging_required=True, near_elevator=True))
 
     assert result.recommendations
-    assert load_graph.await_count == 1
+    assert load_graph.await_count == 2
     assert shortest_distances.call_count == 3
     assert get_route.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_omitted_floor_ranks_reachable_slots_across_all_floors(
+    recommendation_session: AsyncSession,
+):
+    result = await _service(recommendation_session).recommend(_request(limit=120))
+
+    assert {candidate.slot_id[:2] for candidate in result.recommendations} == {
+        "F1",
+        "F2",
+        "F3",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("floor_id", ["F1", "F2", "F3"])
+async def test_explicit_floor_is_a_hard_filter(
+    recommendation_session: AsyncSession,
+    floor_id: str,
+):
+    result = await _service(recommendation_session).recommend(_request(floor_id=floor_id, limit=40))
+
+    assert len(result.recommendations) == 40
+    assert all(candidate.slot_id.startswith(f"{floor_id}-") for candidate in result.recommendations)
 
 
 @pytest.mark.asyncio

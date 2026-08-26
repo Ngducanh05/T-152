@@ -1,6 +1,5 @@
 """Deterministic, allowlisted UI actions derived from verified Agent state."""
 
-import re
 from collections.abc import Sequence, Set
 
 from src.models.schemas import (
@@ -8,18 +7,14 @@ from src.models.schemas import (
     ChatUIActionStyle,
     ChatUIActionType,
     RouteResult,
+    is_slot_id,
 )
 
-_CANONICAL_SLOT_ID = re.compile(r"^F[1-3]-[A-D](?:0[1-9]|10)$")
 _MAX_UI_ACTIONS = 5
 
 
 def _slot_ids(values: Sequence[str]) -> list[str]:
-    return [
-        slot_id
-        for slot_id in dict.fromkeys(values)
-        if _CANONICAL_SLOT_ID.fullmatch(slot_id)
-    ]
+    return [slot_id for slot_id in dict.fromkeys(values) if is_slot_id(slot_id)]
 
 
 def _action(
@@ -56,11 +51,7 @@ def derive_chat_ui_actions(
 ) -> list[ChatUIAction]:
     """Build safe actions without inspecting LLM text or accepting arbitrary targets."""
     actions: list[ChatUIAction] = []
-    canonical_selected_slot = (
-        selected_slot
-        if selected_slot is not None and _CANONICAL_SLOT_ID.fullmatch(selected_slot)
-        else None
-    )
+    canonical_selected_slot = selected_slot if is_slot_id(selected_slot) else None
 
     if not current_location:
         return [
@@ -75,13 +66,10 @@ def derive_chat_ui_actions(
                 action_type=ChatUIActionType.SELECT_LOCATION,
                 label="Chọn vị trí thủ công",
                 style=ChatUIActionStyle.SECONDARY,
-            )
+            ),
         ]
 
-    if (
-        "recommend_parking_slot" in successful_tool_names
-        and recommended_slot_ids
-    ):
+    if "recommend_parking_slot" in successful_tool_names and recommended_slot_ids:
         for slot_id in _slot_ids(recommended_slot_ids)[:3]:
             actions.append(
                 _action(
@@ -109,11 +97,7 @@ def derive_chat_ui_actions(
                 action_id="cancel-reservation",
                 action_type=ChatUIActionType.CANCEL,
                 label="Hủy chỗ đã giữ",
-                payload=(
-                    {"slot_id": canonical_selected_slot}
-                    if canonical_selected_slot is not None
-                    else None
-                ),
+                payload=({"slot_id": canonical_selected_slot} if canonical_selected_slot is not None else None),
                 style=ChatUIActionStyle.DANGER,
                 requires_confirmation=True,
             )

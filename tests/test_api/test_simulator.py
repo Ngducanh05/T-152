@@ -113,15 +113,9 @@ async def _reserve_demo_slot(api: SimulatorApi, slot_id: str = "F1-A01") -> str:
 async def _assert_current_baseline(api: SimulatorApi) -> None:
     status_response = await api.client.get("/api/v1/parking/status")
     slots_response = await api.client.get("/api/v1/parking/slots")
-    location_response = await api.client.get(
-        "/api/v1/locations/current", params={"user_id": "USER-001"}
-    )
-    reservation_response = await api.client.get(
-        "/api/v1/reservations/active", params={"user_id": "USER-001"}
-    )
-    session_response = await api.client.get(
-        "/api/v1/sessions/active", params={"user_id": "USER-001"}
-    )
+    location_response = await api.client.get("/api/v1/locations/current", params={"user_id": "USER-001"})
+    reservation_response = await api.client.get("/api/v1/reservations/active", params={"user_id": "USER-001"})
+    session_response = await api.client.get("/api/v1/sessions/active", params={"user_id": "USER-001"})
 
     status = status_response.json()["data"]
     assert (status["total"], status["available"], status["reserved"], status["occupied"]) == (
@@ -130,12 +124,8 @@ async def _assert_current_baseline(api: SimulatorApi) -> None:
         0,
         1,
     )
-    occupied = [
-        slot for slot in slots_response.json()["data"] if slot["status"] == "OCCUPIED"
-    ]
-    assert [(slot["id"], slot["occupied_by_vehicle_id"]) for slot in occupied] == [
-        ("F1-B03", "SIM-CAR-02")
-    ]
+    occupied = [slot for slot in slots_response.json()["data"] if slot["status"] == "OCCUPIED"]
+    assert [(slot["id"], slot["occupied_by_vehicle_id"]) for slot in occupied] == [("F1-B03", "SIM-CAR-02")]
     assert location_response.json()["data"]["node_id"] == "F1-ENTRANCE"
     assert reservation_response.status_code == 404
     assert session_response.status_code == 404
@@ -229,9 +219,9 @@ async def test_reset_does_not_modify_another_users_active_state(
             )
         )
         await session.flush()
-        other_reservation = await ReservationService(
-            session, ParkingStateService(session)
-        ).create_reservation("USER-OTHER", "VEHICLE-OTHER", "F1-C01")
+        other_reservation = await ReservationService(session, ParkingStateService(session)).create_reservation(
+            "USER-OTHER", "VEHICLE-OTHER", "F1-C01"
+        )
         other_reservation_id = other_reservation.id
 
     response = await simulator_api.client.post("/api/v1/simulator/reset", json={})
@@ -445,23 +435,15 @@ async def test_admin_events_are_ordered_and_limited(simulator_api: SimulatorApi)
 async def test_admin_events_support_zone_type_and_slot_filters(simulator_api: SimulatorApi):
     await _insert_admin_events(simulator_api)
 
-    zone_response = await simulator_api.client.get(
-        "/api/v1/admin/events", params={"zone_id": "A"}
-    )
-    type_response = await simulator_api.client.get(
-        "/api/v1/admin/events", params={"event_type": "SLOT_RESERVED"}
-    )
-    slot_response = await simulator_api.client.get(
-        "/api/v1/admin/events", params={"slot_id": "F1-A01"}
-    )
+    zone_response = await simulator_api.client.get("/api/v1/admin/events", params={"zone_id": "A"})
+    type_response = await simulator_api.client.get("/api/v1/admin/events", params={"event_type": "SLOT_RESERVED"})
+    slot_response = await simulator_api.client.get("/api/v1/admin/events", params={"slot_id": "F1-A01"})
 
     assert [event["id"] for event in zone_response.json()["data"]] == [
         "EVENT-ADMIN-002",
         "EVENT-ADMIN-001",
     ]
-    assert [event["id"] for event in type_response.json()["data"]] == [
-        "EVENT-ADMIN-003"
-    ]
+    assert [event["id"] for event in type_response.json()["data"]] == ["EVENT-ADMIN-003"]
     assert [event["id"] for event in slot_response.json()["data"]] == [
         "EVENT-ADMIN-002",
         "EVENT-ADMIN-001",
@@ -472,9 +454,7 @@ async def test_admin_events_support_zone_type_and_slot_filters(simulator_api: Si
 async def test_admin_events_return_an_empty_list_for_no_match(simulator_api: SimulatorApi):
     await _insert_admin_events(simulator_api)
 
-    response = await simulator_api.client.get(
-        "/api/v1/admin/events", params={"slot_id": "F1-C10"}
-    )
+    response = await simulator_api.client.get("/api/v1/admin/events", params={"slot_id": "F1-C10"})
 
     assert response.status_code == 200
     assert response.json()["data"] == []
@@ -486,9 +466,7 @@ async def test_admin_events_validate_limit_bounds(
     simulator_api: SimulatorApi,
     limit: int,
 ):
-    response = await simulator_api.client.get(
-        "/api/v1/admin/events", params={"limit": limit}
-    )
+    response = await simulator_api.client.get("/api/v1/admin/events", params={"limit": limit})
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
@@ -496,9 +474,7 @@ async def test_admin_events_validate_limit_bounds(
 
 @pytest.mark.asyncio
 async def test_admin_events_require_admin_role_outside_demo(simulator_api: SimulatorApi):
-    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
-        demo_mode=False
-    )
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(demo_mode=False)
     response = await simulator_api.client.get("/api/v1/admin/events")
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "AUTH_REQUIRED"
@@ -564,9 +540,7 @@ async def test_user_can_report_wrong_parking_and_admin_can_read_it(
     assert report["duplicate_candidate_of_id"] is None
     assert report["version"] == 0
 
-    admin_response = await simulator_api.client.get(
-        "/api/v1/admin/reports", params={"limit": 1}
-    )
+    admin_response = await simulator_api.client.get("/api/v1/admin/reports", params={"limit": 1})
     assert admin_response.status_code == 200
     assert admin_response.json()["data"] == [report]
 
@@ -672,9 +646,7 @@ async def test_known_exhausted_report_quota_rejects_before_storage_upload(
     simulator_api: SimulatorApi,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
-        wrong_parking_report_daily_limit=1
-    )
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(wrong_parking_report_daily_limit=1)
     first = await simulator_api.client.post(
         "/api/v1/reports/wrong-parking",
         json={
@@ -715,9 +687,7 @@ async def test_report_quota_race_loser_deletes_uploaded_evidence(
     simulator_api: SimulatorApi,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
-        wrong_parking_report_daily_limit=1
-    )
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(wrong_parking_report_daily_limit=1)
     both_uploaded = asyncio.Event()
     uploaded_paths: list[str] = []
     deleted_paths: list[str] = []
@@ -851,9 +821,7 @@ async def test_storage_failure_does_not_consume_report_quota(
     simulator_api: SimulatorApi,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
-        wrong_parking_report_daily_limit=1
-    )
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(wrong_parking_report_daily_limit=1)
 
     async def upload(*_args, **_kwargs):
         raise HTTPException(
@@ -886,9 +854,7 @@ async def test_unknown_slot_does_not_upload_or_consume_report_quota(
     simulator_api: SimulatorApi,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
-        wrong_parking_report_daily_limit=1
-    )
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(wrong_parking_report_daily_limit=1)
     upload_calls = 0
 
     async def upload(*_args, **_kwargs):
@@ -1136,12 +1102,8 @@ async def test_non_admin_cannot_resolve_reopen_or_delete_reports_outside_demo(
             role=AppRole.USER,
         )
 
-    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(
-        demo_mode=False
-    )
-    simulator_api.application.dependency_overrides[get_optional_current_user] = (
-        resident_user
-    )
+    simulator_api.application.dependency_overrides[get_settings] = lambda: Settings(demo_mode=False)
+    simulator_api.application.dependency_overrides[get_optional_current_user] = resident_user
 
     responses = [
         await simulator_api.client.patch(
@@ -1163,10 +1125,7 @@ async def test_non_admin_cannot_resolve_reopen_or_delete_reports_outside_demo(
     ]
 
     assert [response.status_code for response in responses] == [403, 403, 403]
-    assert all(
-        response.json()["error"]["code"] == "ADMIN_REQUIRED"
-        for response in responses
-    )
+    assert all(response.json()["error"]["code"] == "ADMIN_REQUIRED" for response in responses)
 
 
 @pytest.mark.asyncio
@@ -1306,9 +1265,7 @@ async def test_report_verification_outcome_controls_reward_settlement(
     assert report["reward_points"] == 20
     assert report["reward_status"] == "PENDING"
 
-    before = await simulator_api.client.get(
-        "/api/v1/rewards/users/USER-001/summary"
-    )
+    before = await simulator_api.client.get("/api/v1/rewards/users/USER-001/summary")
     assert before.json()["data"]["available_points"] == 0
     assert before.json()["data"]["pending_points"] == 20
 
@@ -1324,9 +1281,7 @@ async def test_report_verification_outcome_controls_reward_settlement(
     assert resolved.json()["data"]["verification_outcome"] == outcome
     assert resolved.json()["data"]["reward_status"] == expected_reward_status
 
-    after = await simulator_api.client.get(
-        "/api/v1/rewards/users/USER-001/summary"
-    )
+    after = await simulator_api.client.get("/api/v1/rewards/users/USER-001/summary")
     assert after.json()["data"]["available_points"] == expected_available
     assert after.json()["data"]["pending_points"] == 0
 
@@ -1343,9 +1298,7 @@ async def test_duplicate_report_has_no_reward_and_references_candidate(
     assert second["reward_points"] == 0
     assert second["reward_status"] is None
     assert second["duplicate_candidate_of_id"] == first["id"]
-    summary = await simulator_api.client.get(
-        "/api/v1/rewards/users/USER-001/summary"
-    )
+    summary = await simulator_api.client.get("/api/v1/rewards/users/USER-001/summary")
     assert summary.json()["data"]["pending_points"] == 20
 
 
@@ -1372,9 +1325,7 @@ async def test_hard_delete_cancels_pending_reward_but_keeps_safe_ledger(
 
     async with simulator_api.session_factory() as session:
         ledger = await session.scalar(
-            select(RewardTransaction).where(
-                RewardTransaction.source_reference == report_data["id"]
-            )
+            select(RewardTransaction).where(RewardTransaction.source_reference == report_data["id"])
         )
     assert ledger is not None
     assert ledger.status.value == "CANCELLED"
@@ -1388,10 +1339,7 @@ def test_admin_report_lifecycle_is_exposed_in_openapi():
     paths = openapi["paths"]
 
     assert "get" in paths["/api/v1/admin/reports"]
-    query_parameters = {
-        parameter["name"]
-        for parameter in paths["/api/v1/admin/reports"]["get"]["parameters"]
-    }
+    query_parameters = {parameter["name"] for parameter in paths["/api/v1/admin/reports"]["get"]["parameters"]}
     assert {"status", "slot_id", "limit"} <= query_parameters
     detail_operations = paths["/api/v1/admin/reports/{report_id}"]
     assert {"get", "patch", "delete"} <= detail_operations.keys()

@@ -56,10 +56,7 @@ class FakeAgent:
                         ],
                     ),
                     ToolMessage(
-                        content=(
-                            '{"ok": true, "data": {"recommendations": '
-                            '[{"slot_id": "F1-C03"}]}}'
-                        ),
+                        content=('{"ok": true, "data": {"recommendations": [{"slot_id": "F1-C03"}]}}'),
                         tool_call_id=call_id,
                         name="recommend_parking_slot",
                     ),
@@ -72,9 +69,7 @@ class FakeAgent:
             "intent": "RECOMMEND_SLOT" if "tìm" in user_text.lower() else "CHAT",
             "selected_slot": "F1-C03" if "chọn" in user_text.lower() else "",
             "current_location": "F1-CP3",
-            "recommended_slot_ids": (
-                ["F1-C03"] if "tìm" in user_text.lower() else []
-            ),
+            "recommended_slot_ids": (["F1-C03"] if "tìm" in user_text.lower() else []),
             "route": None,
         }
 
@@ -325,9 +320,7 @@ async def test_disabled_agent_returns_503_without_building_or_invoking_graph():
 @pytest.mark.asyncio
 async def test_configured_step_budget_is_passed_when_building_graph():
     built_agent = FakeAgent()
-    application = create_app(
-        Settings(_env_file=None, agent_max_steps=4, llm_api_key=None)
-    )
+    application = create_app(Settings(_env_file=None, agent_max_steps=4, llm_api_key=None))
     with patch("src.api.main.build_graph", return_value=built_agent) as build_graph:
         async with application.router.lifespan_context(application):
             assert application.state.agent is built_agent
