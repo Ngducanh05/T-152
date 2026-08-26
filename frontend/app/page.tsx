@@ -452,7 +452,7 @@ function FirstVehicleDialog({
   return (
     <div className="modal-backdrop" onClick={() => !pending && onClose()}>
       <section
-        className="modal"
+        className="modal first-vehicle-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="first-vehicle-title"
@@ -468,17 +468,23 @@ function FirstVehicleDialog({
           ×
         </button>
         <h2 id="first-vehicle-title">Thêm xe đầu tiên</h2>
-        <label>
-          Biển số
+        <label className="vehicle-plate-field">
+          Biển số xe
           <input
+            type="text"
+            name="plate-number"
+            className="vehicle-plate-input"
             value={plateNumber}
             onChange={(event) => setPlateNumber(event.target.value.toUpperCase())}
+            placeholder="Ví dụ: 59A1-123.45"
             maxLength={32}
             autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
             disabled={pending}
           />
         </label>
-        <label>
+        <label className="vehicle-charge-option">
           <input
             type="checkbox"
             checked={requiresCharging}
@@ -490,6 +496,7 @@ function FirstVehicleDialog({
         {error && <p className="form-error" role="alert">{error}</p>}
         <button
           type="button"
+          className="primary-button"
           onClick={() => void submit()}
           disabled={pending || plateNumber.trim().length < 2}
         >
