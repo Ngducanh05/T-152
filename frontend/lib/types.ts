@@ -163,6 +163,20 @@ export interface ConfirmLocationRequest {
   node_id: FloorScopedId;
 }
 
+export interface ScanLocationRequest {
+  user_id: EntityId;
+  qr_payload: string;
+}
+
+export interface ScannedLocation {
+  user_id: EntityId;
+  marker_id: string;
+  node_id: FloorScopedId;
+  floor_id: FloorId;
+  zone_id: ZoneId;
+  label: string;
+}
+
 export interface RecommendationRequest {
   user_id: EntityId;
   start_node_id: FloorScopedId;
@@ -274,6 +288,7 @@ interface ChatUiActionBase<TType extends string, TPayload> {
 }
 
 export type ChatUiAction =
+  | ChatUiActionBase<"SCAN_LOCATION_QR", Record<string, never>>
   | ChatUiActionBase<"SELECT_LOCATION", { node_id?: FloorScopedId }>
   | ChatUiActionBase<
       "SELECT_PARKING_PREFERENCE",

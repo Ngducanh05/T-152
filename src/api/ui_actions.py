@@ -10,7 +10,7 @@ from src.models.schemas import (
     RouteResult,
 )
 
-_CANONICAL_SLOT_ID = re.compile(r"^F1-[A-D](?:0[1-9]|10)$")
+_CANONICAL_SLOT_ID = re.compile(r"^F[1-3]-[A-D](?:0[1-9]|10)$")
 _MAX_UI_ACTIONS = 5
 
 
@@ -31,6 +31,8 @@ def _action(
     style: ChatUIActionStyle = ChatUIActionStyle.SECONDARY,
     requires_confirmation: bool = False,
 ) -> ChatUIAction:
+    if action_type is ChatUIActionType.SELECT_LOCATION:
+        style = ChatUIActionStyle.SECONDARY
     return ChatUIAction(
         id=action_id,
         type=action_type,
@@ -62,6 +64,12 @@ def derive_chat_ui_actions(
 
     if not current_location:
         return [
+            _action(
+                action_id="scan-location-qr",
+                action_type=ChatUIActionType.SCAN_LOCATION_QR,
+                label="Quét QR vị trí",
+                style=ChatUIActionStyle.PRIMARY,
+            ),
             _action(
                 action_id="select-location",
                 action_type=ChatUIActionType.SELECT_LOCATION,

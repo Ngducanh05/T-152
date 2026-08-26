@@ -11,6 +11,7 @@ import {
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { LocationPicker } from "@/components/location/LocationPicker";
+import { LocationQrScanner } from "@/components/location/LocationQrScanner";
 import { AdjacentSlotObservation } from "@/components/parking/AdjacentSlotObservation";
 import { RewardSummaryCard } from "@/components/rewards/RewardSummaryCard";
 import {
@@ -53,6 +54,7 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
 
   const showLocationPicker =
     manualLocationPicker || workflow.requestedPanel?.kind === "location";
+  const showQrScanner = workflow.requestedPanel?.kind === "qr-location";
   const showReportDialog =
     manualReportDialog ||
     workflow.requestedPanel?.kind === "wrong-parking-report";
@@ -82,6 +84,15 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
   function closeLocationPicker() {
     setManualLocationPicker(false);
     workflow.clearRequestedPanel();
+  }
+
+  function closeQrScanner() {
+    workflow.clearRequestedPanel();
+  }
+
+  function openManualLocationFromQr() {
+    workflow.clearRequestedPanel();
+    setManualLocationPicker(true);
   }
 
   function closeReportDialog() {
@@ -374,6 +385,15 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
           errorMessage={workflow.notice}
           onClose={closeLocationPicker}
           onConfirm={workflow.confirmLocation}
+        />
+      )}
+      {showQrScanner && (
+        <LocationQrScanner
+          pending={workflow.pending === "qr-location"}
+          errorMessage={workflow.notice}
+          onClose={closeQrScanner}
+          onScan={workflow.scanLocationQr}
+          onManualFallback={openManualLocationFromQr}
         />
       )}
       {showReportDialog && (

@@ -29,6 +29,7 @@ import type {
 
 export type WorkflowAction =
   | "location"
+  | "qr-location"
   | "recommend"
   | "reserve"
   | "reserve-and-route"
@@ -51,11 +52,13 @@ export interface WorkflowMessage {
 
 export type WorkflowPanelRequest =
   | { kind: "location" }
+  | { kind: "qr-location" }
   | { kind: "wrong-parking-report"; slotId: FloorScopedId | null };
 
 type WorkflowApi = Pick<
   ParkSmartApiClient,
   | "confirmLocation"
+  | "scanLocation"
   | "recommend"
   | "createReservation"
   | "cancelReservation"
@@ -74,6 +77,7 @@ export interface WorkflowData
     "slots" | "currentLocation" | "activeReservation" | "activeSession"
   > {
   refresh: () => Promise<ParkSmartSnapshot>;
+  applyCurrentLocation?: ParkSmartData["applyCurrentLocation"];
 }
 
 export interface ParkingWorkflow {
@@ -93,6 +97,7 @@ export interface ParkingWorkflow {
   selectCandidate: (slotId: FloorScopedId) => void;
   clearRoute: () => void;
   confirmLocation: (nodeId: FloorScopedId) => Promise<boolean>;
+  scanLocationQr: (qrPayload: string) => Promise<boolean>;
   requestRecommendations: (preferences: {
     chargingRequired: boolean;
     accessibleRequired: boolean;
@@ -138,6 +143,7 @@ const AUTHORITATIVE_REFRESH_TOOLS = new Set([
 ]);
 
 const KNOWN_UI_ACTION_TYPES = new Set([
+  "SCAN_LOCATION_QR",
   "SELECT_LOCATION",
   "SELECT_PARKING_PREFERENCE",
   "SELECT_SLOT",
@@ -150,6 +156,7 @@ const KNOWN_UI_ACTION_TYPES = new Set([
 ]);
 
 const REPEATABLE_UI_ACTION_TYPES = new Set<ChatUiAction["type"]>([
+  "SCAN_LOCATION_QR",
   "SELECT_LOCATION",
   "SELECT_PARKING_PREFERENCE",
   "SELECT_SLOT",
@@ -158,6 +165,14 @@ const REPEATABLE_UI_ACTION_TYPES = new Set<ChatUiAction["type"]>([
 ]);
 
 const WELCOME_ACTIONS: ChatUiAction[] = [
+  {
+    id: "welcome-scan-location",
+    type: "SCAN_LOCATION_QR",
+    label: "Quét QR vị trí",
+    payload: {},
+    style: "secondary",
+    requires_confirmation: false,
+  },
   {
     id: "welcome-find-parking",
     type: "SELECT_PARKING_PREFERENCE",
@@ -243,6 +258,8 @@ export function useParkingWorkflow(
   const reserveAndRouteInFlightRef = useRef(false);
   const adjacentObservationInFlightRef = useRef(false);
   const deferredPreferenceRef = useRef<ParkingPreference | null>(null);
+  const resumeAgentAfterLocationRef = useRef(false);
+  const scanInFlightRef = useRef(false);
   const messageSequenceRef = useRef(0);
 
   function nextMessageId(role: WorkflowMessage["role"]) {
@@ -320,12 +337,44 @@ export function useParkingWorkflow(
     setNotice(null);
   }
 
+  async function continueAfterLocationConfirmation(nodeId: FloorScopedId) {
+    setAgentCurrentLocationId(null);
+    setActiveRoute(null);
+    const deferredPreference = deferredPreferenceRef.current;
+    deferredPreferenceRef.current = null;
+    if (!deferredPreference) return false;
+    try {
+      const result = await api.recommend({
+        user_id: identity.userId,
+        start_node_id: nodeId,
+        floor_id: floorIdFromNode(nodeId),
+        charging_required: deferredPreference === "EV",
+        accessible_required: deferredPreference === "ACCESSIBLE",
+        near_elevator: deferredPreference === "NEAR_ELEVATOR",
+        limit: 3,
+      });
+      setCandidates(result.recommendations);
+      setRecommendedSlotIds(result.recommendations.map((candidate) => candidate.slot_id));
+      setSelectedSlotId(null);
+      appendAgentMessage(
+        result.recommendations.length > 0
+          ? "Tôi đã tìm thấy các ô phù hợp. Hãy chọn một ô."
+          : "Hiện chưa có ô phù hợp với nhu cầu này.",
+        slotSelectionActions(result.recommendations),
+      );
+    } catch (error) {
+      setNotice(vietnameseError(error));
+    }
+    return true;
+  }
+
   async function confirmLocation(nodeId: FloorScopedId) {
     setPending("location");
     setNotice(null);
     try {
-      await api.confirmLocation({ user_id: identity.userId, node_id: nodeId });
-      await data.refresh();
+      const location = await api.confirmLocation({ user_id: identity.userId, node_id: nodeId });
+      data.applyCurrentLocation?.(location);
+      await continueAfterLocationConfirmation(nodeId);
       setAgentCurrentLocationId(null);
       setActiveRoute(null);
       const deferredPreference = deferredPreferenceRef.current;
@@ -361,6 +410,41 @@ export function useParkingWorkflow(
       await handleMutationFailure(error);
       return false;
     } finally {
+      setPending(null);
+    }
+  }
+
+  async function scanLocationQr(qrPayload: string) {
+    if (scanInFlightRef.current) return false;
+    scanInFlightRef.current = true;
+    setPending("qr-location");
+    setNotice(null);
+    try {
+      const scanned = await api.scanLocation({
+        user_id: identity.userId,
+        qr_payload: qrPayload,
+      });
+      data.applyCurrentLocation?.({ user_id: scanned.user_id, node_id: scanned.node_id });
+      const continuedDeterministically = await continueAfterLocationConfirmation(
+        scanned.node_id,
+      );
+      const shouldResumeAgent =
+        !continuedDeterministically && resumeAgentAfterLocationRef.current;
+      resumeAgentAfterLocationRef.current = false;
+      setRequestedPanel(null);
+      setNotice(`Đã xác định: ${scanned.label}`);
+      if (shouldResumeAgent) {
+        await sendAgentMessageInternal(
+          "Vị trí đã được xác nhận bằng QR. Hãy tiếp tục yêu cầu trước đó.",
+          { appendUserMessage: false, currentLocationOverride: scanned.node_id },
+        );
+      }
+      return true;
+    } catch (error) {
+      setNotice(vietnameseError(error));
+      return false;
+    } finally {
+      scanInFlightRef.current = false;
       setPending(null);
     }
   }
@@ -660,7 +744,16 @@ export function useParkingWorkflow(
     }
   }
 
-  async function sendAgentMessage(message: string, appendUserMessage = true) {
+  async function sendAgentMessageInternal(
+    message: string,
+    {
+      appendUserMessage = true,
+      currentLocationOverride,
+    }: {
+      appendUserMessage?: boolean;
+      currentLocationOverride?: FloorScopedId;
+    } = {},
+  ) {
     if (!isAgentEnabled()) return null;
     const trimmed = message.trim();
     if (!trimmed || !threadId || chatInFlightRef.current) return null;
@@ -685,7 +778,7 @@ export function useParkingWorkflow(
         thread_id: threadId,
         user_id: identity.userId,
         vehicle_id: identity.vehicleId,
-        current_location: data.currentLocation?.node_id ?? null,
+        current_location: currentLocationOverride ?? data.currentLocation?.node_id ?? null,
         message: trimmed,
       });
       if (
@@ -749,7 +842,11 @@ export function useParkingWorkflow(
 
   async function retryAgentMessage() {
     if (!retryMessage) return;
-    await sendAgentMessage(retryMessage, false);
+    await sendAgentMessageInternal(retryMessage, { appendUserMessage: false });
+  }
+
+  async function sendAgentMessage(message: string) {
+    return sendAgentMessageInternal(message);
   }
 
   async function updateAdjacentSlotStatus(
@@ -828,6 +925,10 @@ export function useParkingWorkflow(
         return;
       }
       switch (attachedAction.type) {
+        case "SCAN_LOCATION_QR":
+          resumeAgentAfterLocationRef.current = sourceMessage.id !== "welcome";
+          setRequestedPanel({ kind: "qr-location" });
+          break;
         case "SELECT_LOCATION":
           setRequestedPanel({ kind: "location" });
           break;
@@ -835,7 +936,8 @@ export function useParkingWorkflow(
           const preference = attachedAction.payload.preference;
           if (!data.currentLocation?.node_id) {
             deferredPreferenceRef.current = preference;
-            setRequestedPanel({ kind: "location" });
+            resumeAgentAfterLocationRef.current = false;
+            setRequestedPanel({ kind: "qr-location" });
           } else {
             await requestRecommendations(preferencesFor(preference));
           }
@@ -904,6 +1006,7 @@ export function useParkingWorkflow(
     selectCandidate,
     clearRoute: () => setActiveRoute(null),
     confirmLocation,
+    scanLocationQr,
     requestRecommendations,
     reserveSelected,
     reserveSelectedAndRoute,

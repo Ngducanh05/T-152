@@ -47,6 +47,7 @@ export interface ParkSmartDataState {
 
 export interface ParkSmartData extends ParkSmartDataState {
   refresh: () => Promise<ParkSmartSnapshot>;
+  applyCurrentLocation: (location: Location) => void;
 }
 
 const initialState: ParkSmartDataState = {
@@ -244,5 +245,14 @@ export function useParkSmartData(
     };
   }, [api, refresh, userId]);
 
-  return { ...state, refresh };
+  const applyCurrentLocation = useCallback((location: Location) => {
+    setState((current) => ({
+      ...current,
+      currentLocation: location,
+      lastUpdatedAt: new Date().toISOString(),
+      error: null,
+    }));
+  }, []);
+
+  return { ...state, refresh, applyCurrentLocation };
 }

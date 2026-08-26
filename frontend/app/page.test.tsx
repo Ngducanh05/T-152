@@ -84,6 +84,7 @@ function workflowFixture(): ParkingWorkflow {
     selectCandidate: vi.fn(),
     clearRoute: vi.fn(),
     confirmLocation: vi.fn(async () => true),
+    scanLocationQr: vi.fn(async () => true),
     requestRecommendations: vi.fn(async () => undefined),
     reserveSelected: vi.fn(async () => undefined),
     reserveSelectedAndRoute: vi.fn(async () => undefined),

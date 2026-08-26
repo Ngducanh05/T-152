@@ -102,6 +102,7 @@ function fixture() {
   };
   const api = {
     confirmLocation: vi.fn(),
+    scanLocation: vi.fn(),
     recommend: vi.fn(async () => recommendation),
     createReservation: vi.fn(),
     cancelReservation: vi.fn(),
@@ -117,6 +118,46 @@ function fixture() {
 }
 
 describe("useParkingWorkflow", () => {
+  it("opens the QR scanner for its deterministic welcome action", async () => {
+    const { api, data } = fixture();
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    const action = result.current.messages[0].uiActions.find(
+      (candidate) => candidate.type === "SCAN_LOCATION_QR",
+    );
+    expect(action).toBeDefined();
+    await act(async () => {
+      await result.current.executeUiAction("welcome", action!);
+    });
+    expect(result.current.requestedPanel).toEqual({ kind: "qr-location" });
+  });
+
+  it("uses one QR API call and direct recommendations without agent chat", async () => {
+    const { api, data } = fixture();
+    data.currentLocation = null;
+    const applyCurrentLocation = vi.fn();
+    data.applyCurrentLocation = applyCurrentLocation;
+    api.scanLocation.mockResolvedValue({
+      user_id: "USER-001",
+      marker_id: "PSLOC-F3-D-W",
+      node_id: "F3-D-W",
+      floor_id: "F3",
+      zone_id: "D",
+      label: "Tầng 3 · Khu D · lối Tây",
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    const preference = result.current.messages[0].uiActions.find(
+      (candidate) => candidate.type === "SELECT_PARKING_PREFERENCE",
+    );
+    await act(async () => {
+      await result.current.executeUiAction("welcome", preference!);
+      await result.current.scanLocationQr("parksmart:location:v1:PSLOC-F3-D-W");
+    });
+    expect(api.scanLocation).toHaveBeenCalledOnce();
+    expect(applyCurrentLocation).toHaveBeenCalledWith({ user_id: "USER-001", node_id: "F3-D-W" });
+    expect(api.recommend).toHaveBeenCalledWith(expect.objectContaining({ start_node_id: "F3-D-W", floor_id: "F3" }));
+    expect(api.chat).not.toHaveBeenCalled();
+  });
+
   it("confirms a slot location without reserving it or creating a parking session", async () => {
     const { api, data, refresh, slot } = fixture();
     api.confirmLocation.mockResolvedValue({
@@ -134,7 +175,7 @@ describe("useParkingWorkflow", () => {
       user_id: "USER-001",
       node_id: "F1-D01",
     });
-    expect(refresh).toHaveBeenCalledOnce();
+    expect(refresh).not.toHaveBeenCalled();
     expect(api.createReservation).not.toHaveBeenCalled();
     expect(api.confirmParking).not.toHaveBeenCalled();
     expect(api.getActiveSession).not.toHaveBeenCalled();

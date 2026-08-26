@@ -97,6 +97,40 @@ def _reservation_payload(
 
 
 @pytest.mark.asyncio
+async def test_scan_location_resolves_trusted_marker_and_rejects_invalid_input(
+    phase4_api: Phase4Api,
+):
+    client = phase4_api.client
+    success = await client.post(
+        "/api/v1/locations/scan",
+        json={"user_id": "USER-001", "qr_payload": "parksmart:location:v1:PSLOC-F3-D-W"},
+    )
+    assert success.status_code == 200
+    assert success.json()["data"]["node_id"] == "F3-D-W"
+    assert success.json()["data"]["marker_id"] == "PSLOC-F3-D-W"
+
+    malformed = await client.post(
+        "/api/v1/locations/scan",
+        json={"user_id": "USER-001", "qr_payload": "F3-D-W"},
+    )
+    assert malformed.status_code == 422
+    assert malformed.json()["error"]["code"] == "INVALID_LOCATION_QR"
+
+    unknown = await client.post(
+        "/api/v1/locations/scan",
+        json={"user_id": "USER-001", "qr_payload": "parksmart:location:v1:PSLOC-F3-Z-W"},
+    )
+    assert unknown.status_code == 404
+    assert unknown.json()["error"]["code"] == "LOCATION_MARKER_NOT_FOUND"
+
+    extra_field = await client.post(
+        "/api/v1/locations/scan",
+        json={"user_id": "USER-001", "qr_payload": "F3-D-W", "node_id": "F3-D-W"},
+    )
+    assert extra_field.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_phase4_end_to_end_flow(phase4_api: Phase4Api):
     client = phase4_api.client
     entrance = await client.post(
