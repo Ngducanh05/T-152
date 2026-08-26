@@ -1,10 +1,11 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -25,11 +26,15 @@ from src.models.schemas import (
     ParkingEventType,
     ParkingSessionStatus,
     ReservationStatus,
+    RewardSourceType,
+    RewardTransactionStatus,
+    RewardTransactionType,
     RouteMode,
+    SlotObservationStatus,
     SlotStatus,
     WrongParkingReason,
     WrongParkingReportStatus,
-    WrongParkingReviewStatus,
+    WrongParkingReportVerificationOutcome,
 )
 
 
@@ -47,7 +52,7 @@ class AppRoleEnum(StrEnum):
 
 
 class Profile(Base):
-    """Profile linked one-to-one with a Supabase Auth user."""
+    """Existing profile linked one-to-one with a Supabase Auth user."""
 
     __tablename__ = "profiles"
     __table_args__ = (
@@ -64,13 +69,10 @@ class Profile(Base):
         index=True,
     )
     parking_user_id: Mapped[str | None] = mapped_column(
-        ForeignKey("parking_users.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("parking_users.id", ondelete="SET NULL"), nullable=True
     )
     default_vehicle_id: Mapped[str | None] = mapped_column(
-        ForeignKey("vehicles.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
+        ForeignKey("vehicles.id", ondelete="SET NULL"), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -105,6 +107,72 @@ class ParkingUser(Base):
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     current_node_id: Mapped[str | None] = mapped_column(
         ForeignKey("map_nodes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+
+class AgentDailyUsage(Base):
+    __tablename__ = "agent_daily_usage"
+    __table_args__ = (
+        CheckConstraint(
+            "request_count >= 0",
+            name="ck_agent_daily_usage_request_count_nonnegative",
+        ),
+        Index("ix_agent_daily_usage_usage_date", "usage_date"),
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("parking_users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    usage_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    request_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class ReportDailyUsage(Base):
+    __tablename__ = "report_daily_usage"
+    __table_args__ = (
+        CheckConstraint(
+            "submission_count >= 0",
+            name="ck_report_daily_usage_submission_count_nonnegative",
+        ),
+        Index("ix_report_daily_usage_usage_date", "usage_date"),
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("parking_users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    usage_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    submission_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -315,6 +383,129 @@ class ParkingEvent(Base):
     )
 
 
+class SlotObservation(Base):
+    __tablename__ = "slot_observations"
+    __table_args__ = (
+        CheckConstraint("reward_points >= 0", name="ck_slot_observations_reward_nonnegative"),
+        CheckConstraint("version >= 0", name="ck_slot_observations_version_nonnegative"),
+        CheckConstraint(
+            "observed_slot_version >= 0",
+            name="ck_slot_observations_slot_version_nonnegative",
+        ),
+        CheckConstraint(
+            "expires_at > created_at",
+            name="ck_slot_observations_expiry_after_creation",
+        ),
+        UniqueConstraint(
+            "observer_session_id",
+            "slot_id",
+            name="uq_slot_observations_session_slot",
+        ),
+        Index(
+            "ix_slot_observations_verification_created",
+            "verification_status",
+            "created_at",
+        ),
+        Index("ix_slot_observations_slot_created", "slot_id", "created_at"),
+        Index("ix_slot_observations_user_created", "observer_user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    observer_user_id: Mapped[str] = mapped_column(
+        ForeignKey("parking_users.id", ondelete="RESTRICT"), nullable=False
+    )
+    observer_session_id: Mapped[str] = mapped_column(
+        ForeignKey("parking_sessions.id", ondelete="RESTRICT"), nullable=False
+    )
+    slot_id: Mapped[str] = mapped_column(
+        ForeignKey("parking_slots.id", ondelete="RESTRICT"), nullable=False
+    )
+    observed_status: Mapped[SlotStatus] = mapped_column(
+        Enum(SlotStatus, name="slot_status_enum", values_callable=_enum_values),
+        nullable=False,
+    )
+    verification_status: Mapped[SlotObservationStatus] = mapped_column(
+        Enum(
+            SlotObservationStatus,
+            name="slot_observation_status_enum",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=SlotObservationStatus.PENDING,
+        server_default=text("'PENDING'"),
+    )
+    reward_points: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    observed_slot_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+
+
+class RewardTransaction(Base):
+    __tablename__ = "reward_transactions"
+    __table_args__ = (
+        CheckConstraint("points >= 0", name="ck_reward_transactions_points_nonnegative"),
+        UniqueConstraint(
+            "source_type",
+            "source_reference",
+            name="uq_reward_transactions_source",
+        ),
+        Index(
+            "ix_reward_transactions_user_status_created",
+            "user_id",
+            "status",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("parking_users.id", ondelete="RESTRICT"), nullable=False
+    )
+    source_type: Mapped[RewardSourceType] = mapped_column(
+        Enum(RewardSourceType, name="reward_source_type_enum", values_callable=_enum_values),
+        nullable=False,
+    )
+    source_reference: Mapped[str] = mapped_column(String(64), nullable=False)
+    transaction_type: Mapped[RewardTransactionType] = mapped_column(
+        Enum(
+            RewardTransactionType,
+            name="reward_transaction_type_enum",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=RewardTransactionType.CONTRIBUTION_REWARD,
+        server_default=text("'CONTRIBUTION_REWARD'"),
+    )
+    status: Mapped[RewardTransactionStatus] = mapped_column(
+        Enum(
+            RewardTransactionStatus,
+            name="reward_transaction_status_enum",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=RewardTransactionStatus.PENDING,
+        server_default=text("'PENDING'"),
+    )
+    points: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    transaction_metadata: Mapped[dict[str, object]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+
+
 class WrongParkingReport(Base):
     __tablename__ = "wrong_parking_reports"
     __table_args__ = (
@@ -322,14 +513,13 @@ class WrongParkingReport(Base):
             "version >= 0",
             name="ck_wrong_parking_reports_version_nonnegative",
         ),
+        CheckConstraint(
+            "reward_points >= 0",
+            name="ck_wrong_parking_reports_reward_nonnegative",
+        ),
         Index("ix_wrong_parking_reports_created", "created_at"),
         Index("ix_wrong_parking_reports_slot_created", "slot_id", "created_at"),
         Index("ix_wrong_parking_reports_status_created", "status", "created_at"),
-        Index(
-            "ix_wrong_parking_reports_review_status_created",
-            "review_status",
-            "created_at",
-        ),
         Index(
             "ix_wrong_parking_reports_slot_status_created",
             "slot_id",
@@ -365,16 +555,6 @@ class WrongParkingReport(Base):
         default=WrongParkingReportStatus.OPEN,
         server_default=text("'OPEN'"),
     )
-    review_status: Mapped[WrongParkingReviewStatus] = mapped_column(
-        Enum(
-            WrongParkingReviewStatus,
-            name="wrong_parking_review_status_enum",
-            values_callable=_enum_values,
-        ),
-        nullable=False,
-        default=WrongParkingReviewStatus.PENDING,
-        server_default=text("'PENDING'"),
-    )
     observed_plate_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     evidence_storage_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -392,13 +572,26 @@ class WrongParkingReport(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    reviewed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    reviewed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    review_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     resolved_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolution_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    verification_outcome: Mapped[WrongParkingReportVerificationOutcome] = mapped_column(
+        Enum(
+            WrongParkingReportVerificationOutcome,
+            name="wrong_parking_report_verification_outcome_enum",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=WrongParkingReportVerificationOutcome.PENDING,
+        server_default=text("'PENDING'"),
+    )
+    reward_points: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    duplicate_candidate_of_id: Mapped[str | None] = mapped_column(
+        ForeignKey("wrong_parking_reports.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
@@ -406,6 +599,7 @@ class WrongParkingReport(Base):
 
 __all__ = [
     "ActorType",
+    "AgentDailyUsage",
     "AppRoleEnum",
     "Base",
     "MapEdge",
@@ -418,12 +612,19 @@ __all__ = [
     "ParkingSlot",
     "ParkingUser",
     "Profile",
+    "ReportDailyUsage",
     "ReservationStatus",
+    "RewardSourceType",
+    "RewardTransaction",
+    "RewardTransactionStatus",
+    "RewardTransactionType",
     "RouteMode",
+    "SlotObservation",
+    "SlotObservationStatus",
     "SlotStatus",
     "Vehicle",
     "WrongParkingReason",
     "WrongParkingReport",
     "WrongParkingReportStatus",
-    "WrongParkingReviewStatus",
+    "WrongParkingReportVerificationOutcome",
 ]

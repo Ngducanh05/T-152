@@ -1,17 +1,22 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo, useState } from "react";
 
 import {
   formatParkingLocation,
   formatSlotStatus,
+  formatVerificationOutcome,
   formatWrongParkingReason,
   formatWrongParkingReportStatus,
-  formatWrongParkingReviewStatus,
 } from "@/lib/parking-display";
-import type { ParkingSlot, WrongParkingReport } from "@/lib/types";
+import type {
+  ParkingSlot,
+  WrongParkingReport,
+  WrongParkingReportVerificationOutcome,
+} from "@/lib/types";
 
-export type ReportMutationAction = "resolve" | "reopen" | "delete" | "confirm" | "reject";
+export type ReportMutationAction = "resolve" | "reopen" | "delete";
 export interface PendingReportMutation {
   reportId: string;
   action: ReportMutationAction;
@@ -25,11 +30,13 @@ interface ReportDetailDrawerProps {
   pendingMutation: PendingReportMutation | null;
   onClose: () => void;
   onRefresh: () => Promise<void>;
-  onResolve: (report: WrongParkingReport, resolutionNote: string | null) => Promise<boolean>;
+  onResolve: (
+    report: WrongParkingReport,
+    outcome: Exclude<WrongParkingReportVerificationOutcome, "PENDING">,
+    resolutionNote: string | null,
+  ) => Promise<boolean>;
   onReopen: (report: WrongParkingReport) => Promise<boolean>;
   onDelete: (report: WrongParkingReport) => Promise<boolean>;
-  onConfirm: (report: WrongParkingReport, reviewNote: string | null) => Promise<boolean>;
-  onReject: (report: WrongParkingReport, reviewNote: string | null) => Promise<boolean>;
   onLoadEvidence: (report: WrongParkingReport) => Promise<string | null>;
 }
 
@@ -51,14 +58,16 @@ export function ReportDetailDrawer({
   onResolve,
   onReopen,
   onDelete,
-  onConfirm,
-  onReject,
   onLoadEvidence,
 }: ReportDetailDrawerProps) {
-  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [resolutionNotes, setResolutionNotes] = useState<Record<string, string>>({});
+  const [resolutionOutcomes, setResolutionOutcomes] = useState<
+    Record<string, Exclude<WrongParkingReportVerificationOutcome, "PENDING"> | "">
+  >({});
   const [deleteCandidate, setDeleteCandidate] =
     useState<WrongParkingReport | null>(null);
   const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
+  const [loadingEvidenceId, setLoadingEvidenceId] = useState<string | null>(null);
   const orderedReports = useMemo(
     () =>
       [...reports].toSorted(
@@ -76,9 +85,15 @@ export function ReportDetailDrawer({
   }
 
   async function loadEvidence(report: WrongParkingReport) {
-    const url = await onLoadEvidence(report);
-    if (url) {
-      setEvidenceUrls((current) => ({ ...current, [report.id]: url }));
+    if (loadingEvidenceId) return;
+    setLoadingEvidenceId(report.id);
+    try {
+      const signedUrl = await onLoadEvidence(report);
+      if (signedUrl) {
+        setEvidenceUrls((current) => ({ ...current, [report.id]: signedUrl }));
+      }
+    } finally {
+      setLoadingEvidenceId(null);
     }
   }
 
@@ -93,40 +108,41 @@ export function ReportDetailDrawer({
       >
         <header>
           <div>
-            <p className="eyebrow green">CHI TIET PHAN ANH</p>
-            <h2 id="report-drawer-title">{formatParkingLocation(slot?.id)}</h2>
+            <p className="eyebrow green">CHI TIẾT PHẢN ÁNH</p>
+            <h2 id="report-drawer-title">
+              {formatParkingLocation(slot?.id)}
+            </h2>
             <p>
-              Trang thai o thuc te: <b>{slot ? formatSlotStatus(slot.status) : "Khong xac dinh"}</b>
+              Trạng thái ô thực tế: <b>{slot ? formatSlotStatus(slot.status) : "Không xác định"}</b>
             </p>
           </div>
           <button
             type="button"
             className="modal-close"
-            aria-label="Dong chi tiet bao cao"
+            aria-label="Đóng chi tiết báo cáo"
             onClick={onClose}
             disabled={anyMutationPending}
           >
-            x
+            ×
           </button>
         </header>
 
         <div className="drawer-refresh-row">
-          <span>{orderedReports.length} bao cao tai o nay</span>
+          <span>{orderedReports.length} báo cáo tại ô này</span>
           <button type="button" onClick={() => void onRefresh()} disabled={loading || anyMutationPending}>
-            {loading ? "Dang tai..." : "Tai lai"}
+            {loading ? "Đang tải…" : "Tải lại"}
           </button>
         </div>
 
         {error && <div className="report-drawer-error" role="alert">{error}</div>}
-        {loading && <p className="report-drawer-empty" role="status">Dang tai chi tiet bao cao...</p>}
+        {loading && <p className="report-drawer-empty" role="status">Đang tải chi tiết báo cáo…</p>}
         {!loading && orderedReports.length === 0 && (
-          <p className="report-drawer-empty">Khong con bao cao tai o nay.</p>
+          <p className="report-drawer-empty">Không còn báo cáo tại ô này.</p>
         )}
 
         <div className="report-detail-list">
           {orderedReports.map((report) => {
             const pending = pendingMutation?.reportId === report.id;
-            const note = notes[report.id]?.trim() || null;
             return (
               <article key={report.id} data-report-id={report.id}>
                 <div className="report-detail-heading">
@@ -139,86 +155,94 @@ export function ReportDetailDrawer({
                   </span>
                 </div>
                 <time dateTime={report.created_at}>{formatReportTime(report.created_at)}</time>
-                <p><strong>Reporter:</strong> {report.reporter_user_id}</p>
-                <p><strong>Review:</strong> {formatWrongParkingReviewStatus(report.review_status)}</p>
-                <p><strong>Operational:</strong> {formatWrongParkingReportStatus(report.status)}</p>
                 {report.observed_plate_number && (
-                  <p><strong>Bien so:</strong> {report.observed_plate_number}</p>
+                  <p><strong>Biển số:</strong> {report.observed_plate_number}</p>
                 )}
                 {report.description && <p>{report.description}</p>}
-                {report.review_note && (
-                  <p className="resolution-note"><strong>Ghi chu review:</strong> {report.review_note}</p>
-                )}
-                {report.resolution_note && (
-                  <p className="resolution-note"><strong>Ghi chu xu ly:</strong> {report.resolution_note}</p>
-                )}
-
                 {evidenceUrls[report.id] ? (
-                  <img src={evidenceUrls[report.id]} alt={`Evidence for ${report.id}`} />
+                  <Image
+                    className="report-evidence-image"
+                    src={evidenceUrls[report.id]}
+                    alt={`Ảnh hiện trường của report ${report.id}`}
+                    width={720}
+                    height={480}
+                    unoptimized
+                  />
                 ) : report.evidence_storage_path ? (
                   <button
                     type="button"
                     className="secondary-button"
-                    disabled={anyMutationPending}
+                    disabled={loadingEvidenceId !== null}
                     onClick={() => void loadEvidence(report)}
                   >
-                    Xem anh
+                    {loadingEvidenceId === report.id ? "Đang tải ảnh…" : "Xem ảnh hiện trường"}
                   </button>
                 ) : (
-                  <p>Report cu khong co anh.</p>
+                  <p><strong>Ảnh hiện trường:</strong> Không có ảnh đính kèm</p>
+                )}
+                {report.resolution_note && (
+                  <p className="resolution-note"><strong>Ghi chú xử lý:</strong> {report.resolution_note}</p>
+                )}
+                <p><strong>Kết quả xác minh:</strong> {formatVerificationOutcome(report.verification_outcome)}</p>
+                <p><strong>Điểm:</strong> {report.reward_points} · {report.reward_status ?? "Không có reward"}</p>
+                {report.duplicate_candidate_of_id && (
+                  <p><strong>Report tương tự:</strong> <code>{report.duplicate_candidate_of_id}</code></p>
                 )}
 
                 {report.status === "OPEN" && (
-                  <label>
-                    Ghi chu (khong bat buoc)
-                    <textarea
-                      value={notes[report.id] ?? ""}
-                      maxLength={500}
-                      disabled={anyMutationPending}
-                      onChange={(event) =>
-                        setNotes((current) => ({
-                          ...current,
-                          [report.id]: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
+                  <>
+                    <label>
+                      Kết quả xác minh (bắt buộc)
+                      <select
+                        value={resolutionOutcomes[report.id] ?? ""}
+                        disabled={anyMutationPending}
+                        onChange={(event) =>
+                          setResolutionOutcomes((current) => ({
+                            ...current,
+                            [report.id]: event.target.value as Exclude<WrongParkingReportVerificationOutcome, "PENDING">,
+                          }))
+                        }
+                      >
+                        <option value="">Chọn kết quả</option>
+                        <option value="CONFIRMED">Xác nhận hợp lệ</option>
+                        <option value="REJECTED">Từ chối</option>
+                        <option value="DUPLICATE">Trùng report</option>
+                        <option value="UNVERIFIABLE">Không thể xác minh</option>
+                      </select>
+                    </label>
+                    <label>
+                      Ghi chú xử lý (không bắt buộc)
+                      <textarea
+                        value={resolutionNotes[report.id] ?? ""}
+                        maxLength={500}
+                        disabled={anyMutationPending}
+                        onChange={(event) =>
+                          setResolutionNotes((current) => ({
+                            ...current,
+                            [report.id]: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  </>
                 )}
 
                 <div className="report-detail-actions">
-                  {report.status === "OPEN" && report.review_status !== "CONFIRMED" && (
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      disabled={anyMutationPending}
-                      onClick={() => void onConfirm(report, note)}
-                    >
-                      {pending && pendingMutation?.action === "confirm"
-                        ? "Dang xac nhan..."
-                        : "Confirm report"}
-                    </button>
-                  )}
-                  {report.status === "OPEN" && (
-                    <button
-                      type="button"
-                      className="danger-button"
-                      disabled={anyMutationPending}
-                      onClick={() => void onReject(report, note)}
-                    >
-                      {pending && pendingMutation?.action === "reject"
-                        ? "Dang tu choi..."
-                        : "Reject report"}
-                    </button>
-                  )}
                   {report.status === "OPEN" ? (
                     <button
                       type="button"
                       className="primary-button"
-                      disabled={anyMutationPending}
-                      onClick={() => void onResolve(report, note)}
+                      disabled={anyMutationPending || !resolutionOutcomes[report.id]}
+                      onClick={() =>
+                        void onResolve(
+                          report,
+                          resolutionOutcomes[report.id] as Exclude<WrongParkingReportVerificationOutcome, "PENDING">,
+                          resolutionNotes[report.id]?.trim() || null,
+                        )
+                      }
                     >
                       {pending && pendingMutation?.action === "resolve"
-                        ? "Dang resolve..."
+                        ? "Đang resolve…"
                         : "Resolve report"}
                     </button>
                   ) : (
@@ -229,7 +253,7 @@ export function ReportDetailDrawer({
                       onClick={() => void onReopen(report)}
                     >
                       {pending && pendingMutation?.action === "reopen"
-                        ? "Dang mo lai..."
+                        ? "Đang mở lại…"
                         : "Reopen report"}
                     </button>
                   )}
@@ -240,8 +264,8 @@ export function ReportDetailDrawer({
                     onClick={() => setDeleteCandidate(report)}
                   >
                     {pending && pendingMutation?.action === "delete"
-                      ? "Dang xoa..."
-                      : "Xoa vinh vien"}
+                      ? "Đang xóa…"
+                      : "Xóa vĩnh viễn"}
                   </button>
                 </div>
               </article>
@@ -258,13 +282,13 @@ export function ReportDetailDrawer({
               aria-labelledby="delete-report-title"
               aria-describedby="delete-report-description"
             >
-              <h3 id="delete-report-title">Xoa vinh vien report?</h3>
+              <h3 id="delete-report-title">Xóa vĩnh viễn report?</h3>
               <p id="delete-report-description">
-                Thao tac nay xoa vinh vien report khoi database va co gang xoa anh bang chung.
+                Thao tác này xóa vĩnh viễn report khỏi database và không thể hoàn tác.
               </p>
               <dl>
                 <div><dt>Report ID</dt><dd>{deleteCandidate.id}</dd></div>
-                <div><dt>O do</dt><dd>{formatParkingLocation(deleteCandidate.slot_id)}</dd></div>
+                <div><dt>Ô đỗ</dt><dd>{formatParkingLocation(deleteCandidate.slot_id)}</dd></div>
               </dl>
               <div>
                 <button
@@ -273,7 +297,7 @@ export function ReportDetailDrawer({
                   disabled={anyMutationPending}
                   onClick={() => setDeleteCandidate(null)}
                 >
-                  Huy
+                  Hủy
                 </button>
                 <button
                   type="button"
@@ -281,7 +305,7 @@ export function ReportDetailDrawer({
                   disabled={anyMutationPending}
                   onClick={() => void confirmDelete()}
                 >
-                  {pendingMutation?.action === "delete" ? "Dang xoa..." : "Xac nhan xoa vinh vien"}
+                  {pendingMutation?.action === "delete" ? "Đang xóa…" : "Xác nhận xóa vĩnh viễn"}
                 </button>
               </div>
             </section>

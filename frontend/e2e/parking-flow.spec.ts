@@ -5,6 +5,7 @@ import {
   confirmLocation,
   requestCandidate,
   resetDemo,
+  slotButton,
   waitForRouteResponse,
 } from "./helpers";
 
@@ -66,26 +67,61 @@ test("completes the tap-first parking path without exposing an operational map",
   });
   await expect(priorityDock).toHaveCSS("position", "sticky");
 
-  const occupiedObservation = priorityDock
-    .getByRole("button", { name: /Báo F1-[A-D]\d{2} có xe đỗ/ })
-    .first();
-  const observedSlotId = (await occupiedObservation.getAttribute("aria-label"))?.match(
-    /F1-[A-D]\d{2}/,
-  )?.[0];
-  expect(observedSlotId).toBeTruthy();
+  await priorityDock.getByRole("button", { name: "Giúp kiểm tra ngay" }).click();
+  const question = priorityDock.getByRole("heading", {
+    name: /Bạn nhìn giúp ô [A-D]\d{2}/,
+  });
+  const shortSlotId = (await question.textContent())?.match(/ô ([A-D]\d{2})/)?.[1];
+  expect(shortSlotId).toBeTruthy();
+  const observedSlotId = `F1-${shortSlotId}`;
+  const slotBeforeResponse = await page.request.get(
+    `${apiUrl}/parking/slots/${observedSlotId}`,
+  );
+  const slotBefore = (await slotBeforeResponse.json()) as {
+    data: { status: "AVAILABLE" | "OCCUPIED" };
+  };
+  const observedStatus = slotBefore.data.status === "AVAILABLE" ? "OCCUPIED" : "AVAILABLE";
+  const answerButton = priorityDock.getByRole("button", {
+    name: observedStatus === "OCCUPIED" ? "Đã có xe" : "Ô đang trống",
+  });
   const observationResponse = page.waitForResponse(
     (response) =>
       response.url().includes(`/parking/slots/${observedSlotId}/observation`) &&
       response.request().method() === "POST",
   );
-  await occupiedObservation.click();
-  expect((await observationResponse).status()).toBe(200);
-  const observedSlot = await page.request.get(
+  await answerButton.click();
+  const createdResponse = await observationResponse;
+  expect(createdResponse.status()).toBe(200);
+  const created = (await createdResponse.json()) as {
+    data: { id: string; reward_points: number; verification_status: string };
+  };
+  expect(created.data.verification_status).toBe("PENDING");
+  const observedSlotBeforeVerify = await page.request.get(
     `${apiUrl}/parking/slots/${observedSlotId}`,
   );
-  expect(((await observedSlot.json()) as { data: { status: string } }).data.status).toBe(
-    "OCCUPIED",
+  expect(
+    ((await observedSlotBeforeVerify.json()) as { data: { status: string } }).data.status,
+  ).toBe(slotBefore.data.status);
+
+  await page.goto("/admin");
+  const contribution = page.locator(
+    `.observation-row[data-observation-id="${created.data.id}"]`,
   );
+  await expect(contribution).toBeVisible();
+  await contribution.click();
+  await expect(slotButton(page, observedSlotId)).toHaveClass(/is-selected/);
+  await page.getByRole("button", { name: "Xác minh", exact: true }).click();
+  await expect(contribution).toHaveCount(0);
+  const observedSlotAfterVerify = await page.request.get(
+    `${apiUrl}/parking/slots/${observedSlotId}`,
+  );
+  expect(
+    ((await observedSlotAfterVerify.json()) as { data: { status: string } }).data.status,
+  ).toBe(observedStatus);
+  const summary = await page.request.get(`${apiUrl}/rewards/users/USER-001/summary`);
+  expect(
+    ((await summary.json()) as { data: { available_points: number } }).data.available_points,
+  ).toBeGreaterThanOrEqual(created.data.reward_points);
 });
 
 test("does not request a route when the selected slot becomes occupied", async ({

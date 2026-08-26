@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
@@ -187,9 +188,9 @@ export function LoginForm({
             ? "Đăng nhập"
             : "Đăng ký"}
       </button>
-
       <p className={styles.securityNote}>
-        Vai trò do backend ParkSmart quyết định; màn hình này không cho phép chọn quyền.
+        Vai trò do backend ParkSmart quyết định; màn hình này không cho phép chọn quyền.{" "}
+        <Link href="/privacy">Quyền riêng tư</Link>
       </p>
     </form>
   );

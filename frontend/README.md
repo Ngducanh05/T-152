@@ -20,7 +20,14 @@ Set-Location ..
 
 ```dotenv
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
+NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<public key>
+NEXT_PUBLIC_DEMO_MODE=false
 ```
+
+Supabase Auth dùng `sessionStorage` và storage key riêng cho từng tab. Nhờ đó một tab
+có thể đăng nhập user và tab khác đăng nhập admin mà không ghi đè session. Đóng tab sẽ
+kết thúc session của tab đó; hãy mở tab mới thay vì duplicate tab đã đăng nhập.
 
 Sau khi PostgreSQL, migration, seed và FastAPI đã sẵn sàng theo README gốc, mở
 một PowerShell riêng:
@@ -31,6 +38,11 @@ npm run dev
 ```
 
 Mở `http://localhost:3000`.
+
+Report xe đỗ sai dùng luồng xác nhận ba bước: chọn ô/lý do, bổ sung biển số-mô tả-ảnh
+tùy chọn, rồi bấm nút gửi riêng. Popup có vùng cuộn nội bộ và submit dock sticky trên
+màn hình thấp. Dashboard `/admin` không hiển thị simulator controls; click slot mở panel
+chi tiết và nút **Đóng ×** bỏ cả panel lẫn highlight.
 
 ## Quality gates
 

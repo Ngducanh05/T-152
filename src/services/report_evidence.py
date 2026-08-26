@@ -26,18 +26,52 @@ def _storage_error(code: str, message: str, status_code: int = 422) -> HTTPExcep
 def validate_report_image(
     *,
     content_type: str | None,
-    size_bytes: int,
+    data: bytes,
     max_bytes: int,
 ) -> str:
     normalized_type = (content_type or "").split(";")[0].strip().lower()
     if normalized_type not in ALLOWED_IMAGE_TYPES:
-        raise _storage_error("REPORT_EVIDENCE_INVALID", "Report evidence must be an image.")
-    if size_bytes <= 0 or size_bytes > max_bytes:
         raise _storage_error(
             "REPORT_EVIDENCE_INVALID",
-            f"Report evidence must be between 1 byte and {max_bytes} bytes.",
+            "Report evidence must be a supported image.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    if len(data) > max_bytes:
+        raise _storage_error(
+            "REPORT_EVIDENCE_TOO_LARGE",
+            f"Report evidence must not exceed {max_bytes} bytes.",
+            status.HTTP_413_CONTENT_TOO_LARGE,
+        )
+    if not data or not _signature_matches(normalized_type, data):
+        raise _storage_error(
+            "REPORT_EVIDENCE_INVALID",
+            "Report evidence content does not match its declared image type.",
+            status.HTTP_400_BAD_REQUEST,
         )
     return normalized_type
+
+
+def _signature_matches(content_type: str, data: bytes) -> bool:
+    if content_type == "image/jpeg":
+        return data.startswith(b"\xff\xd8\xff")
+    if content_type == "image/png":
+        return data.startswith(b"\x89PNG\r\n\x1a\n")
+    if content_type == "image/webp":
+        return len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+    if content_type not in {"image/heic", "image/heif"} or len(data) < 16:
+        return False
+
+    box_size = int.from_bytes(data[:4], "big")
+    if data[4:8] != b"ftyp" or box_size < 16 or box_size > len(data):
+        return False
+    brands = {data[8:12]}
+    brands.update(data[offset : offset + 4] for offset in range(16, box_size, 4))
+    expected_brands = (
+        {b"heic", b"heix", b"hevc", b"hevx"}
+        if content_type == "image/heic"
+        else {b"mif1", b"msf1", b"heif"}
+    )
+    return bool(brands & expected_brands)
 
 
 class ReportEvidenceStorage:
@@ -72,7 +106,7 @@ class ReportEvidenceStorage:
     ) -> StoredReportEvidence:
         content_type = validate_report_image(
             content_type=content_type,
-            size_bytes=len(data),
+            data=data,
             max_bytes=self.settings.report_evidence_max_bytes,
         )
         extension = {
@@ -180,7 +214,8 @@ class ReportEvidenceStorage:
         assert service_key is not None
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.delete(
+                response = await client.request(
+                    "DELETE",
                     f"{base_url}/storage/v1/object/{self.settings.supabase_report_evidence_bucket}",
                     headers={
                         "apikey": service_key,

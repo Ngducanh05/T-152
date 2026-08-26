@@ -9,7 +9,7 @@ ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 ## Shared conventions
 
 - JSON field names use snake_case exactly as defined by the Pydantic models. No camelCase aliases are provided.
-- Floor-scoped identifiers start with F1-, for example F1-A01, F1-CP2, and F1-ELEVATOR. The only MVP floor_id is F1.
+- Floor-scoped identifiers start with F1-, F2-, or F3-, for example F2-A01, F3-CP2, and F1-ELEVATOR.
 - User, vehicle, reservation, session, and event identifiers use their domain prefixes, for example USER-001, VEHICLE-001, RESERVATION-001, SESSION-001, and EVENT-001.
 - Timestamps are timezone-aware UTC values serialized as ISO 8601, for example 2026-08-11T08:30:00Z.
 - Distances use metres and the field name distance_m.
@@ -23,12 +23,16 @@ ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 | SlotStatus | AVAILABLE, RESERVED, OCCUPIED |
 | ReservationStatus | ACTIVE, CONFIRMED, EXPIRED, CANCELLED |
 | ParkingSessionStatus | ACTIVE, COMPLETED, CANCELLED |
-| MapNodeType | ENTRANCE, EXIT, CHECKPOINT, ELEVATOR, AISLE, SLOT |
-| ActorType | USER, SIMULATOR, CAMERA, SYSTEM |
+| MapNodeType | ENTRANCE, EXIT, CHECKPOINT, ELEVATOR, RAMP, AISLE, SLOT |
+| ActorType | USER, ADMIN, SIMULATOR, CAMERA, SYSTEM |
 | ParkingEventType | VEHICLE_ENTERED, SLOT_RESERVED, RESERVATION_CANCELLED, RESERVATION_EXPIRED, VEHICLE_PARKED, VEHICLE_LEFT_SLOT, VEHICLE_EXITED |
 | WrongParkingReportStatus | OPEN, RESOLVED |
 | WrongParkingReason | WRONG_SLOT, CROSSED_LINE, BLOCKING_ACCESS, OCCUPYING_CHARGER, OTHER |
-| ErrorCode | INVALID_TRANSITION, SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ROUTE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND, SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS, USER_NOT_FOUND, VEHICLE_NOT_FOUND, RESERVATION_NOT_FOUND, ACTIVE_RESERVATION_NOT_FOUND, RESERVATION_EXPIRED, ACTIVE_SESSION_EXISTS, SESSION_NOT_FOUND, LOCATION_NODE_NOT_FOUND, CURRENT_LOCATION_NOT_FOUND, INVALID_LOCATION_NODE_TYPE, REPORT_NOT_FOUND, REPORT_VERSION_CONFLICT, INVALID_REPORT_TRANSITION, AGENT_TOOL_UNAVAILABLE |
+| SlotObservationStatus | PENDING, VERIFIED, REJECTED, EXPIRED |
+| WrongParkingReportVerificationOutcome | PENDING, CONFIRMED, REJECTED, DUPLICATE, UNVERIFIABLE |
+| RewardSourceType | ADJACENT_SLOT_OBSERVATION, WRONG_PARKING_REPORT |
+| RewardTransactionStatus | PENDING, EARNED, CANCELLED |
+| ErrorCode | Canonical values live in `src/models/schemas.py`; public feature availability codes include AGENT_DISABLED and SPEECH_DISABLED; contribution/report additions include OBSERVATION_NOT_FOUND, OBSERVATION_ALREADY_EXISTS, OBSERVATION_EXPIRED, INVALID_OBSERVATION_TRANSITION, OBSERVATION_VERSION_CONFLICT, REWARD_ALREADY_SETTLED, REPORT_REWARD_DUPLICATE and CONTRIBUTION_DAILY_LIMIT_REACHED |
 
 ## Data schemas
 
@@ -44,15 +48,19 @@ The canonical Pydantic definitions live in src/models/schemas.py.
 | MapNode | id, floor_id, type, x, y |
 | MapEdge | from_node, to_node, distance_m, bidirectional, enabled |
 | RouteResult | path, distance_m, polyline |
-| RecommendationRequest | user_id, start_node_id, zone_id, charging_required, accessible_required, near_elevator, limit |
+| RecommendationRequest | user_id, start_node_id, floor_id, zone_id, charging_required, accessible_required, near_elevator, limit |
 | RecommendationCandidate | slot_id, score, distance_m, reasons |
 | RecommendationResult | recommendations, parking_state_version |
 | ParkingEvent | id, event_type, slot_id, actor_type, actor_id, old_status, new_status, created_at, metadata |
-| WrongParkingReport | id, user_id, slot_id, reason_code, status, observed_plate_number, description, created_at, updated_at, resolved_at, resolved_by, resolution_note, version |
+| SlotObservation | id, observer_user_id, observer_session_id, slot_id, observed_status, verification_status, reward_points, observed_slot_version, created_at, expires_at, verified_at, verified_by, rejection_reason, version, reward_status |
+| WrongParkingReport | id, reporter_user_id, slot_id, reason_code, status, observed_plate_number, description, evidence_storage_path, evidence_content_type, evidence_size_bytes, created_at, updated_at, resolved_at, resolved_by, resolution_note, verification_outcome, reward_points, reward_status, duplicate_candidate_of_id, version |
+| RewardTransaction | id, user_id, source_type, source_reference, transaction_type, status, points, created_at, settled_at, metadata |
+| RewardSummary | available_points, pending_points, verified_contributions, daily_pending_points, daily_earned_points, daily_limit_points |
 
-Nullable fields are User.current_node_id, ParkingSlot.occupied_by_vehicle_id,
-ParkingSession.completed_at, RecommendationRequest.zone_id, and the event fields that may
-not apply to a particular event:
+Nullable fields include User.current_node_id, ParkingSlot.occupied_by_vehicle_id,
+ParkingSession.completed_at, RecommendationRequest.floor_id, RecommendationRequest.zone_id,
+the optional report evidence/resolution/reward fields, and the event fields that may not
+apply to a particular event:
 slot_id, actor_id, old_status, and new_status. ParkingEvent.metadata defaults to an empty
 object. MapEdge.bidirectional and MapEdge.enabled default to true.
 
@@ -60,10 +68,10 @@ object. MapEdge.bidirectional and MapEdge.enabled default to true.
 
 | Field | Type | Rules |
 |---|---|---|
-| id | string | Required; starts with F1- |
-| floor_id | string | Required; F1 |
+| id | string | Required; starts with F1-, F2-, or F3- |
+| floor_id | string | Required; F1, F2, or F3 |
 | zone_id | string | Required; A, B, C, or D |
-| node_id | string | Required; starts with F1- |
+| node_id | string | Required; starts with the same floor prefix as id |
 | status | SlotStatus | Required |
 | has_charger | boolean | Required |
 | is_accessible | boolean | Required |
@@ -103,7 +111,8 @@ HTTP status codes and stable error codes follow the implementation guide:
 | 400 | INVALID_TRANSITION |
 | 404 | SLOT_NOT_FOUND, ROUTE_NODE_NOT_FOUND, ROUTE_NOT_FOUND, ACTIVE_SESSION_NOT_FOUND |
 | 409 | SLOT_NOT_AVAILABLE, ACTIVE_RESERVATION_EXISTS |
-| 503 | AGENT_TOOL_UNAVAILABLE |
+| 429 | AGENT_DAILY_LIMIT_REACHED |
+| 503 | AGENT_DISABLED, AGENT_TOOL_UNAVAILABLE |
 
 Voice transcription additionally uses:
 
@@ -112,7 +121,7 @@ Voice transcription additionally uses:
 | 400 | SPEECH_AUDIO_INVALID |
 | 413 | SPEECH_AUDIO_TOO_LARGE |
 | 422 | SPEECH_NO_TRANSCRIPT |
-| 503 | SPEECH_TRANSCRIPTION_UNAVAILABLE |
+| 503 | SPEECH_DISABLED, SPEECH_TRANSCRIPTION_UNAVAILABLE |
 | 504 | SPEECH_TRANSCRIPTION_TIMEOUT |
 
 Wrong-parking report lifecycle additionally uses:
@@ -189,6 +198,10 @@ The backend derives these actions deterministically from validated runtime/tool 
 prose is never parsed into buttons, URLs or tool names, and the final business mutation is
 still validated by its Core API.
 
+For recommendations, the workflow forwards the selected/current floor as `floor_id`.
+`recommend_parking_slot` treats it as a hard candidate filter, while `zone_id` remains
+optional; asking for “tầng 1” therefore does not require a follow-up question about zone.
+
 Thread checkpoints use the internal namespace `user_id:thread_id`. A public `thread_id` can
 belong to only one user while its checkpoint is retained; reuse by another user returns HTTP
 409 with `INVALID_TRANSITION`. Idle threads expire after `AGENT_THREAD_TTL_SECONDS` (one hour
@@ -199,6 +212,19 @@ memory only: it is lost on process restart and is not shared across multiple wor
 Agent timeout, missing LLM configuration, or unexpected Agent/tool failures return HTTP 503
 with `AGENT_TOOL_UNAVAILABLE` in the standard `ErrorResponse` envelope and include the request
 ID. This endpoint does not provide streaming, WebSocket, voice, or QR behavior.
+
+When `AGENT_ENABLED=false`, the authentication dependency still applies, then the handler
+returns HTTP 503 with `AGENT_DISABLED` before ownership/vehicle resolution or quota
+consumption. No LLM client or LangGraph graph is created and no graph is invoked.
+
+When `AGENT_DAILY_REQUEST_LIMIT` is greater than zero, each authenticated/trusted parking
+user may invoke the Agent at most that many times per UTC day. A request is charged after
+authentication, ownership and vehicle validation succeed and immediately before graph
+invocation. Later provider timeout or tool failure does not refund the request. Exceeding the
+limit returns HTTP 429 with `AGENT_DAILY_LIMIT_REACHED`, the standard error envelope,
+`X-Request-ID`, and a positive integer `Retry-After` header counting seconds until the next
+UTC day. `AGENT_DAILY_REQUEST_LIMIT=0` disables quota persistence. `AGENT_MAX_STEPS` controls
+the per-request graph step budget and is constrained to 1–8.
 
 ## Speech transcription
 
@@ -224,6 +250,9 @@ transcript is returned to the editable composer and is not automatically submitt
 Agent endpoint. Transcription uses a 60-second timeout and one retry for transient network,
 rate-limit, or provider failures by default.
 
+When `SPEECH_ENABLED=false`, the endpoint returns HTTP 503 with `SPEECH_DISABLED` before
+reading the request body or invoking the transcription provider.
+
 ## Wrong-parking reports
 
 ### `POST /api/v1/reports/wrong-parking`
@@ -233,6 +262,24 @@ null for the four standard reasons; `OTHER` requires at least five trimmed chara
 `observed_plate_number` is optional and normalized to uppercase. Creating a report never
 changes `ParkingSlot.status`.
 
+The endpoint accepts either JSON (no image) or `multipart/form-data`. Multipart uses the
+same fields plus optional `evidence`. Evidence is never required; when supplied it must be
+JPEG, PNG, WebP, HEIC or HEIF and must not exceed `REPORT_EVIDENCE_MAX_BYTES`. The backend
+validates both the declared MIME type and the file signature, reads the upload with a bounded
+stream, and returns HTTP 413 with `REPORT_EVIDENCE_TOO_LARGE` when the configured byte limit
+is exceeded. Invalid, empty, spoofed or unsupported image content returns HTTP 400 with
+`REPORT_EVIDENCE_INVALID`. The backend chooses the private Storage path. The response includes nullable `evidence_storage_path`,
+`evidence_content_type` and `evidence_size_bytes`; it never exposes the service-role key.
+
+`WRONG_PARKING_REPORT_DAILY_LIMIT=0` disables the submission quota. When it is greater than
+zero, successful report creation atomically consumes one persistent quota unit per trusted
+parking user and UTC day, including duplicate reports and reports that receive no reward.
+Validation and Storage upload failures do not consume quota. An exhausted quota returns HTTP
+429 with `REPORT_DAILY_LIMIT_REACHED`, a positive `Retry-After` value until the next UTC day,
+the standard error envelope and `X-Request-ID`. A read-only preflight avoids known-unnecessary
+uploads; the transaction-time atomic consume remains authoritative under races, and a race
+loser's uploaded object is deleted.
+
 ### Admin lifecycle endpoints
 
 All admin endpoints use `require_admin_or_demo`:
@@ -240,11 +287,17 @@ All admin endpoints use `require_admin_or_demo`:
 - `GET /api/v1/admin/reports?status=OPEN&slot_id=F1-D01&limit=20` lists reports,
   newest first. `status` and `slot_id` are optional; `limit` is 1–100.
 - `GET /api/v1/admin/reports/{report_id}` returns one report.
-- `PATCH /api/v1/admin/reports/{report_id}` accepts `status=RESOLVED`, optional
-  `resolution_note`, and required `expected_version`.
+- `GET /api/v1/admin/reports/{report_id}/evidence-url` returns a five-minute signed URL
+  when the optional evidence exists.
+- `PATCH /api/v1/admin/reports/{report_id}` accepts `status=RESOLVED`, required
+  non-`PENDING` `verification_outcome`, optional `resolution_note`, and required
+  `expected_version`.
 - `POST /api/v1/admin/reports/{report_id}/reopen` requires `expected_version`.
 - `DELETE /api/v1/admin/reports/{report_id}?expected_version=N` permanently removes the
   database row and returns `deleted_report_id` in `SuccessResponse`.
+- `PATCH /api/v1/admin/parking/slots/{slot_id}/status` accepts `status`
+  (`AVAILABLE|OCCUPIED`) and required `expected_version`. It rejects `RESERVED` slots and
+  delegates the transition and event creation to Parking State Service.
 
 Resolve records UTC `resolved_at`, the admin actor, trimmed note, and increments `version`.
 Reopen clears resolution metadata and increments `version`. Re-resolving or re-reopening is
@@ -262,13 +315,51 @@ An actively parked user may optionally report one physically adjacent slot as
 {
   "user_id": "USER-001",
   "observed_status": "OCCUPIED",
-  "expected_version": 3
+  "expected_slot_version": 3
 }
 ```
 
 The backend requires an active parking session and independently derives the left/right
-neighbours within the same five-slot row. Non-adjacent targets, `RESERVED` slots, stale
-versions, active sessions belonging to another vehicle, and attempts to clear verified
-vehicle occupancy are rejected. Successful transitions increment slot version and write a
-`ParkingEvent` with actor `USER` and metadata source `adjacent_user_observation`. The browser
-never mutates slot state optimistically.
+neighbours within the same floor, zone and five-slot row on F1/F2/F3. Non-adjacent targets,
+`RESERVED` slots and stale versions are rejected. Submission creates a `PENDING`
+`SlotObservation` and optional `PENDING` reward, but never changes the slot. Admin verification
+is the only path that may call Parking State Service and write an event with source
+`verified_user_observation`.
+
+## Phase 13 contribution and reward APIs
+
+Mọi response tiếp tục dùng `SuccessResponse`/`ErrorResponse` chuẩn.
+
+- `POST /api/v1/parking/slots/{slot_id}/observation` nhận `user_id`,
+  `observed_status` (`AVAILABLE|OCCUPIED`) và `expected_slot_version`; trả
+  `SlotObservation`, không trả/cập nhật `ParkingSlot`.
+- `GET /api/v1/contributions/users/{user_id}` trả lịch sử contribution hợp nhất;
+  observation record có `observer_session_id` để client không hỏi lại cùng một ô
+  trong cùng phiên đỗ (report trả `null`).
+- `GET /api/v1/rewards/users/{user_id}/summary` trả available/pending/verified và
+  daily totals authoritative. Các path user được tách để sau này chuyển sang `/me`.
+- `GET /api/v1/rewards/configuration` cung cấp copy/UI reward values, tránh hard-code.
+- `GET /api/v1/admin/slot-observations` hỗ trợ `status`, `floor_id`, `slot_id`,
+  `user_id`, `limit`; detail dùng `GET /api/v1/admin/slot-observations/{id}`.
+- `POST /api/v1/admin/slot-observations/{id}/verify` và `/reject` yêu cầu
+  `expected_version`; reject nhận thêm `reason` tùy chọn.
+- Report response thêm `verification_outcome`, `reward_points`, `reward_status`,
+  `duplicate_candidate_of_id`. PATCH resolve bắt buộc `status=RESOLVED`, một outcome
+  khác `PENDING`, `expected_version`, và `resolution_note` tùy chọn.
+
+Reward còn `PENDING` không phải điểm khả dụng. Chỉ outcome `CONFIRMED` hoặc observation
+`VERIFIED` chuyển sang `EARNED`; các outcome âm/không xác minh chuyển `CANCELLED`.
+
+## Supabase authentication
+
+- `GET /api/v1/auth/me` maps a verified Supabase bearer token to the backend-owned profile.
+- `POST /api/v1/auth/onboarding` idempotently creates a regular user profile and linked
+  `ParkingUser`; token metadata cannot grant admin role.
+- `POST /api/v1/auth/vehicles` adds a vehicle owned by the authenticated parking user and
+  assigns it as the default when no default exists.
+
+Outside demo mode, user-scoped APIs require a bearer token and reject a `user_id` or
+`vehicle_id` not owned by that identity. Admin APIs require `profiles.app_role=admin`.
+The browser client stores the Supabase session in `sessionStorage` with the ParkSmart
+storage key, so separate tabs may hold independent user and admin sessions. Duplicating a
+tab may still copy its initial session because that is browser behavior.

@@ -39,31 +39,26 @@ it("shows initial loading until the canonical map and status arrive", async () =
 
   const fetcher = vi.fn<typeof fetch>(async (input) => {
     const url = String(input);
-
-    if (url.endsWith("/parking/map")) {
-      return mapRequest;
-    }
-
-    if (url.endsWith("/parking/status")) {
-      return statusRequest;
-    }
-
-    if (url.includes("/parking/slots")) {
-      return successResponse(canonicalMap.slots);
-    }
-
-    if (url.includes("/locations/current")) {
-      return successResponse(currentLocation);
-    }
-
-    if (url.includes("/reservations/active")) {
-      return successResponse(activeReservation);
-    }
-
-    if (url.includes("/sessions/active")) {
-      return successResponse(activeSession);
-    }
-
+    if (url.endsWith("/parking/map")) return mapRequest;
+    if (url.endsWith("/parking/status")) return statusRequest;
+    if (url.includes("/parking/slots")) return successResponse(canonicalMap.slots);
+    if (url.includes("/locations/current")) return successResponse(currentLocation);
+    if (url.includes("/reservations/active")) return successResponse(activeReservation);
+    if (url.includes("/sessions/active")) return successResponse(activeSession);
+    if (url.includes("/rewards/users/")) return successResponse({
+      available_points: 20,
+      pending_points: 10,
+      verified_contributions: 1,
+      daily_pending_points: 10,
+      daily_earned_points: 20,
+      daily_limit_points: 100,
+    });
+    if (url.endsWith("/rewards/configuration")) return successResponse({
+      adjacent_observation_reward_points: 10,
+      wrong_parking_report_reward_points: 20,
+      contribution_daily_points_limit: 100,
+    });
+    if (url.includes("/contributions/users/")) return successResponse([]);
     throw new Error(`Unexpected request: ${url}`);
   });
 
@@ -121,7 +116,20 @@ it("finishes initial loading when React Strict Mode remounts the effect", async 
     if (url.includes("/sessions/active")) {
       return errorResponse("NOT_FOUND", "Not found.", 404);
     }
-
+    if (url.includes("/rewards/users/")) return successResponse({
+      available_points: 0,
+      pending_points: 0,
+      verified_contributions: 0,
+      daily_pending_points: 0,
+      daily_earned_points: 0,
+      daily_limit_points: 100,
+    });
+    if (url.endsWith("/rewards/configuration")) return successResponse({
+      adjacent_observation_reward_points: 10,
+      wrong_parking_report_reward_points: 20,
+      contribution_daily_points_limit: 100,
+    });
+    if (url.includes("/contributions/users/")) return successResponse([]);
     throw new Error(`Unexpected request: ${url}`);
   });
 
@@ -148,7 +156,53 @@ it("finishes initial loading when React Strict Mode remounts the effect", async 
   expect(result.current.error).toBeNull();
 });
 
-it("polls parking only after the configured polling interval", async () => {
+it("polls the authoritative reward ledger so verified points appear without a reload", async () => {
+  let rewardCalls = 0;
+  const fetcher = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/parking/map")) return successResponse(canonicalMap);
+    if (url.endsWith("/parking/status")) return successResponse(parkingStatus);
+    if (url.includes("/parking/slots")) return successResponse(canonicalMap.slots);
+    if (url.includes("/locations/current") || url.includes("/reservations/active") || url.includes("/sessions/active")) {
+      return errorResponse("NOT_FOUND", "Not found.", 404);
+    }
+    if (url.includes("/rewards/users/")) {
+      rewardCalls += 1;
+      return successResponse({
+        available_points: rewardCalls > 1 ? 10 : 0,
+        pending_points: rewardCalls > 1 ? 0 : 10,
+        verified_contributions: rewardCalls > 1 ? 1 : 0,
+        daily_pending_points: rewardCalls > 1 ? 0 : 10,
+        daily_earned_points: rewardCalls > 1 ? 10 : 0,
+        daily_limit_points: 100,
+      });
+    }
+    if (url.endsWith("/rewards/configuration")) return successResponse({
+      adjacent_observation_reward_points: 10,
+      wrong_parking_report_reward_points: 20,
+      contribution_daily_points_limit: 100,
+    });
+    if (url.includes("/contributions/users/")) return successResponse([]);
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const api = new ParkSmartApiClient({ baseUrl: "http://api.test/api/v1", fetcher });
+  const { result } = renderHook(() => useParkSmartData(api, "USER-001"));
+
+  await act(async () => {
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+  });
+  expect(result.current.rewardSummary?.pending_points).toBe(10);
+
+  await act(async () => {
+    vi.advanceTimersByTime(PARKING_POLL_INTERVAL_MS);
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+  });
+  expect(result.current.rewardSummary?.available_points).toBe(10);
+  expect(result.current.rewardSummary?.pending_points).toBe(0);
+});
+
+it("prevents overlapping polls and aborts requests and timers on unmount", async () => {
+  const signals: AbortSignal[] = [];
   let statusCalls = 0;
   let slotCalls = 0;
 
@@ -168,8 +222,21 @@ it("polls parking only after the configured polling interval", async () => {
       slotCalls += 1;
       return successResponse(canonicalMap.slots);
     }
-
-    throw new Error(`Unexpected request: ${url}`);
+    if (url.includes("/rewards/users/")) return successResponse({
+      available_points: 0,
+      pending_points: 0,
+      verified_contributions: 0,
+      daily_pending_points: 0,
+      daily_earned_points: 0,
+      daily_limit_points: 100,
+    });
+    if (url.endsWith("/rewards/configuration")) return successResponse({
+      adjacent_observation_reward_points: 10,
+      wrong_parking_report_reward_points: 20,
+      contribution_daily_points_limit: 100,
+    });
+    if (url.includes("/contributions/users/")) return successResponse([]);
+    return errorResponse("NOT_FOUND", "Not found.", 404, "req-404");
   });
 
   const api = new ParkSmartApiClient({
@@ -373,52 +440,39 @@ it("aborts the old user lifecycle when the user id changes", async () => {
   >();
 
   const requestedUsers: string[] = [];
-
-  const fetcher = vi.fn<typeof fetch>(
-    async (input, init) => {
-      const url = String(input);
-      const parsed = new URL(url);
-
-      const userId =
-        parsed.searchParams.get("user_id");
-
-      if (userId && init?.signal) {
-        requestedUsers.push(userId);
-
-        signalsByUser.set(userId, [
-          ...(signalsByUser.get(userId) ?? []),
-          init.signal,
-        ]);
-      }
-
-      if (url.endsWith("/parking/map")) {
-        return successResponse(canonicalMap);
-      }
-
-      if (url.endsWith("/parking/status")) {
-        return successResponse(parkingStatus);
-      }
-
-      if (url.includes("/parking/slots")) {
-        return successResponse(canonicalMap.slots);
-      }
-
-      if (url.includes("/locations/current")) {
-        return successResponse(currentLocation);
-      }
-
-      if (url.includes("/reservations/active")) {
-        return successResponse(activeReservation);
-      }
-
-      if (url.includes("/sessions/active")) {
-        return successResponse(activeSession);
-      }
-
-      throw new Error(`Unexpected request: ${url}`);
-    },
-  );
-
+  const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    const parsed = new URL(url);
+    const userId = parsed.searchParams.get("user_id");
+    if (userId && init?.signal) {
+      requestedUsers.push(userId);
+      signalsByUser.set(userId, [
+        ...(signalsByUser.get(userId) ?? []),
+        init.signal,
+      ]);
+    }
+    if (url.endsWith("/parking/map")) return successResponse(canonicalMap);
+    if (url.endsWith("/parking/status")) return successResponse(parkingStatus);
+    if (url.includes("/parking/slots")) return successResponse(canonicalMap.slots);
+    if (url.includes("/locations/current")) return successResponse(currentLocation);
+    if (url.includes("/reservations/active")) return successResponse(activeReservation);
+    if (url.includes("/sessions/active")) return successResponse(activeSession);
+    if (url.includes("/rewards/users/")) return successResponse({
+      available_points: 0,
+      pending_points: 0,
+      verified_contributions: 0,
+      daily_pending_points: 0,
+      daily_earned_points: 0,
+      daily_limit_points: 100,
+    });
+    if (url.endsWith("/rewards/configuration")) return successResponse({
+      adjacent_observation_reward_points: 10,
+      wrong_parking_report_reward_points: 20,
+      contribution_daily_points_limit: 100,
+    });
+    if (url.includes("/contributions/users/")) return successResponse([]);
+    throw new Error(`Unexpected request: ${url}`);
+  });
   const api = new ParkSmartApiClient({
     baseUrl: "http://api.test/api/v1",
     fetcher,

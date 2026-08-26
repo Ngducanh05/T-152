@@ -11,10 +11,6 @@ import {
 import type { IsoBoxFaces, IsoRampFaces } from "@/lib/iso-geometry";
 import { buildLanePath, getDisplayPoint } from "@/lib/map-geometry";
 import type { MapPoint } from "@/lib/map-geometry";
-
-function lift(point: MapPoint, height: number): MapPoint {
-  return [point[0], point[1] - height];
-}
 import type {
   FloorId,
   MapEdge,
@@ -30,7 +26,7 @@ export const BAY_HALF_W = 2.2;
 export const BAY_HALF_D = 4.5;
 export const CAR_HALF_W = 1.8;
 export const CAR_HALF_D = 3.6;
-export const CAR_HEIGHT = 5;
+export const CAR_HEIGHT = 3.2;
 export const ELEVATOR_HEIGHT = 12;
 export const CHECKPOINT_HEIGHT = 4;
 export const RAMP_RISE = 8;
@@ -38,6 +34,8 @@ export const ROAD_W_MAIN = 7;
 export const ROAD_W_RING = 6;
 export const ROAD_W_SHARED = 6;
 export const ROAD_W_ELEVATOR = 5.5;
+export const RAMP_EAST_CENTER: MapPoint = [88, 75];
+export const RAMP_WEST_CENTER: MapPoint = [12, 32];
 
 export type IsoPropKind =
   | "ELEVATOR"
@@ -143,35 +141,8 @@ const ZONE_RECTS: Array<{ id: string; points: MapPoint[] }> = [
   },
 ];
 
-export interface IsoCarFaces extends IsoBoxFaces {
-  cabinTop?: MapPoint[];
-  cabinLeft?: MapPoint[];
-  cabinRight?: MapPoint[];
-}
-
-export function buildIsoCar(center: MapPoint): IsoCarFaces {
-  // 1. Thân xe (chassis) thấp dài
-  const body = buildIsoBox(center, CAR_HALF_W, CAR_HALF_D, 2.2);
-
-  // 2. Cabin / mui kính ở nửa sau xe (từ cao độ 2.2 đến 4.6)
-  const cabinCenter: MapPoint = [center[0], center[1] - 0.5];
-  const [p0, p1, p2, p3] = buildIsoRhombus(cabinCenter, CAR_HALF_W * 0.82, CAR_HALF_D * 0.55);
-  const base1 = lift(p1, 2.2);
-  const base2 = lift(p2, 2.2);
-  const base3 = lift(p3, 2.2);
-  const top0 = lift(p0, 4.6);
-  const top1 = lift(p1, 4.6);
-  const top2 = lift(p2, 4.6);
-  const top3 = lift(p3, 4.6);
-
-  return {
-    top: body.top,
-    left: body.left,
-    right: body.right,
-    cabinTop: [top0, top1, top2, top3],
-    cabinLeft: [base2, base3, top3, top2],
-    cabinRight: [base1, base2, top2, top1],
-  };
+export function buildIsoCar(center: MapPoint): IsoBoxFaces {
+  return buildIsoBox(center, CAR_HALF_W, CAR_HALF_D, CAR_HEIGHT);
 }
 
 /**
@@ -329,19 +300,20 @@ export function buildIsoScene(input: BuildIsoSceneInput): IsoScene {
       });
     } else if (node.type === "RAMP") {
       if (floorId === "F1") {
-        // F1: Dốc đi xuống tầng F2 (vị trí cũ [85, 75], nhãn tách biệt dưới chân dốc)
+        // Đặt dốc ngoài mép phải của đường x=80 để không che mặt đường.
+        const rampCenter = RAMP_EAST_CENTER;
         props.push({
           id: node.id,
           kind: "RAMP",
-          depth,
+          depth: isoDepth(rampCenter),
           box: null,
-          ramp: buildIsoRamp(center, 3.6, 4.5, -6),
-          labelAt: projectIso([center[0], center[1] + 11.5]),
+          ramp: buildIsoRamp(rampCenter, 3.6, 4.5, -6),
+          labelAt: projectIso([rampCenter[0], rampCenter[1] + 11.5]),
           label: "↓ Xuống F2",
         });
       } else if (floorId === "F3") {
-        // F3: Dốc đi lên tầng F2 (di chuyển sang vị trí mới [14, 32] cặp với Xuống F3 của F2)
-        const f3RampCenter: MapPoint = [14, 32];
+        // Đặt dốc ngoài mép trái của đường x=20 để không che mặt đường.
+        const f3RampCenter = RAMP_WEST_CENTER;
         props.push({
           id: node.id,
           kind: "RAMP",
@@ -356,18 +328,19 @@ export function buildIsoScene(input: BuildIsoSceneInput): IsoScene {
           continue;
         }
         // F2: 2 dốc tách biệt
-        // 1. Dốc lên F1: Giữ nguyên vị trí cũ [85, 75]
+        // 1. Dốc lên F1 nằm ngoài mép phải đường x=80.
+        const f2UpCenter = RAMP_EAST_CENTER;
         props.push({
           id: `${node.id}-up`,
           kind: "RAMP",
-          depth: isoDepth(center),
+          depth: isoDepth(f2UpCenter),
           box: null,
-          ramp: buildIsoRamp(center, 3.6, 4.5, 6),
-          labelAt: projectIso([center[0], center[1] - 9.5]),
+          ramp: buildIsoRamp(f2UpCenter, 3.6, 4.5, 6),
+          labelAt: projectIso([f2UpCenter[0], f2UpCenter[1] - 9.5]),
           label: "↑ Lên F1",
         });
-        // 2. Dốc xuống F3: Vị trí mới [14, 32] (khu vực khoanh đỏ)
-        const f2DownCenter: MapPoint = [14, 32];
+        // 2. Dốc xuống F3 nằm ngoài mép trái đường x=20.
+        const f2DownCenter = RAMP_WEST_CENTER;
         props.push({
           id: `${node.id}-down`,
           kind: "RAMP",
@@ -437,7 +410,11 @@ export function buildIsoScene(input: BuildIsoSceneInput): IsoScene {
   let currentLocationAt: MapPoint | null = null;
   if (currentLocationNodeId) {
     const currentNode = nodeById.get(currentLocationNodeId);
-    if (currentNode && currentNode.type !== "SLOT") {
+    if (
+      currentNode &&
+      currentNode.type !== "SLOT" &&
+      currentNode.type !== "CHECKPOINT"
+    ) {
       currentLocationAt = projectIso(getDisplayPoint(currentNode));
     }
   }

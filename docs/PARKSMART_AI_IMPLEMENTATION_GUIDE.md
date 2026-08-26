@@ -6,6 +6,33 @@
 
 ---
 
+## Phụ lục trạng thái triển khai hiện tại — 2026-08-24
+
+Tài liệu bên dưới giữ lại kế hoạch MVP ban đầu để tham khảo lịch sử. Khi có mâu thuẫn,
+trạng thái triển khai hiện tại sau đây và các tài liệu kiến trúc/API chuyên biệt được ưu tiên:
+
+- bản đồ chuẩn có F1/F2/F3, 120 ô; chi tiết nằm tại
+  `docs/architecture/parking-map-spec.md`;
+- PostgreSQL, Auth và ảnh bằng chứng riêng tư dùng Supabase; Alembic vẫn là nguồn chuẩn cho
+  schema nghiệp vụ;
+- frontend giữ `ParkingMap` và `IsometricMap` hiện có, hỗ trợ tab tầng; phối cảnh isometric
+  là góc nhìn cố định, không có thao tác xoay;
+- đề xuất ô đỗ nhận `floor_id` độc lập với `zone_id`, nên có thể tìm theo tầng mà không bắt
+  người dùng chọn khu;
+- quan sát ô bên cạnh và report đỗ sai tạo contribution/reward `PENDING`; chỉ xác minh admin
+  mới chuyển reward thành `EARNED`;
+- report chỉ được gửi sau bước xác nhận rõ ràng; biển số, mô tả và ảnh là tùy chọn, ảnh được
+  backend lưu trong bucket Supabase riêng tư;
+- dashboard admin không còn bộ điều khiển simulator; admin vẫn xem bản đồ, mở/đóng chi tiết
+  ô, xác minh contribution/report và đổi trạng thái ô qua Parking State Service;
+- Supabase session phía browser dùng `sessionStorage` để tab user và tab admin độc lập.
+
+Phần mô tả “một tầng F1”, seed 40 ô và giao diện điều khiển simulator ở kế hoạch cũ không
+còn phản ánh sản phẩm hiện tại. API hiện hành được định nghĩa tại
+`docs/api/api-contract.md`; kiến trúc hiện hành nằm tại `docs/architecture.md`.
+
+---
+
 ## 1. Mục tiêu và nguyên tắc phạm vi
 
 ParkSmart AI giúp người dùng:

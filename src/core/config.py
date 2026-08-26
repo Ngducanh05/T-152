@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://parksmart:parksmart@localhost:5432/parksmart"
 
     reservation_ttl_seconds: int = Field(default=300, gt=0)
+    adjacent_observation_reward_points: int = Field(default=10, ge=0)
+    wrong_parking_report_reward_points: int = Field(default=20, ge=0)
+    contribution_daily_points_limit: int = Field(default=100, ge=0)
+    observation_verification_ttl_seconds: int = Field(default=1800, gt=0)
+    report_reward_cooldown_seconds: int = Field(default=3600, ge=0)
     simulator_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices(
@@ -21,6 +26,8 @@ class Settings(BaseSettings):
         ),
     )
     demo_mode: bool = True
+    agent_enabled: bool = True
+    speech_enabled: bool = True
     next_public_api_base_url: str = "http://localhost:8000"
 
     supabase_url: str | None = None
@@ -28,6 +35,7 @@ class Settings(BaseSettings):
     supabase_service_role_key: str | None = None
     supabase_report_evidence_bucket: str = "wrong-parking-evidence"
     report_evidence_max_bytes: int = Field(default=5_000_000, gt=0, le=15_000_000)
+    wrong_parking_report_daily_limit: int = Field(default=0, ge=0, le=100)
 
     llm_api_key: str | None = Field(
         default=None,
@@ -60,6 +68,8 @@ class Settings(BaseSettings):
     speech_timeout_seconds: float = Field(default=60.0, gt=0.0, le=120.0)
     speech_max_retries: int = Field(default=1, ge=0, le=2)
     agent_thread_ttl_seconds: float = Field(default=3600.0, gt=0.0)
+    agent_daily_request_limit: int = Field(default=0, ge=0, le=1000)
+    agent_max_steps: int = Field(default=8, ge=1, le=8)
 
     cors_origins: str = Field(
         default="http://localhost:3000",
@@ -105,7 +115,9 @@ class Settings(BaseSettings):
             failures.append("SUPABASE_SERVICE_ROLE_KEY is required")
         if not self.supabase_report_evidence_bucket:
             failures.append("SUPABASE_REPORT_EVIDENCE_BUCKET is required")
-        if not self.llm_api_key:
+        if (self.agent_enabled or self.speech_enabled) and not (
+            self.llm_api_key or ""
+        ).strip():
             failures.append("LLM_API_KEY is required")
 
         if failures:

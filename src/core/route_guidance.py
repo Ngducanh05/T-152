@@ -28,9 +28,12 @@ def _detect_floor_transitions(path: list[str]) -> list[str]:
             continue
         prev_floor, curr_floor = prev_m.group(1), curr_m.group(1)
         if prev_floor != curr_floor:
-            via = "đường dốc (ramp)" if _RAMP_ID.fullmatch(path[i]) or _RAMP_ID.fullmatch(path[i - 1]) else "thang máy"
+            goes_up = int(curr_floor[1:]) < int(prev_floor[1:])
+            direction = "lên" if goes_up else "xuống"
+            via_ramp = _RAMP_ID.fullmatch(path[i]) or _RAMP_ID.fullmatch(path[i - 1])
+            via = "đường dốc" if via_ramp else "thang máy"
             instructions.append(
-                f"Di chuyển từ {_FLOOR_NAMES.get(prev_floor, prev_floor)} lên {_FLOOR_NAMES.get(curr_floor, curr_floor)} bằng {via}."
+                f"Đi {via} {direction} {_FLOOR_NAMES.get(curr_floor, curr_floor)}."
             )
     return instructions
 
@@ -71,8 +74,9 @@ def vietnamese_route_guidance(path: list[str], distance_m: float) -> str:
     if transition_copy:
         guidance += f"{transition_copy} "
     guidance += (
-        f"Đến lối vào khu {zone} ({dest_floor}), rẽ {entry_turn} và đi theo đường bao quanh khu. "
-        f"Tại {row_copy}, rẽ {bay_turn} vào ô {zone}{number:02d}. "
+        f"Ở ngã tư phía trước, rẽ {entry_turn} để vào khu {zone} ở {dest_floor}, "
+        "rồi đi theo lối quanh khu. "
+        f"Khi tới {row_copy} phía trước, rẽ {bay_turn} vào ô {zone}{number:02d}. "
         f"Quãng đường khoảng {distance_m:g} m."
     )
     return guidance

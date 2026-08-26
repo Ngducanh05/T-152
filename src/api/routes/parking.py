@@ -3,19 +3,17 @@
 import logging
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
     ParkingUserDependency,
-    require_authenticated_or_demo,
+    SessionDependency,
     resolve_parking_user_id,
 )
-from src.core.database import get_db_session
 from src.core.parking_map import build_canonical_parking_map
 from src.core.parking_state import ParkingStateError, ParkingStateService
-from src.core.slot_observation import SlotObservationService
+from src.core.slot_observation import SlotObservationError, SlotObservationService
 from src.models.common import SuccessResponse
 from src.models.schemas import (
     ErrorCode,
@@ -23,16 +21,12 @@ from src.models.schemas import (
     MapEdge,
     MapNode,
     ParkingSlot,
+    SlotObservation,
     SlotStatus,
     ZoneId,
 )
 
-router = APIRouter(
-    prefix="/parking",
-    tags=["Parking"],
-    dependencies=[Depends(require_authenticated_or_demo)],
-)
-SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
+router = APIRouter(prefix="/parking", tags=["Parking"])
 logger = logging.getLogger(__name__)
 
 
@@ -55,7 +49,7 @@ class AdjacentSlotObservationRequest(BaseModel):
 
     user_id: str = Field(min_length=1)
     observed_status: Literal[SlotStatus.AVAILABLE, SlotStatus.OCCUPIED]
-    expected_version: int = Field(ge=0)
+    expected_slot_version: int = Field(ge=0)
 
 
 def _slot_response(slot: object) -> ParkingSlot:
@@ -65,6 +59,19 @@ def _slot_response(slot: object) -> ParkingSlot:
 def _domain_error(error: ParkingStateError) -> HTTPException:
     return HTTPException(
         status_code=404 if error.code is ErrorCode.SLOT_NOT_FOUND else 409,
+        detail={"code": error.code.value, "message": error.message},
+    )
+
+
+def _observation_error(error: SlotObservationError) -> HTTPException:
+    if error.code in {ErrorCode.SLOT_NOT_FOUND, ErrorCode.USER_NOT_FOUND}:
+        status_code = 404
+    elif error.code is ErrorCode.ACTIVE_SESSION_NOT_FOUND:
+        status_code = 409
+    else:
+        status_code = 409
+    return HTTPException(
+        status_code=status_code,
         detail={"code": error.code.value, "message": error.message},
     )
 
@@ -111,32 +118,35 @@ async def parking_slot(
 
 @router.post(
     "/slots/{slot_id}/observation",
-    response_model=SuccessResponse[ParkingSlot],
+    response_model=SuccessResponse[SlotObservation],
 )
 async def observe_adjacent_parking_slot(
     slot_id: str,
     request: AdjacentSlotObservationRequest,
     session: SessionDependency,
     current_user: ParkingUserDependency,
-) -> SuccessResponse[ParkingSlot]:
+) -> SuccessResponse[SlotObservation]:
     user_id = resolve_parking_user_id(request.user_id, current_user)
     try:
         async with session.begin():
-            slot = await SlotObservationService(session).observe_adjacent_slot(
+            observation = await SlotObservationService(session).create_observation(
                 user_id=user_id,
                 slot_id=slot_id,
                 observed_status=request.observed_status,
-                expected_version=request.expected_version,
+                expected_slot_version=request.expected_slot_version,
             )
-    except ParkingStateError as error:
-        raise _domain_error(error) from error
+    except SlotObservationError as error:
+        raise _observation_error(error) from error
     logger.info(
         "adjacent_slot_observation slot_id=%s actor_id=%s observed_status=%s outcome=success",
         slot_id,
         user_id,
         request.observed_status.value,
     )
-    return SuccessResponse(data=_slot_response(slot))
+    return SuccessResponse(
+        data=SlotObservation.model_validate(observation, from_attributes=True),
+        message="Observation submitted for verification.",
+    )
 
 
 @router.get("/map", response_model=SuccessResponse[ParkingMapResponse])
@@ -145,14 +155,8 @@ async def parking_map(session: SessionDependency) -> SuccessResponse[ParkingMapR
     slots = await ParkingStateService(session).list_slots()
     return SuccessResponse(
         data=ParkingMapResponse(
-            nodes=[
-                MapNode.model_validate(node, from_attributes=True)
-                for node in canonical_map.nodes
-            ],
-            edges=[
-                MapEdge.model_validate(edge, from_attributes=True)
-                for edge in canonical_map.edges
-            ],
+            nodes=[MapNode.model_validate(node, from_attributes=True) for node in canonical_map.nodes],
+            edges=[MapEdge.model_validate(edge, from_attributes=True) for edge in canonical_map.edges],
             slots=[_slot_response(slot) for slot in slots],
         )
     )

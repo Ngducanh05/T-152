@@ -47,12 +47,16 @@ flowchart TB
     end
 
     subgraph External["External providers"]
+        Auth["Supabase Auth"]
+        Storage["Supabase private Storage"]
         LLM["LLM API"]
         STT["Speech-to-Text API"]
     end
 
     UserUI --> Shared
     AdminUI --> Shared
+    UserUI --> Auth
+    AdminUI --> Auth
     WebSpeech --> UserUI
     Shared --> PublicAPI
     UserUI --> AgentAPI
@@ -68,6 +72,8 @@ flowchart TB
     AdminAPI --> Simulator
     Simulator --> Core
     SpeechAPI --> STT
+    PublicAPI --> Storage
+    AdminAPI --> Storage
 
     Core --> DB
     Core --> Map
@@ -78,7 +84,7 @@ flowchart TB
 | Giao diện | Trách nhiệm | Không được làm |
 |---|---|---|
 | User UI `/` | Chat mobile-first, lựa chọn vị trí bằng thao tác chạm, tìm/giữ ô, route dạng turn-by-turn, phiên đỗ xe, báo cáo nhanh, text và voice | Hiển thị map/mật độ/dữ liệu vận hành, dùng GPS, reset demo, tự sửa trạng thái hoặc auto-send transcript |
-| Admin UI `/admin` | KPI mật độ, filter map, cảnh báo report OPEN theo slot, resolve/reopen/hard-delete, simulator controls và parking events | Tự ghi database, dùng localStorage làm source of truth hoặc tính business transition ở frontend |
+| Admin UI `/admin` | KPI mật độ, filter map F1/F2/F3, chi tiết slot có thể đóng, cảnh báo report/observation, resolve/reopen/hard-delete và parking events | Tự ghi database, hiển thị simulator controls, dùng browser storage làm source of truth hoặc tính business transition ở frontend |
 
 `/admin` dùng `CurrentUser.app_role` khi authentication được bật. Trong demo
 mode, backend có thể cho phép trang vận hành mà không cần bearer token; giao
@@ -171,12 +177,16 @@ biểu đồ lịch sử hoặc dự đoán giả.
 
 ```mermaid
 flowchart LR
-    User["User selects canonical slot + reason"] --> ReportAPI["POST /api/v1/reports/wrong-parking"]
+    User["User selects canonical slot + reason"] --> Evidence["Optional plate, description and photo"]
+    Evidence --> Confirm["Explicit submit confirmation"]
+    Confirm --> ReportAPI["POST /api/v1/reports/wrong-parking"]
     ReportAPI --> Validate["Validate user, slot and reason"]
-    Validate --> DB[("OPEN report v0")]
+    Validate --> DB[("OPEN/PENDING report + PENDING reward if eligible")]
+    ReportAPI -. "optional image" .-> Storage["Private Supabase Storage"]
     DB --> AdminAPI["Admin report APIs"]
     AdminAPI --> AdminUI["Map warning + detail drawer"]
-    AdminUI --> Resolve["Resolve or reopen with expected_version"]
+    Storage -. "short-lived signed URL" .-> AdminUI
+    AdminUI --> Resolve["Resolve with explicit outcome or reopen"]
     AdminUI --> Delete["Confirmed hard delete"]
     Resolve --> DB
     Delete --> DB
@@ -251,7 +261,9 @@ không tự tạo parking session.
 Turn-by-turn presentation không thay đổi Routing Service. UI lấy ba điểm liên tiếp trong
 `route.polyline` (fallback sang tọa độ canonical map), tính tích có hướng để phân loại đi
 thẳng/rẽ trái/rẽ phải/quay lại và hiển thị icon. Nếu thiếu hình học, UI chỉ nói “Tiếp tục”;
-LLM không được phát minh hướng rẽ.
+LLM không được phát minh hướng rẽ. Checkpoint vẫn là node định tuyến nội bộ nhưng bị loại
+khỏi LocationPicker, nhãn vị trí, marker bản đồ và nội dung hướng dẫn. UI mô tả điểm rẽ bằng
+ngôn ngữ đời thường như “Ở ngã tư phía trước, rẽ phải”.
 
 Reservation/session card, mutation notice và lỗi quan trọng nằm trong priority dock sticky
 ngay dưới header. Message history tiếp tục cuộn phía sau; các thao tác “Tôi đã đến nơi”, tìm
@@ -267,18 +279,16 @@ xác minh; mọi transition hợp lệ tạo ParkingEvent và chỉ hiển thị
 
 ## 5. Deployment architecture hiện tại
 
-`docker-compose.yml` hiện container hóa PostgreSQL và FastAPI backend. Agent và
-Simulator chạy như module trong backend process. Frontend Next.js hiện được
-chạy riêng bằng npm trong development; container frontend là bước deployment
-chưa hoàn tất.
+Runtime chia sẻ hiện dùng PostgreSQL, Auth và private Storage trên Supabase. Agent và
+Simulator vẫn là module backend, nhưng simulator không còn được trình bày trên admin UI;
+endpoint simulator chỉ dành cho development/test được bảo vệ. Frontend Next.js chạy riêng
+bằng npm trong development hoặc triển khai độc lập với FastAPI.
 
 ```mermaid
 flowchart LR
-    subgraph Compose["Docker Compose hiện tại"]
-        API["FastAPI backend container"]
-        DB[("PostgreSQL container")]
-        API --> DB
-    end
+    API["FastAPI backend"] --> DB[("Supabase PostgreSQL")]
+    API --> Auth["Supabase Auth"]
+    API --> Storage["Private evidence Storage"]
 
     Browser["Browser: User UI / Admin UI / Web Speech"] --> Next["Next.js dev or deployed frontend"]
     Next --> API
@@ -290,8 +300,8 @@ flowchart LR
 |---|---|
 | Browser | `/`, `/admin`, Browser Speech Recognition và `speechSynthesis` |
 | Next.js | User/Admin rendering, API client và polling |
-| Backend container | FastAPI, LangGraph Agent, tools, Core Services và Simulator module |
-| Database container | PostgreSQL authoritative state và events/reports |
+| Backend | FastAPI, LangGraph Agent, tools, Core Services và simulator module không có admin UI |
+| Supabase | PostgreSQL authoritative, Auth và private report-evidence Storage |
 | External provider | LLM; STT chỉ khi browser fallback được dùng |
 
 Production tương lai có thể thay Simulator bằng:
@@ -321,3 +331,48 @@ PostgreSQL + canonical parking graph
 
 Frontend quyết định cách trình bày. Agent quyết định tool nào cần gọi. Chỉ Core
 Services quyết định nghiệp vụ và chỉ PostgreSQL lưu trạng thái authoritative.
+## Verified community contributions and ParkSmart Points
+
+```mermaid
+flowchart LR
+    User[User contribution] --> Pending[Pending observation/report]
+    Pending --> Reserve[PENDING reward if within shared cap]
+    Pending --> Admin[Admin verification]
+    Admin -->|verified observation, if status differs| State[Parking State Service]
+    Admin -->|explicit report outcome| Outcome[CONFIRMED or negative outcome]
+    State --> Ledger[Reward ledger]
+    Outcome --> Ledger
+    Ledger -->|valid| Earned[EARNED]
+    Ledger -->|reject, duplicate, unverifiable, expire| Cancelled[CANCELLED]
+```
+
+`RewardService` là nơi duy nhất reserve/settle/cancel điểm. Nó khóa `ParkingUser` trước
+khi tính tổng `PENDING + EARNED` trong ngày, nên observation và report đồng thời không thể
+vượt cap chung. `RewardSummary` luôn được tính từ ledger; frontend chỉ refetch dữ liệu có
+thẩm quyền. Observation hết hạn được lazy-expire trước list/get/verify, không cần worker.
+
+Map vận hành không có renderer mới: contribution chọn floor F1/F2/F3 trên `ParkingMap`
+và overlay icon/outline lên `IsometricMap` hiện hữu mà không đổi màu status của slot.
+Nếu payload map chỉ có hình học F1, frontend tái sử dụng cùng hình học chuẩn với ID theo tầng
+để vẫn render đủ ô F2/F3 trong cả 2D và isometric. Admin có thể chọn trực tiếp slot, mở
+report/observation gắn với slot và yêu cầu đổi trạng thái. Phối cảnh giữ góc isometric cố
+định; hình học ramp phân biệt lối lên/lối xuống, đặt vạch trắng dọc hướng chạy và thêm miệng
+hầm cùng tường chắn cho đầu thấp. Ramp dùng cùng bảng màu với road surface và được đặt
+ngoài mép làn; xe đang đỗ là khối hộp chữ nhật isometric ba mặt;
+API vẫn đưa thay đổi qua Parking State Service, optimistic version và parking event ledger.
+User UI polling cả reward summary/contribution ledger cùng parking state nên settlement của
+admin xuất hiện tự động mà không cần reload và không optimistic cộng điểm.
+
+Canonical seed tạo 120 slot và graph cho cả F1/F2/F3. Seed là idempotent: chỉ thêm
+node/edge/slot còn thiếu, vì vậy database Supabase từng chỉ có F1 có thể được bổ sung F2/F3
+mà không reset trạng thái mutable của F1. `RecommendationRequest.floor_id` và Agent tool
+`recommend_parking_slot` giữ hard constraint tầng; zone vẫn là filter tùy chọn.
+
+Browser Auth không dùng một cookie/session chung cho mọi tab. Supabase client lưu session
+trong `sessionStorage` với storage key riêng của browsing tab, nên user và admin có thể hoạt
+động đồng thời trên cùng origin. Đây chỉ là nơi lưu credential phiên; profile, role và quyền
+vẫn được backend đọc từ Supabase/PostgreSQL cho mỗi request.
+
+Report dialog là progressive form: chọn reason không tạo mutation; plate, description và
+evidence đều có thể được thêm trước một explicit submit. Modal giới hạn theo `100dvh`, cuộn
+nội bộ và giữ submit dock sticky để thao tác được trên màn hình thấp.

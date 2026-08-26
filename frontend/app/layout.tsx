@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { AuthProvider } from "@/components/auth/AuthProvider";
+import { BackendReadinessGate } from "@/components/system/BackendReadinessGate";
 
 import "./globals.css";
 
@@ -27,7 +28,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="vi">
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <BackendReadinessGate>
+          <AuthProvider>{children}</AuthProvider>
+        </BackendReadinessGate>
       </body>
     </html>
   );

@@ -36,6 +36,40 @@ describe("API envelope parsing", () => {
   });
 });
 
+describe("database readiness", () => {
+  it("checks the public database health URL with the supplied AbortSignal", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope({ database: "connected" })),
+    );
+    const authProvider = {
+      getAccessToken: vi.fn(async () => "access-token"),
+      refreshAccessToken: vi.fn(async () => "refreshed-token"),
+    };
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1/",
+      fetcher,
+      authProvider,
+    });
+    const controller = new AbortController();
+
+    await expect(
+      api.checkDatabaseHealth(controller.signal),
+    ).resolves.toEqual({ database: "connected" });
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      "http://api.test/api/v1/health/database",
+    );
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
+      signal: controller.signal,
+    });
+    expect(fetcher.mock.calls[0]?.[1]?.method).toBeUndefined();
+    expect(fetcher.mock.calls[0]?.[1]?.body).toBeUndefined();
+    expect(authProvider.getAccessToken).not.toHaveBeenCalled();
+    expect(authProvider.refreshAccessToken).not.toHaveBeenCalled();
+  });
+});
+
 describe("optional resources", () => {
   it("converts expected 404 responses to null", async () => {
     const fetcher = vi.fn<typeof fetch>(async () =>
@@ -93,7 +127,7 @@ describe("adjacent slot observations", () => {
     await api.observeAdjacentSlot("F1-D02", {
       user_id: "USER-001",
       observed_status: "OCCUPIED",
-      expected_version: 7,
+      expected_slot_version: 7,
     });
 
     expect(String(fetcher.mock.calls[0]?.[0])).toBe(
@@ -104,7 +138,7 @@ describe("adjacent slot observations", () => {
       body: JSON.stringify({
         user_id: "USER-001",
         observed_status: "OCCUPIED",
-        expected_version: 7,
+        expected_slot_version: 7,
       }),
     });
   });
@@ -163,6 +197,29 @@ describe("admin operations client", () => {
     );
   });
 
+  it("updates a selected slot through the guarded admin status endpoint", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope({ id: "F2-D03", status: "OCCUPIED" })),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+    });
+
+    await api.updateAdminSlotStatus("F2-D03", {
+      status: "OCCUPIED",
+      expected_version: 4,
+    });
+
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      "http://api.test/api/v1/admin/parking/slots/F2-D03/status",
+    );
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ status: "OCCUPIED", expected_version: 4 }),
+    });
+  });
+
   it("submits and reads wrong-parking reports through typed endpoints", async () => {
     const fetcher = vi.fn<typeof fetch>(async () =>
       jsonResponse(successEnvelope([])),
@@ -183,6 +240,7 @@ describe("admin operations client", () => {
     await api.getAdminReport("REPORT-001");
     await api.resolveAdminReport("REPORT-001", {
       status: "RESOLVED",
+      verification_outcome: "CONFIRMED",
       resolution_note: "Đã xử lý.",
       expected_version: 0,
     });
@@ -214,5 +272,34 @@ describe("admin operations client", () => {
     expect(fetcher.mock.calls[3]?.[1]?.method).toBe("PATCH");
     expect(fetcher.mock.calls[4]?.[1]?.method).toBe("POST");
     expect(fetcher.mock.calls[5]?.[1]?.method).toBe("DELETE");
+  });
+
+  it("uses multipart only when optional report evidence is selected", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope({ id: "REPORT-IMAGE" })),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+    });
+    const evidence = new File(["image-bytes"], "scene.jpg", {
+      type: "image/jpeg",
+    });
+
+    await api.reportWrongParking({
+      user_id: "USER-001",
+      slot_id: "F2-D03",
+      reason_code: "BLOCKING_ACCESS",
+      evidence,
+    });
+
+    const request = fetcher.mock.calls[0]?.[1];
+    expect(request?.body).toBeInstanceOf(FormData);
+    const body = request?.body as FormData;
+    expect(body.get("user_id")).toBe("USER-001");
+    expect(body.get("slot_id")).toBe("F2-D03");
+    expect(body.get("reason_code")).toBe("BLOCKING_ACCESS");
+    expect(body.get("evidence")).toBe(evidence);
+    expect(new Headers(request?.headers).has("Content-Type")).toBe(false);
   });
 });

@@ -178,6 +178,25 @@ afterEach(() => {
 });
 
 describe("useWebSpeech", () => {
+  it("does not initialize or invoke browser speech APIs when disabled", () => {
+    installRecognition("standard");
+    const synthesis = installSynthesis();
+    const { getUserMedia } = installMediaCapture();
+    const { result } = renderHook(() => useWebSpeech(vi.fn(), false));
+
+    act(() => {
+      result.current.startListening();
+      result.current.speak("Không được đọc");
+    });
+
+    expect(result.current.recognitionSupported).toBe(false);
+    expect(result.current.synthesisSupported).toBe(false);
+    expect(MockSpeechRecognition.instances).toHaveLength(0);
+    expect(MockMediaRecorder.instances).toHaveLength(0);
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(synthesis.speak).not.toHaveBeenCalled();
+  });
+
   it("feature-detects unprefixed SpeechRecognition and configures Vietnamese STT", () => {
     installRecognition("standard");
     const { result } = renderHook(() => useWebSpeech(vi.fn()));

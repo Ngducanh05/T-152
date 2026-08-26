@@ -68,7 +68,7 @@ uv run alembic current
 Expected head:
 
 ```text
-20260819_0007
+20260824_0010
 ```
 
 Confirm these tables exist in Studio:
@@ -84,6 +84,8 @@ parking_reservations
 parking_sessions
 parking_events
 wrong_parking_reports
+slot_observations
+reward_transactions
 ```
 
 `location_checkpoints` must not exist.
@@ -122,7 +124,9 @@ where schemaname = 'public'
     'parking_reservations',
     'parking_sessions',
     'parking_events',
-    'wrong_parking_reports'
+    'wrong_parking_reports',
+    'slot_observations',
+    'reward_transactions'
   )
 order by tablename;
 ```
@@ -141,13 +145,25 @@ The second run must be idempotent.
 Seed owns:
 
 ```text
-canonical F1 map
-parking slots
+canonical F1/F2/F3 map (161 nodes, 177 edges)
+120 parking slots (40 on each floor)
 USER-001
 VEHICLE-001
 ```
 
 Do not store passwords in ParkSmart tables.
+
+Verify the multi-floor seed before sharing the environment:
+
+```sql
+select floor_id, count(*)
+from public.parking_slots
+group by floor_id
+order by floor_id;
+```
+
+Expected result is `F1=40`, `F2=40`, `F3=40`. The repeated seed command must keep these
+counts unchanged.
 
 ## Phase E — Create development Auth identities
 
@@ -275,7 +291,7 @@ Then:
 
 1. Obtain project URL and publishable key.
 2. Obtain DB connection string.
-3. Apply Alembic 0001–0007.
+3. Apply Alembic through `20260824_0010`.
 4. Apply the same platform hardening SQL.
 5. Seed intended dev/staging business data.
 6. Create Auth users.

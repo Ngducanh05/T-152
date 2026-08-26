@@ -1,7 +1,9 @@
 import type { AuthenticatedProfile } from "./auth";
 import type {
   ActiveParkingSession,
+  AddVehicleRequest,
   AdjacentSlotObservationRequest,
+  AdminObservationFilters,
   AdminReportFilters,
   AdminEventFilters,
   ApiEnvelope,
@@ -10,7 +12,6 @@ import type {
   ChatResponse,
   CompleteSessionRequest,
   CreateWrongParkingReportRequest,
-  AddVehicleRequest,
   DeleteWrongParkingReportRequest,
   DeleteWrongParkingReportResponse,
   ConfirmLocationRequest,
@@ -23,6 +24,8 @@ import type {
   ParkingSession,
   ParkingSlot,
   ParkingStatus,
+  ContributionRecord,
+  RejectSlotObservationRequest,
   RecommendationRequest,
   RecommendationResult,
   ReopenWrongParkingReportRequest,
@@ -30,17 +33,25 @@ import type {
   ReportEvidenceUrlResponse,
   ResolveWrongParkingReportRequest,
   ResolveWrongParkingReportResponse,
-  ReviewWrongParkingReportRequest,
   RouteRequest,
   RouteResponse,
+  RewardConfiguration,
+  RewardSummary,
   SimulatorStep,
   SimulatorMutationRequest,
   SlotFilters,
   SpeechTranscriptionResponse,
+  SlotObservation,
+  VerifySlotObservationRequest,
+  UpdateParkingSlotStatusRequest,
   WrongParkingReport,
 } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
+
+export interface DatabaseHealth {
+  database: string;
+}
 
 export interface ApiAuthProvider {
   getAccessToken: () => Promise<string | null>;
@@ -81,18 +92,13 @@ export function formatApiErrorForOperator(
   const requestReference = error.requestId
     ? ` Mã yêu cầu: ${error.requestId}.`
     : "";
-
   return `${userMessage} Mã lỗi: ${error.code}.${requestReference}`;
 }
 
 function isFailureEnvelope(value: unknown): value is ApiFailure {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
+  if (!value || typeof value !== "object") return false;
   const envelope = value as Partial<ApiFailure>;
   const error = envelope.error;
-
   return (
     envelope.success === false &&
     !!error &&
@@ -102,9 +108,7 @@ function isFailureEnvelope(value: unknown): value is ApiFailure {
   );
 }
 
-function isSuccessEnvelope<T>(
-  value: unknown,
-): value is ApiEnvelope<T> & { success: true } {
+function isSuccessEnvelope<T>(value: unknown): value is ApiEnvelope<T> & { success: true } {
   return (
     !!value &&
     typeof value === "object" &&
@@ -115,7 +119,6 @@ function isSuccessEnvelope<T>(
 
 export async function parseApiResponse<T>(response: Response): Promise<T> {
   let body: unknown;
-
   try {
     body = await response.json();
   } catch {
@@ -147,19 +150,12 @@ export async function parseApiResponse<T>(response: Response): Promise<T> {
   return body.data;
 }
 
-function queryString(
-  values: Record<string, string | number | boolean | undefined>,
-) {
+function queryString(values: Record<string, string | number | boolean | undefined>) {
   const params = new URLSearchParams();
-
   for (const [key, value] of Object.entries(values)) {
-    if (value !== undefined) {
-      params.set(key, String(value));
-    }
+    if (value !== undefined) params.set(key, String(value));
   }
-
   const query = params.toString();
-
   return query ? `?${query}` : "";
 }
 
@@ -176,15 +172,6 @@ export class ParkSmartApiClient {
     } = {},
   ) {
     this.baseUrl = (options.baseUrl ?? DEFAULT_API_BASE_URL).replace(/\/$/, "");
-
-    /*
-     * Keep injected fetchers untouched for unit/e2e tests.
-     *
-     * For the native runtime fetch, explicitly bind it to the correct global
-     * object. This prevents browser runtimes from throwing:
-     *
-     * TypeError: Failed to execute 'fetch' on 'Window': Illegal invocation
-     */
     if (options.fetcher) {
       this.fetcher = options.fetcher;
     } else if (typeof window !== "undefined") {
@@ -192,7 +179,6 @@ export class ParkSmartApiClient {
     } else {
       this.fetcher = (input, init) => globalThis.fetch(input, init);
     }
-
     this.authProvider = options.authProvider ?? null;
   }
 
@@ -206,7 +192,6 @@ export class ParkSmartApiClient {
     accessToken: string | null,
   ) {
     const headers = new Headers(options.headers);
-
     if (
       options.body !== undefined &&
       !(typeof FormData !== "undefined" && options.body instanceof FormData) &&
@@ -214,55 +199,23 @@ export class ParkSmartApiClient {
     ) {
       headers.set("Content-Type", "application/json");
     }
-
-    if (accessToken) {
-      headers.set("Authorization", `Bearer ${accessToken}`);
-    }
-
-    return this.fetcher(`${this.baseUrl}${path}`, {
-      ...options,
-      headers,
-    });
+    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+    return this.fetcher(`${this.baseUrl}${path}`, { ...options, headers });
   }
 
-  private async authenticatedFetch(
-    path: string,
-    options: RequestInit = {},
-  ) {
+  private async authenticatedFetch(path: string, options: RequestInit = {}) {
     const provider = this.authProvider;
-
-    const accessToken = provider
-      ? await provider.getAccessToken()
-      : null;
-
-    let response = await this.fetchOnce(
-      path,
-      options,
-      accessToken,
-    );
-
-    if (response.status !== 401 || !provider) {
-      return response;
-    }
+    const accessToken = provider ? await provider.getAccessToken() : null;
+    let response = await this.fetchOnce(path, options, accessToken);
+    if (response.status !== 401 || !provider) return response;
 
     const refreshedToken = await provider.refreshAccessToken();
-
     if (!refreshedToken) {
       await provider.onAuthenticationFailure?.();
-
       return response;
     }
-
-    response = await this.fetchOnce(
-      path,
-      options,
-      refreshedToken,
-    );
-
-    if (response.status === 401) {
-      await provider.onAuthenticationFailure?.();
-    }
-
+    response = await this.fetchOnce(path, options, refreshedToken);
+    if (response.status === 401) await provider.onAuthenticationFailure?.();
     return response;
   }
 
@@ -270,222 +223,141 @@ export class ParkSmartApiClient {
     path: string,
     options: RequestInit = {},
   ): Promise<T> {
-    const response = await this.authenticatedFetch(
-      path,
-      options,
-    );
-
+    const response = await this.authenticatedFetch(path, options);
     return parseApiResponse<T>(response);
   }
 
-  private async optional<T>(
-    request: Promise<T>,
-  ): Promise<T | null> {
+  private async optional<T>(request: Promise<T>): Promise<T | null> {
     try {
       return await request;
     } catch (error) {
-      if (
-        error instanceof ApiError &&
-        error.status === 404
-      ) {
-        return null;
-      }
-
+      if (error instanceof ApiError && error.status === 404) return null;
       throw error;
     }
   }
 
+  async checkDatabaseHealth(signal?: AbortSignal): Promise<DatabaseHealth> {
+    const response = await this.fetchOnce("/health/database", { signal }, null);
+    return parseApiResponse<DatabaseHealth>(response);
+  }
+
   getCurrentUser(signal?: AbortSignal) {
-    return this.request<AuthenticatedProfile>(
-      "/auth/me",
-      { signal },
-    );
+    return this.request<AuthenticatedProfile>("/auth/me", { signal });
   }
 
   onboardCurrentUser(signal?: AbortSignal) {
-    return this.request<AuthenticatedProfile>(
-      "/auth/onboarding",
-      { method: "POST", body: JSON.stringify({}), signal },
-    );
+    return this.request<AuthenticatedProfile>("/auth/onboarding", {
+      method: "POST",
+      body: JSON.stringify({}),
+      signal,
+    });
   }
 
   addVehicle(payload: AddVehicleRequest, signal?: AbortSignal) {
-    return this.request<AuthenticatedProfile>(
-      "/auth/vehicles",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal,
-      },
-    );
+    return this.request<AuthenticatedProfile>("/auth/vehicles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
   }
 
   getMap(signal?: AbortSignal) {
-    return this.request<ParkingMap>(
-      "/parking/map",
-      { signal },
-    );
+    return this.request<ParkingMap>("/parking/map", { signal });
   }
 
   getParkingStatus(signal?: AbortSignal) {
-    return this.request<ParkingStatus>(
-      "/parking/status",
-      { signal },
-    );
+    return this.request<ParkingStatus>("/parking/status", { signal });
   }
 
-  getSlots(
-    filters: SlotFilters = {},
-    signal?: AbortSignal,
-  ) {
+  getSlots(filters: SlotFilters = {}, signal?: AbortSignal) {
     const query = queryString({
       zone_id: filters.zone_id,
       status: filters.status,
       has_charger: filters.has_charger,
       is_accessible: filters.is_accessible,
     });
-
     return this.request<ParkingSlot[]>(
       `/parking/slots${query}`,
       { signal },
     );
   }
 
-  getSlot(
-    slotId: string,
-    signal?: AbortSignal,
-  ) {
+  getSlot(slotId: string, signal?: AbortSignal) {
     return this.request<ParkingSlot>(
       `/parking/slots/${encodeURIComponent(slotId)}`,
       { signal },
     );
   }
 
-  getCurrentLocation(
-    userId: string,
-    signal?: AbortSignal,
-  ) {
+  getCurrentLocation(userId: string, signal?: AbortSignal) {
     return this.optional(
       this.request<Location>(
-        `/locations/current${queryString({
-          user_id: userId,
-        })}`,
+        `/locations/current${queryString({ user_id: userId })}`,
         { signal },
       ),
     );
   }
 
-  confirmLocation(
-    payload: ConfirmLocationRequest,
-    signal?: AbortSignal,
-  ) {
-    return this.request<Location>(
-      "/locations/confirm",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal,
-      },
-    );
+  confirmLocation(payload: ConfirmLocationRequest, signal?: AbortSignal) {
+    return this.request<Location>("/locations/confirm", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
   }
 
-  recommend(
-    payload: RecommendationRequest,
-    signal?: AbortSignal,
-  ) {
-    return this.request<RecommendationResult>(
-      "/recommendations",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal,
-      },
-    );
+  recommend(payload: RecommendationRequest, signal?: AbortSignal) {
+    return this.request<RecommendationResult>("/recommendations", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
   }
 
-  createReservation(
-    payload: CreateReservationRequest,
-    signal?: AbortSignal,
-  ) {
-    return this.request<ParkingReservation>(
-      "/reservations",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal,
-      },
-    );
+  createReservation(payload: CreateReservationRequest, signal?: AbortSignal) {
+    return this.request<ParkingReservation>("/reservations", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
   }
 
-  getActiveReservation(
-    userId: string,
-    signal?: AbortSignal,
-  ) {
+  getActiveReservation(userId: string, signal?: AbortSignal) {
     return this.optional(
       this.request<ParkingReservation>(
-        `/reservations/active${queryString({
-          user_id: userId,
-        })}`,
+        `/reservations/active${queryString({ user_id: userId })}`,
         { signal },
       ),
     );
   }
 
-  cancelReservation(
-    reservationId: string,
-    userId: string,
-    signal?: AbortSignal,
-  ) {
+  cancelReservation(reservationId: string, userId: string, signal?: AbortSignal) {
     return this.request<ParkingReservation>(
-      `/reservations/${encodeURIComponent(
-        reservationId,
-      )}${queryString({
-        user_id: userId,
-      })}`,
-      {
-        method: "DELETE",
-        signal,
-      },
+      `/reservations/${encodeURIComponent(reservationId)}${queryString({ user_id: userId })}`,
+      { method: "DELETE", signal },
     );
   }
 
-  getRoute(
-    payload: RouteRequest,
-    signal?: AbortSignal,
-  ) {
-    return this.request<RouteResponse>(
-      "/routes",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal,
-      },
-    );
+  getRoute(payload: RouteRequest, signal?: AbortSignal) {
+    return this.request<RouteResponse>("/routes", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
   }
 
-  confirmParking(
-    payload: ConfirmParkingRequest,
-    signal?: AbortSignal,
-  ) {
-    return this.request<ParkingSession>(
-      "/sessions/confirm-parking",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal,
-      },
-    );
+  confirmParking(payload: ConfirmParkingRequest, signal?: AbortSignal) {
+    return this.request<ParkingSession>("/sessions/confirm-parking", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
   }
 
-  getActiveSession(
-    userId: string,
-    signal?: AbortSignal,
-  ) {
+  getActiveSession(userId: string, signal?: AbortSignal) {
     return this.optional(
       this.request<ActiveParkingSession>(
-        `/sessions/active${queryString({
-          user_id: userId,
-        })}`,
+        `/sessions/active${queryString({ user_id: userId })}`,
         { signal },
       ),
     );
@@ -497,9 +369,7 @@ export class ParkSmartApiClient {
     signal?: AbortSignal,
   ) {
     return this.request<ParkingSession>(
-      `/sessions/${encodeURIComponent(
-        sessionId,
-      )}/complete`,
+      `/sessions/${encodeURIComponent(sessionId)}/complete`,
       {
         method: "POST",
         body: JSON.stringify(payload),
@@ -508,18 +378,12 @@ export class ParkSmartApiClient {
     );
   }
 
-  chat(
-    payload: ChatRequest,
-    signal?: AbortSignal,
-  ) {
-    return this.request<ChatResponse>(
-      "/agent/chat",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal,
-      },
-    );
+  chat(payload: ChatRequest, signal?: AbortSignal) {
+    return this.request<ChatResponse>("/agent/chat", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
   }
 
   observeAdjacentSlot(
@@ -527,10 +391,8 @@ export class ParkSmartApiClient {
     payload: AdjacentSlotObservationRequest,
     signal?: AbortSignal,
   ) {
-    return this.request<ParkingSlot>(
-      `/parking/slots/${encodeURIComponent(
-        slotId,
-      )}/observation`,
+    return this.request<SlotObservation>(
+      `/parking/slots/${encodeURIComponent(slotId)}/observation`,
       {
         method: "POST",
         body: JSON.stringify(payload),
@@ -539,93 +401,56 @@ export class ParkSmartApiClient {
     );
   }
 
-  async transcribeSpeech(
-    audio: Blob,
-    signal?: AbortSignal,
-  ) {
-    const response = await this.authenticatedFetch(
-      "/speech/transcriptions",
-      {
-        method: "POST",
-        body: audio,
-        headers: {
-          "Content-Type":
-            audio.type || "audio/webm",
-        },
-        signal,
-      },
-    );
-
-    return parseApiResponse<SpeechTranscriptionResponse>(
-      response,
-    );
+  async transcribeSpeech(audio: Blob, signal?: AbortSignal) {
+    const response = await this.authenticatedFetch("/speech/transcriptions", {
+      method: "POST",
+      body: audio,
+      headers: { "Content-Type": audio.type || "audio/webm" },
+      signal,
+    });
+    return parseApiResponse<SpeechTranscriptionResponse>(response);
   }
 
   resetDemo(signal?: AbortSignal) {
-    return this.request<SimulatorStep[]>(
-      "/simulator/reset",
-      {
-        method: "POST",
-        body: JSON.stringify({}),
-        signal,
-      },
-    );
+    return this.request<SimulatorStep[]>("/simulator/reset", {
+      method: "POST",
+      body: JSON.stringify({}),
+      signal,
+    });
   }
 
-  parkSimulatedVehicle(
-    payload: SimulatorMutationRequest,
-    signal?: AbortSignal,
-  ) {
-    return this.request<ParkingSlot>(
-      "/simulator/park",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal,
-      },
-    );
+  parkSimulatedVehicle(payload: SimulatorMutationRequest, signal?: AbortSignal) {
+    return this.request<ParkingSlot>("/simulator/park", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
   }
 
-  leaveSimulatedVehicle(
-    payload: SimulatorMutationRequest,
-    signal?: AbortSignal,
-  ) {
-    return this.request<ParkingSlot>(
-      "/simulator/leave",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal,
-      },
-    );
+  leaveSimulatedVehicle(payload: SimulatorMutationRequest, signal?: AbortSignal) {
+    return this.request<ParkingSlot>("/simulator/leave", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
   }
 
   runFixedScenario(signal?: AbortSignal) {
-    return this.request<SimulatorStep[]>(
-      "/simulator/run-scenario",
-      {
-        method: "POST",
-        body: JSON.stringify({}),
-        signal,
-      },
-    );
+    return this.request<SimulatorStep[]>("/simulator/run-scenario", {
+      method: "POST",
+      body: JSON.stringify({}),
+      signal,
+    });
   }
 
-  getAdminEvents(
-    filters: AdminEventFilters = {},
-    signal?: AbortSignal,
-  ) {
+  getAdminEvents(filters: AdminEventFilters = {}, signal?: AbortSignal) {
     const query = queryString({
       limit: filters.limit,
       zone_id: filters.zone_id,
       event_type: filters.event_type,
       slot_id: filters.slot_id,
     });
-
-    return this.request<ParkingEvent[]>(
-      `/admin/events${query}`,
-      { signal },
-    );
+    return this.request<ParkingEvent[]>(`/admin/events${query}`, { signal });
   }
 
   reportWrongParking(
@@ -640,53 +465,112 @@ export class ParkSmartApiClient {
       if (payload.observed_plate_number) {
         form.set("observed_plate_number", payload.observed_plate_number);
       }
-      if (payload.description) {
-        form.set("description", payload.description);
-      }
+      if (payload.description) form.set("description", payload.description);
       form.set("evidence", payload.evidence);
-      return this.request<WrongParkingReport>(
-        "/reports/wrong-parking",
-        {
-          method: "POST",
-          body: form,
-          signal,
-        },
-      );
-    }
-    return this.request<WrongParkingReport>(
-      "/reports/wrong-parking",
-      {
+      return this.request<WrongParkingReport>("/reports/wrong-parking", {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: form,
         signal,
-      },
-    );
+      });
+    }
+    return this.request<WrongParkingReport>("/reports/wrong-parking", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
   }
 
-  getAdminReports(
-    filters: AdminReportFilters = {},
-    signal?: AbortSignal,
-  ) {
+  getAdminReports(filters: AdminReportFilters = {}, signal?: AbortSignal) {
     const query = queryString({
       status: filters.status,
       slot_id: filters.slotId,
       limit: filters.limit ?? 20,
     });
+    return this.request<WrongParkingReport[]>(`/admin/reports${query}`, {
+      signal,
+    });
+  }
 
-    return this.request<WrongParkingReport[]>(
-      `/admin/reports${query}`,
+  updateAdminSlotStatus(
+    slotId: string,
+    payload: UpdateParkingSlotStatusRequest,
+    signal?: AbortSignal,
+  ) {
+    return this.request<ParkingSlot>(
+      `/admin/parking/slots/${encodeURIComponent(slotId)}/status`,
+      { method: "PATCH", body: JSON.stringify(payload), signal },
+    );
+  }
+
+  getAdminObservations(
+    filters: AdminObservationFilters = {},
+    signal?: AbortSignal,
+  ) {
+    const query = queryString({
+      status: filters.status,
+      floor_id: filters.floorId,
+      slot_id: filters.slotId,
+      user_id: filters.userId,
+      limit: filters.limit ?? 50,
+    });
+    return this.request<SlotObservation[]>(
+      `/admin/slot-observations${query}`,
       { signal },
     );
   }
 
-  getAdminReport(
-    reportId: string,
+  getAdminObservation(observationId: string, signal?: AbortSignal) {
+    return this.request<SlotObservation>(
+      `/admin/slot-observations/${encodeURIComponent(observationId)}`,
+      { signal },
+    );
+  }
+
+  verifyAdminObservation(
+    observationId: string,
+    payload: VerifySlotObservationRequest,
     signal?: AbortSignal,
   ) {
+    return this.request<SlotObservation>(
+      `/admin/slot-observations/${encodeURIComponent(observationId)}/verify`,
+      { method: "POST", body: JSON.stringify(payload), signal },
+    );
+  }
+
+  rejectAdminObservation(
+    observationId: string,
+    payload: RejectSlotObservationRequest,
+    signal?: AbortSignal,
+  ) {
+    return this.request<SlotObservation>(
+      `/admin/slot-observations/${encodeURIComponent(observationId)}/reject`,
+      { method: "POST", body: JSON.stringify(payload), signal },
+    );
+  }
+
+  getRewardSummary(userId: string, signal?: AbortSignal) {
+    return this.request<RewardSummary>(
+      `/rewards/users/${encodeURIComponent(userId)}/summary`,
+      { signal },
+    );
+  }
+
+  getRewardConfiguration(signal?: AbortSignal) {
+    return this.request<RewardConfiguration>("/rewards/configuration", {
+      signal,
+    });
+  }
+
+  getUserContributions(userId: string, signal?: AbortSignal) {
+    return this.request<ContributionRecord[]>(
+      `/contributions/users/${encodeURIComponent(userId)}`,
+      { signal },
+    );
+  }
+
+  getAdminReport(reportId: string, signal?: AbortSignal) {
     return this.request<WrongParkingReport>(
-      `/admin/reports/${encodeURIComponent(
-        reportId,
-      )}`,
+      `/admin/reports/${encodeURIComponent(reportId)}`,
       { signal },
     );
   }
@@ -697,14 +581,8 @@ export class ParkSmartApiClient {
     signal?: AbortSignal,
   ) {
     return this.request<ResolveWrongParkingReportResponse>(
-      `/admin/reports/${encodeURIComponent(
-        reportId,
-      )}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-        signal,
-      },
+      `/admin/reports/${encodeURIComponent(reportId)}`,
+      { method: "PATCH", body: JSON.stringify(payload), signal },
     );
   }
 
@@ -714,44 +592,8 @@ export class ParkSmartApiClient {
     signal?: AbortSignal,
   ) {
     return this.request<ReopenWrongParkingReportResponse>(
-      `/admin/reports/${encodeURIComponent(
-        reportId,
-      )}/reopen`,
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal,
-      },
-    );
-  }
-
-  confirmAdminReport(
-    reportId: string,
-    payload: ReviewWrongParkingReportRequest,
-    signal?: AbortSignal,
-  ) {
-    return this.request<WrongParkingReport>(
-      `/admin/reports/${encodeURIComponent(reportId)}/confirm`,
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal,
-      },
-    );
-  }
-
-  rejectAdminReport(
-    reportId: string,
-    payload: ReviewWrongParkingReportRequest,
-    signal?: AbortSignal,
-  ) {
-    return this.request<WrongParkingReport>(
-      `/admin/reports/${encodeURIComponent(reportId)}/reject`,
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal,
-      },
+      `/admin/reports/${encodeURIComponent(reportId)}/reopen`,
+      { method: "POST", body: JSON.stringify(payload), signal },
     );
   }
 
@@ -767,25 +609,14 @@ export class ParkSmartApiClient {
     payload: DeleteWrongParkingReportRequest,
     signal?: AbortSignal,
   ) {
-    const query = queryString({
-      expected_version: payload.expected_version,
-    });
-
+    const query = queryString({ expected_version: payload.expected_version });
     return this.request<DeleteWrongParkingReportResponse>(
-      `/admin/reports/${encodeURIComponent(
-        reportId,
-      )}${query}`,
-      {
-        method: "DELETE",
-        signal,
-      },
+      `/admin/reports/${encodeURIComponent(reportId)}${query}`,
+      { method: "DELETE", signal },
     );
   }
 }
 
-export const parkSmartApi =
-  new ParkSmartApiClient({
-    baseUrl:
-      process.env.NEXT_PUBLIC_API_BASE_URL ??
-      DEFAULT_API_BASE_URL,
-  });
+export const parkSmartApi = new ParkSmartApiClient({
+  baseUrl: process.env.NEXT_PUBLIC_API_BASE_URL ?? DEFAULT_API_BASE_URL,
+});

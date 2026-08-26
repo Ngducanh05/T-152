@@ -14,6 +14,8 @@ from src.core.db_models import (
     ParkingSession,
     ParkingSlot,
     ParkingUser,
+    RewardTransaction,
+    SlotObservation,
     Vehicle,
     WrongParkingReport,
 )
@@ -33,6 +35,8 @@ async def seed_session() -> AsyncGenerator[AsyncSession, None]:
         )
         async with factory() as session:
             for model in (
+                RewardTransaction,
+                SlotObservation,
                 WrongParkingReport,
                 ParkingEvent,
                 ParkingSession,

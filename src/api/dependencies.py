@@ -64,9 +64,9 @@ async def require_parking_user_or_demo(
     settings: SettingsDependency,
 ) -> CurrentUser | None:
     """Require the regular user role and a linked ParkingUser outside demo mode."""
-    if settings.demo_mode:
-        return user
-    if user is None:  # pragma: no cover - enforced by require_authenticated_or_demo
+    if settings.demo_mode and user is None:
+        return None
+    if user is None:  # pragma: no cover - enforced outside demo mode
         raise _access_error(
             status.HTTP_401_UNAUTHORIZED,
             "AUTH_REQUIRED",
@@ -92,8 +92,8 @@ async def require_admin_or_demo(
     user: Annotated[CurrentUser | None, Depends(get_optional_current_user)],
 ) -> CurrentUser | None:
     """Allow demo operations, otherwise require the backend-owned admin role."""
-    if settings.demo_mode:
-        return user
+    if settings.demo_mode and user is None:
+        return None
     if user is None:
         raise _access_error(
             status.HTTP_401_UNAUTHORIZED,

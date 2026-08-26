@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useState } from "react";
 
 import { useWebSpeech } from "@/hooks/use-web-speech";
+import { isSpeechEnabled } from "@/lib/public-config";
 
 interface AgentComposerProps {
   onSend: (message: string) => Promise<string | null>;
@@ -15,17 +16,21 @@ export function AgentComposer({
   threadReady,
   chatPending,
 }: AgentComposerProps) {
+  const speechEnabled = isSpeechEnabled();
   const [draft, setDraft] = useState("");
   const [voiceOrigin, setVoiceOrigin] = useState(false);
   const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const speech = useWebSpeech((finalTranscript) => {
-    setDraft(finalTranscript);
-    setVoiceOrigin(true);
-    setVoiceNotice(
-      "Đã nhận giọng nói. Hãy kiểm tra nội dung rồi nhấn Gửi.",
-    );
-  });
+  const speech = useWebSpeech(
+    (finalTranscript) => {
+      setDraft(finalTranscript);
+      setVoiceOrigin(true);
+      setVoiceNotice(
+        "Đã nhận giọng nói. Hãy kiểm tra nội dung rồi nhấn Gửi.",
+      );
+    },
+    speechEnabled,
+  );
   const pending = chatPending || submitting;
 
   function updateDraft(event: ChangeEvent<HTMLInputElement>) {
@@ -60,17 +65,19 @@ export function AgentComposer({
     setSubmitting(true);
     try {
       const responseMessage = await onSend(message);
-      if (shouldSpeakResponse && responseMessage) speech.speak(responseMessage);
+      if (speechEnabled && shouldSpeakResponse && responseMessage) {
+        speech.speak(responseMessage);
+      }
     } finally {
       setSubmitting(false);
     }
   }
 
-  let statusMessage = voiceNotice;
-  if (!speech.recognitionSupported) {
+  let statusMessage = speechEnabled ? voiceNotice : null;
+  if (speechEnabled && !speech.recognitionSupported) {
     statusMessage =
       "Trình duyệt không hỗ trợ nhập giọng nói. Hãy nhập nội dung bằng bàn phím.";
-  } else if (speech.errorMessage) {
+  } else if (speechEnabled && speech.errorMessage) {
     statusMessage = speech.errorMessage;
   } else if (speech.status === "listening") {
     statusMessage = "Đang nghe… Nhấn Dừng nghe để kết thúc.";
@@ -90,7 +97,7 @@ export function AgentComposer({
           aria-label="Tin nhắn cho ParkSmart AI"
           disabled={!threadReady || pending}
         />
-        {speech.status === "speaking" && (
+        {speechEnabled && speech.status === "speaking" && (
           <button
             type="button"
             onClick={speech.stopSpeaking}
@@ -99,25 +106,27 @@ export function AgentComposer({
             ■
           </button>
         )}
-        <button
-          type="button"
-          className={
-            speech.status === "listening" || speech.status === "preparing"
-              ? "listening"
-              : undefined
-          }
-          onClick={toggleListening}
-          disabled={!threadReady || pending || !speech.recognitionSupported}
-          aria-label={
-            speech.status === "listening" || speech.status === "preparing"
-              ? "Dừng nghe"
-              : "Bắt đầu nhập bằng giọng nói"
-          }
-        >
-          {speech.status === "listening" || speech.status === "preparing"
-            ? "■"
-            : "🎤"}
-        </button>
+        {speechEnabled && (
+          <button
+            type="button"
+            className={
+              speech.status === "listening" || speech.status === "preparing"
+                ? "listening"
+                : undefined
+            }
+            onClick={toggleListening}
+            disabled={!threadReady || pending || !speech.recognitionSupported}
+            aria-label={
+              speech.status === "listening" || speech.status === "preparing"
+                ? "Dừng nghe"
+                : "Bắt đầu nhập bằng giọng nói"
+            }
+          >
+            {speech.status === "listening" || speech.status === "preparing"
+              ? "■"
+              : "🎤"}
+          </button>
+        )}
         <button
           type="submit"
           disabled={!threadReady || pending || !draft.trim()}
