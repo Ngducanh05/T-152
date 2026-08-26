@@ -13,9 +13,13 @@ import {
   successResponse,
 } from "@/test/fixtures";
 
-import { PARKING_POLL_INTERVAL_MS, useParkSmartData } from "./use-parksmart-data";
+import {
+  PARKING_POLL_INTERVAL_MS,
+  useParkSmartData,
+} from "./use-parksmart-data";
 
 beforeEach(() => vi.useFakeTimers());
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -24,27 +28,53 @@ afterEach(() => {
 it("shows initial loading until the canonical map and status arrive", async () => {
   let resolveMap!: (response: Response) => void;
   let resolveStatus!: (response: Response) => void;
+
   const mapRequest = new Promise<Response>((resolve) => {
     resolveMap = resolve;
   });
+
   const statusRequest = new Promise<Response>((resolve) => {
     resolveStatus = resolve;
   });
+
   const fetcher = vi.fn<typeof fetch>(async (input) => {
     const url = String(input);
-    if (url.endsWith("/parking/map")) return mapRequest;
-    if (url.endsWith("/parking/status")) return statusRequest;
-    if (url.includes("/parking/slots")) return successResponse(canonicalMap.slots);
-    if (url.includes("/locations/current")) return successResponse(currentLocation);
-    if (url.includes("/reservations/active")) return successResponse(activeReservation);
-    if (url.includes("/sessions/active")) return successResponse(activeSession);
+
+    if (url.endsWith("/parking/map")) {
+      return mapRequest;
+    }
+
+    if (url.endsWith("/parking/status")) {
+      return statusRequest;
+    }
+
+    if (url.includes("/parking/slots")) {
+      return successResponse(canonicalMap.slots);
+    }
+
+    if (url.includes("/locations/current")) {
+      return successResponse(currentLocation);
+    }
+
+    if (url.includes("/reservations/active")) {
+      return successResponse(activeReservation);
+    }
+
+    if (url.includes("/sessions/active")) {
+      return successResponse(activeSession);
+    }
+
     throw new Error(`Unexpected request: ${url}`);
   });
+
   const api = new ParkSmartApiClient({
     baseUrl: "http://api.test/api/v1",
     fetcher,
   });
-  const { result } = renderHook(() => useParkSmartData(api, "USER-001"));
+
+  const { result } = renderHook(() =>
+    useParkSmartData(api, "USER-001"),
+  );
 
   expect(result.current.loading).toBe(true);
   expect(result.current.map).toBeNull();
@@ -52,6 +82,7 @@ it("shows initial loading until the canonical map and status arrive", async () =
   await act(async () => {
     resolveMap(successResponse(canonicalMap));
     resolveStatus(successResponse(parkingStatus));
+
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -66,25 +97,45 @@ it("shows initial loading until the canonical map and status arrive", async () =
 it("finishes initial loading when React Strict Mode remounts the effect", async () => {
   const fetcher = vi.fn<typeof fetch>(async (input) => {
     const url = String(input);
-    if (url.endsWith("/parking/map")) return successResponse(canonicalMap);
-    if (url.endsWith("/parking/status")) return successResponse(parkingStatus);
-    if (url.includes("/parking/slots")) return successResponse(canonicalMap.slots);
-    if (url.includes("/locations/current")) return successResponse(currentLocation);
+
+    if (url.endsWith("/parking/map")) {
+      return successResponse(canonicalMap);
+    }
+
+    if (url.endsWith("/parking/status")) {
+      return successResponse(parkingStatus);
+    }
+
+    if (url.includes("/parking/slots")) {
+      return successResponse(canonicalMap.slots);
+    }
+
+    if (url.includes("/locations/current")) {
+      return successResponse(currentLocation);
+    }
+
     if (url.includes("/reservations/active")) {
       return errorResponse("NOT_FOUND", "Not found.", 404);
     }
+
     if (url.includes("/sessions/active")) {
       return errorResponse("NOT_FOUND", "Not found.", 404);
     }
+
     throw new Error(`Unexpected request: ${url}`);
   });
+
   const api = new ParkSmartApiClient({
     baseUrl: "http://api.test/api/v1",
     fetcher,
   });
-  const { result } = renderHook(() => useParkSmartData(api, "USER-001"), {
-    wrapper: StrictMode,
-  });
+
+  const { result } = renderHook(
+    () => useParkSmartData(api, "USER-001"),
+    {
+      wrapper: StrictMode,
+    },
+  );
 
   await act(async () => {
     for (let index = 0; index < 10; index += 1) {
@@ -97,36 +148,123 @@ it("finishes initial loading when React Strict Mode remounts the effect", async 
   expect(result.current.error).toBeNull();
 });
 
-it("prevents overlapping polls and aborts requests and timers on unmount", async () => {
-  const signals: AbortSignal[] = [];
+it("polls parking only after the configured polling interval", async () => {
   let statusCalls = 0;
   let slotCalls = 0;
-  const neverResolve = () => new Promise<Response>(() => undefined);
 
-  const fetcher = vi.fn<typeof fetch>(async (input, init) => {
-    if (init?.signal) signals.push(init.signal);
+  const fetcher = vi.fn<typeof fetch>(async (input) => {
     const url = String(input);
+
     if (url.endsWith("/parking/map")) {
       return successResponse(canonicalMap);
     }
+
     if (url.endsWith("/parking/status")) {
       statusCalls += 1;
-      return statusCalls === 1
-        ? successResponse(parkingStatus)
-        : neverResolve();
+      return successResponse(parkingStatus);
     }
+
     if (url.includes("/parking/slots")) {
       slotCalls += 1;
-      return slotCalls === 1 ? successResponse(canonicalMap.slots) : neverResolve();
+      return successResponse(canonicalMap.slots);
     }
-    return errorResponse("NOT_FOUND", "Not found.", 404, "req-404");
+
+    throw new Error(`Unexpected request: ${url}`);
   });
+
   const api = new ParkSmartApiClient({
     baseUrl: "http://api.test/api/v1",
     fetcher,
   });
 
-  const { result, unmount } = renderHook(() => useParkSmartData(api, "USER-001"));
+  const { unmount } = renderHook(() =>
+    useParkSmartData(api),
+  );
+
+  await act(async () => {
+    for (let index = 0; index < 10; index += 1) {
+      await Promise.resolve();
+    }
+  });
+
+  // Initial authoritative load.
+  expect(slotCalls).toBe(1);
+  expect(statusCalls).toBe(1);
+
+  // The polling interval has not elapsed yet.
+  await act(async () => {
+    vi.advanceTimersByTime(PARKING_POLL_INTERVAL_MS - 1);
+    await Promise.resolve();
+  });
+
+  expect(slotCalls).toBe(1);
+  expect(statusCalls).toBe(1);
+
+  // Once the configured interval elapses, exactly one poll runs.
+  await act(async () => {
+    vi.advanceTimersByTime(1);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(slotCalls).toBe(2);
+  expect(statusCalls).toBe(2);
+
+  unmount();
+});
+
+it("prevents overlapping polls and aborts requests and timers on unmount", async () => {
+  const signals: AbortSignal[] = [];
+  let statusCalls = 0;
+  let slotCalls = 0;
+
+  const neverResolve = () =>
+    new Promise<Response>(() => undefined);
+
+  const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+    if (init?.signal) {
+      signals.push(init.signal);
+    }
+
+    const url = String(input);
+
+    if (url.endsWith("/parking/map")) {
+      return successResponse(canonicalMap);
+    }
+
+    if (url.endsWith("/parking/status")) {
+      statusCalls += 1;
+
+      return statusCalls === 1
+        ? successResponse(parkingStatus)
+        : neverResolve();
+    }
+
+    if (url.includes("/parking/slots")) {
+      slotCalls += 1;
+
+      return slotCalls === 1
+        ? successResponse(canonicalMap.slots)
+        : neverResolve();
+    }
+
+    return errorResponse(
+      "NOT_FOUND",
+      "Not found.",
+      404,
+      "req-404",
+    );
+  });
+
+  const api = new ParkSmartApiClient({
+    baseUrl: "http://api.test/api/v1",
+    fetcher,
+  });
+
+  const { result, unmount } = renderHook(() =>
+    useParkSmartData(api, "USER-001"),
+  );
+
   await act(async () => {
     await Promise.resolve();
     await Promise.resolve();
@@ -141,42 +279,74 @@ it("prevents overlapping polls and aborts requests and timers on unmount", async
     vi.advanceTimersByTime(PARKING_POLL_INTERVAL_MS);
     await Promise.resolve();
   });
+
   expect(slotCalls).toBe(2);
 
   await act(async () => {
-    vi.advanceTimersByTime(PARKING_POLL_INTERVAL_MS * 3);
+    vi.advanceTimersByTime(
+      PARKING_POLL_INTERVAL_MS * 3,
+    );
     await Promise.resolve();
   });
+
+  /*
+   * The previous poll is still pending, so no additional
+   * parking request is allowed to start.
+   */
   expect(slotCalls).toBe(2);
 
   unmount();
-  expect(signals.every((signal) => signal.aborted)).toBe(true);
+
+  expect(
+    signals.every((signal) => signal.aborted),
+  ).toBe(true);
+
   expect(vi.getTimerCount()).toBe(0);
 
-  vi.advanceTimersByTime(PARKING_POLL_INTERVAL_MS * 2);
+  vi.advanceTimersByTime(
+    PARKING_POLL_INTERVAL_MS * 2,
+  );
+
   expect(slotCalls).toBe(2);
 });
 
 it("does not request user-scoped resources when no user id is supplied", async () => {
   const fetcher = vi.fn<typeof fetch>(async (input) => {
     const url = String(input);
-    if (url.endsWith("/parking/map")) return successResponse(canonicalMap);
-    if (url.endsWith("/parking/status")) return successResponse(parkingStatus);
-    if (url.includes("/parking/slots")) return successResponse(canonicalMap.slots);
+
+    if (url.endsWith("/parking/map")) {
+      return successResponse(canonicalMap);
+    }
+
+    if (url.endsWith("/parking/status")) {
+      return successResponse(parkingStatus);
+    }
+
+    if (url.includes("/parking/slots")) {
+      return successResponse(canonicalMap.slots);
+    }
+
     if (
       url.includes("/locations/current") ||
       url.includes("/reservations/active") ||
       url.includes("/sessions/active")
     ) {
-      throw new Error(`Unexpected user-scoped request: ${url}`);
+      throw new Error(
+        `Unexpected user-scoped request: ${url}`,
+      );
     }
+
     throw new Error(`Unexpected request: ${url}`);
   });
+
   const api = new ParkSmartApiClient({
     baseUrl: "http://api.test/api/v1",
     fetcher,
   });
-  const { result, unmount } = renderHook(() => useParkSmartData(api));
+
+  const { result, unmount } = renderHook(() =>
+    useParkSmartData(api),
+  );
 
   await act(async () => {
     await Promise.resolve();
@@ -187,6 +357,7 @@ it("does not request user-scoped resources when no user id is supplied", async (
   expect(result.current.currentLocation).toBeNull();
   expect(result.current.activeReservation).toBeNull();
   expect(result.current.activeSession).toBeNull();
+
   expect(fetcher).not.toHaveBeenCalledWith(
     expect.stringContaining("/locations/current"),
     expect.anything(),
@@ -196,34 +367,71 @@ it("does not request user-scoped resources when no user id is supplied", async (
 });
 
 it("aborts the old user lifecycle when the user id changes", async () => {
-  const signalsByUser = new Map<string, AbortSignal[]>();
+  const signalsByUser = new Map<
+    string,
+    AbortSignal[]
+  >();
+
   const requestedUsers: string[] = [];
-  const fetcher = vi.fn<typeof fetch>(async (input, init) => {
-    const url = String(input);
-    const parsed = new URL(url);
-    const userId = parsed.searchParams.get("user_id");
-    if (userId && init?.signal) {
-      requestedUsers.push(userId);
-      signalsByUser.set(userId, [
-        ...(signalsByUser.get(userId) ?? []),
-        init.signal,
-      ]);
-    }
-    if (url.endsWith("/parking/map")) return successResponse(canonicalMap);
-    if (url.endsWith("/parking/status")) return successResponse(parkingStatus);
-    if (url.includes("/parking/slots")) return successResponse(canonicalMap.slots);
-    if (url.includes("/locations/current")) return successResponse(currentLocation);
-    if (url.includes("/reservations/active")) return successResponse(activeReservation);
-    if (url.includes("/sessions/active")) return successResponse(activeSession);
-    throw new Error(`Unexpected request: ${url}`);
-  });
+
+  const fetcher = vi.fn<typeof fetch>(
+    async (input, init) => {
+      const url = String(input);
+      const parsed = new URL(url);
+
+      const userId =
+        parsed.searchParams.get("user_id");
+
+      if (userId && init?.signal) {
+        requestedUsers.push(userId);
+
+        signalsByUser.set(userId, [
+          ...(signalsByUser.get(userId) ?? []),
+          init.signal,
+        ]);
+      }
+
+      if (url.endsWith("/parking/map")) {
+        return successResponse(canonicalMap);
+      }
+
+      if (url.endsWith("/parking/status")) {
+        return successResponse(parkingStatus);
+      }
+
+      if (url.includes("/parking/slots")) {
+        return successResponse(canonicalMap.slots);
+      }
+
+      if (url.includes("/locations/current")) {
+        return successResponse(currentLocation);
+      }
+
+      if (url.includes("/reservations/active")) {
+        return successResponse(activeReservation);
+      }
+
+      if (url.includes("/sessions/active")) {
+        return successResponse(activeSession);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  );
+
   const api = new ParkSmartApiClient({
     baseUrl: "http://api.test/api/v1",
     fetcher,
   });
+
   const { rerender, unmount } = renderHook(
-    ({ userId }) => useParkSmartData(api, userId),
-    { initialProps: { userId: "USER-A" } },
+    ({ userId }) =>
+      useParkSmartData(api, userId),
+    {
+      initialProps: {
+        userId: "USER-A",
+      },
+    },
   );
 
   await act(async () => {
@@ -231,25 +439,34 @@ it("aborts the old user lifecycle when the user id changes", async () => {
     await Promise.resolve();
   });
 
-  rerender({ userId: "USER-B" });
-
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
+  rerender({
+    userId: "USER-B",
   });
 
-  expect(signalsByUser.get("USER-A")?.every((signal) => signal.aborted)).toBe(
-    true,
-  );
-  expect(requestedUsers).toContain("USER-B");
-
   await act(async () => {
-    vi.advanceTimersByTime(PARKING_POLL_INTERVAL_MS * 2);
+    await Promise.resolve();
     await Promise.resolve();
   });
 
   expect(
-    requestedUsers.filter((userId) => userId === "USER-A").length,
+    signalsByUser
+      .get("USER-A")
+      ?.every((signal) => signal.aborted),
+  ).toBe(true);
+
+  expect(requestedUsers).toContain("USER-B");
+
+  await act(async () => {
+    vi.advanceTimersByTime(
+      PARKING_POLL_INTERVAL_MS * 2,
+    );
+    await Promise.resolve();
+  });
+
+  expect(
+    requestedUsers.filter(
+      (userId) => userId === "USER-A",
+    ).length,
   ).toBe(3);
 
   unmount();

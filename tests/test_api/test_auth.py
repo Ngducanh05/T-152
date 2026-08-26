@@ -257,3 +257,73 @@ async def test_onboarding_is_idempotent_under_concurrent_requests(
     assert parking_user_count == 1
     assert profile is not None
     assert profile.app_role is AppRoleEnum.USER
+
+@pytest.mark.asyncio
+async def test_new_user_can_add_first_vehicle_and_link_default_vehicle(
+    auth_client_with_db: tuple[
+        httpx.AsyncClient,
+        async_sessionmaker[AsyncSession],
+    ],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, session_factory = auth_client_with_db
+
+    auth_id = UUID("44444444-4444-4444-8444-444444444444")
+
+    async def fake_verify(_token: str) -> dict[str, object]:
+        return {
+            "id": str(auth_id),
+            "email": "vehicle-user@example.com",
+            "user_metadata": {
+                "full_name": "Vehicle User",
+            },
+        }
+
+    monkeypatch.setattr(
+        auth_routes,
+        "verify_supabase_access_token",
+        fake_verify,
+    )
+    monkeypatch.setattr(
+        auth_service,
+        "verify_supabase_access_token",
+        fake_verify,
+    )
+
+    headers = {
+        "Authorization": "Bearer test-token",
+    }
+
+    onboarding_response = await client.post(
+        "/api/v1/auth/onboarding",
+        headers=headers,
+    )
+
+    assert onboarding_response.status_code == 200
+    assert onboarding_response.json()["data"]["default_vehicle_id"] is None
+
+    vehicle_response = await client.post(
+        "/api/v1/auth/vehicles",
+        headers=headers,
+        json={
+            "plate_number": "29A-123.45",
+            "requires_charging": False,
+        },
+    )
+
+    assert vehicle_response.status_code == 200
+
+    data = vehicle_response.json()["data"]
+    vehicle_id = data["default_vehicle_id"]
+
+    assert vehicle_id is not None
+
+    async with session_factory() as session:
+        profile = await session.get(Profile, auth_id)
+        vehicle = await session.get(Vehicle, vehicle_id)
+
+    assert profile is not None
+    assert vehicle is not None
+    assert profile.default_vehicle_id == vehicle.id
+    assert vehicle.user_id == profile.parking_user_id
+    assert vehicle.plate_number == "29A-123.45"

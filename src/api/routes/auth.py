@@ -131,6 +131,7 @@ async def add_first_vehicle(
     session: SessionDependency,
 ) -> SuccessResponse[CurrentUser]:
     current_user = await get_current_user(credentials, session)
+
     if current_user.parking_user_id is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -141,10 +142,14 @@ async def add_first_vehicle(
         )
 
     profile = await session.get(Profile, current_user.id)
+
     if profile is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "PROFILE_NOT_FOUND", "message": "The ParkSmart profile does not exist."},
+            detail={
+                "code": "PROFILE_NOT_FOUND",
+                "message": "The ParkSmart profile does not exist.",
+            },
         )
 
     vehicle = Vehicle(
@@ -153,18 +158,30 @@ async def add_first_vehicle(
         plate_number=payload.plate_number,
         requires_charging=payload.requires_charging,
     )
-    session.add(vehicle)
-    if profile.default_vehicle_id is None:
-        profile.default_vehicle_id = vehicle.id
+
     try:
+        # Step 1:
+        # INSERT vehicle first. The row now exists inside this transaction.
+        session.add(vehicle)
+        await session.flush()
+
+        # Step 2:
+        # It is now safe for profiles.default_vehicle_id
+        # to reference vehicles.id.
+        if profile.default_vehicle_id is None:
+            profile.default_vehicle_id = vehicle.id
+
+        # Step 3:
+        # Commit both changes as one atomic transaction.
         await session.commit()
+
     except IntegrityError as error:
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "code": "VEHICLE_ALREADY_EXISTS",
-                "message": "A vehicle with this plate number already exists.",
+                "code": "VEHICLE_CREATE_CONFLICT",
+                "message": "Could not create or link the vehicle.",
             },
         ) from error
 

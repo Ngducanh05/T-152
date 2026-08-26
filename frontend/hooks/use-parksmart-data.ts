@@ -12,7 +12,7 @@ import type {
   ParkingStatus,
 } from "@/lib/types";
 
-export const PARKING_POLL_INTERVAL_MS = 2_000;
+export const PARKING_POLL_INTERVAL_MS = 10_000;
 
 export interface ParkSmartSnapshot {
   map: ParkingMap;

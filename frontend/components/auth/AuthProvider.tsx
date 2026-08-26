@@ -58,6 +58,45 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+const MIN_PASSWORD_LENGTH = 6;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function validateEmail(email: string): string | null {
+  if (!email) {
+    return "Email không được để trống.";
+  }
+
+  if (!EMAIL_PATTERN.test(email)) {
+    return "Email không đúng định dạng. Ví dụ: tenban@example.com.";
+  }
+
+  return null;
+}
+
+function validatePassword(password: string): string | null {
+  if (!password) {
+    return "Mật khẩu không được để trống.";
+  }
+
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return `Mật khẩu phải có ít nhất ${MIN_PASSWORD_LENGTH} ký tự.`;
+  }
+
+  return null;
+}
+
+function validateFullName(fullName: string): string | null {
+  if (!fullName) {
+    return "Họ và tên không được để trống.";
+  }
+
+  return null;
+}
+
 function safeProfileError(error: unknown) {
   if (error instanceof ApiError && error.status === 403) {
     return "Tài khoản đã đăng nhập nhưng chưa được cấu hình quyền ParkSmart hợp lệ.";
@@ -67,16 +106,28 @@ function safeProfileError(error: unknown) {
 }
 
 function safeSignUpError(error: unknown) {
-  if (
-    error &&
-    typeof error === "object" &&
-    "code" in error &&
-    error.code === "over_email_send_rate_limit"
-  ) {
-    return "Supabase dang tam gioi han so email xac nhan. Vui long cho mot luc roi thu lai.";
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String(error.code)
+      : null;
+
+  if (code === "over_email_send_rate_limit") {
+    return "Supabase đang tạm giới hạn số email xác nhận. Vui lòng chờ một lúc rồi thử lại.";
   }
 
-  return "Khong the tao tai khoan. Vui long kiem tra email va mat khau.";
+  if (code === "weak_password") {
+    return `Mật khẩu phải có ít nhất ${MIN_PASSWORD_LENGTH} ký tự.`;
+  }
+
+  if (code === "email_address_invalid") {
+    return "Email không đúng định dạng. Vui lòng kiểm tra lại địa chỉ email.";
+  }
+
+  if (code === "user_already_exists") {
+    return "Email này đã được đăng ký. Vui lòng đăng nhập hoặc sử dụng email khác.";
+  }
+
+  return "Không thể tạo tài khoản. Vui lòng kiểm tra email và mật khẩu rồi thử lại.";
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -310,6 +361,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
 
+      const normalizedEmail = normalizeEmail(email);
+      const emailError = validateEmail(normalizedEmail);
+      if (emailError) {
+        console.warn("[Auth] Đăng nhập bị chặn: email không hợp lệ.");
+        return {
+          profile: null,
+          error: emailError,
+        };
+      }
+
+      const passwordError = validatePassword(password);
+      if (passwordError) {
+        console.warn("[Auth] Đăng nhập bị chặn: mật khẩu không hợp lệ.");
+        return {
+          profile: null,
+          error: passwordError,
+        };
+      }
+
       const supabase = supabaseRef.current;
 
       if (!supabase) {
@@ -323,12 +393,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
+          email: normalizedEmail,
           password,
         });
 
         if (error || !data.session) {
           accessTokenRef.current = null;
+          console.warn("[Auth] Đăng nhập thất bại: email hoặc mật khẩu không đúng.");
 
           return {
             profile: null,
@@ -382,27 +453,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
 
+      const fullName = input.fullName.trim();
+      const normalizedEmail = normalizeEmail(input.email);
+
+      const fullNameError = validateFullName(fullName);
+      if (fullNameError) {
+        console.warn("[Auth] Đăng ký bị chặn: họ và tên không hợp lệ.");
+        return {
+          profile: null,
+          error: fullNameError,
+          confirmationRequired: false,
+        };
+      }
+
+      const emailError = validateEmail(normalizedEmail);
+      if (emailError) {
+        console.warn("[Auth] Đăng ký bị chặn: email không hợp lệ.");
+        return {
+          profile: null,
+          error: emailError,
+          confirmationRequired: false,
+        };
+      }
+
+      const passwordError = validatePassword(input.password);
+      if (passwordError) {
+        console.warn("[Auth] Đăng ký bị chặn: mật khẩu không hợp lệ.");
+        return {
+          profile: null,
+          error: passwordError,
+          confirmationRequired: false,
+        };
+      }
+
       const supabase = supabaseRef.current;
       if (!supabase) {
         return {
           profile: null,
-          error: "Dich vu dang ky chua san sang. Vui long thu lai.",
+          error: "Dịch vụ đăng ký chưa sẵn sàng. Vui lòng thử lại.",
         };
       }
 
       signInInFlightRef.current = true;
       try {
         const { data, error } = await supabase.auth.signUp({
-          email: input.email.trim(),
+          email: normalizedEmail,
           password: input.password,
           options: {
             data: {
-              full_name: input.fullName.trim(),
+              full_name: fullName,
             },
           },
         });
 
         if (error) {
+          const errorCode =
+            typeof error === "object" && error && "code" in error
+              ? String(error.code)
+              : "unknown";
+
+          console.warn(`[Auth] Supabase từ chối đăng ký. Mã lỗi: ${errorCode}.`);
+
           return {
             profile: null,
             error: safeSignUpError(error),
@@ -439,10 +550,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             confirmationRequired: false,
           };
         }
-      } catch {
+      } catch (error) {
+        console.error("[Auth] Có lỗi không mong muốn khi tạo tài khoản.", error);
+
         return {
           profile: null,
-          error: "Khong the tao tai khoan. Vui long thu lai.",
+          error: "Không thể tạo tài khoản. Vui lòng thử lại.",
         };
       } finally {
         signInInFlightRef.current = false;

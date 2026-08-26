@@ -71,7 +71,7 @@ export default function Home() {
       <main className={authStyles.guardState} role="status">
         <div className={authStyles.guardCard}>
           <strong>ParkSmart AI</strong>
-          <p>Dang xac minh phien dang nhap...</p>
+          <p>Đang xác minh phiên đăng nhập...</p>
         </div>
       </main>
     );
@@ -102,7 +102,7 @@ function GuestPreview() {
           <strong>ParkSmart<span>AI</span></strong>
         </div>
         <button type="button" className="secondary-button" onClick={() => router.push("/login")}>
-          Dang nhap
+          Đăng nhập
         </button>
       </header>
       <section className="chat-workspace" aria-label="ParkSmart preview">
@@ -110,8 +110,8 @@ function GuestPreview() {
           <div className="conversation-intro">
             <span className="agent-avatar" aria-hidden="true">AI</span>
             <div>
-              <h1>Tro ly ParkSmart</h1>
-              <p>Ban dang xem ban xem truoc. Dang nhap de dung du lieu bai xe that.</p>
+              <h1>Trợ lý ParkSmart</h1>
+              <p>Bạn đang xem trước. Đăng nhập để sử dụng dữ liệu bãi xe thực.</p>
             </div>
           </div>
           <article className="chat-message message-agent">
@@ -120,10 +120,10 @@ function GuestPreview() {
               <small>ParkSmart AI</small>
             </div>
             <div className="conversation-actions">
-              <button type="button" onClick={() => gate({ type: "find-parking" })}>Tim o do</button>
-              <button type="button" onClick={() => gate({ type: "find-vehicle" })}>Tim xe</button>
-              <button type="button" onClick={() => gate({ type: "location" })}>Xac nhan vi tri</button>
-              <button type="button" onClick={() => gate({ type: "report" })}>Bao xe do sai</button>
+              <button type="button" onClick={() => gate({ type: "find-parking" })}>Tìm ô đỗ</button>
+              <button type="button" onClick={() => gate({ type: "find-vehicle" })}>Tìm xe</button>
+              <button type="button" onClick={() => gate({ type: "location" })}>Xác nhận vị trí</button>
+              <button type="button" onClick={() => gate({ type: "report" })}>Báo xe đỗ sai</button>
             </div>
           </article>
         </div>
