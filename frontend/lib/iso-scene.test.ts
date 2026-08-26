@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { canonicalMap } from "@/test/fixtures";
+import { buildIsoRamp } from "@/lib/iso-geometry";
 import type { MapNode } from "@/lib/types";
-import { buildIsoScene } from "./iso-scene";
+import {
+  RAMP_EAST_CENTER,
+  RAMP_WEST_CENTER,
+  ROAD_W_RING,
+  buildIsoScene,
+} from "./iso-scene";
 
 describe("iso-scene", () => {
   it("AC-13: buildIsoScene với fixture 1 tầng trả về đúng 40 bays", () => {
@@ -53,6 +59,30 @@ describe("iso-scene", () => {
     expect(exitProp).toBeUndefined();
   });
 
+  it("đặt hai dốc F2 bên ngoài mép đường và không che làn xe", () => {
+    const scene = buildIsoScene({
+      floorId: "F2",
+      nodes: [
+        { id: "F2-RAMP", floor_id: "F2", type: "RAMP", x: 85, y: 75 },
+      ],
+      edges: [],
+      slots: [],
+      route: null,
+      currentLocationNodeId: null,
+    });
+    const rampUp = scene.props.find((prop) => prop.id === "F2-RAMP-up");
+    const rampDown = scene.props.find((prop) => prop.id === "F2-RAMP-down");
+
+    expect(rampUp?.ramp?.deck).toEqual(
+      buildIsoRamp(RAMP_EAST_CENTER, 3.6, 4.5, 6).deck,
+    );
+    expect(rampDown?.ramp?.deck).toEqual(
+      buildIsoRamp(RAMP_WEST_CENTER, 3.6, 4.5, -6).deck,
+    );
+    expect(RAMP_EAST_CENTER[0] - 3.6).toBeGreaterThan(80 + ROAD_W_RING / 2);
+    expect(RAMP_WEST_CENTER[0] + 3.6).toBeLessThan(20 - ROAD_W_RING / 2);
+  });
+
   it("AC-16: buildIsoScene cho F1 có đủ prop ENTRANCE, EXIT, ELEVATOR và 3 CHECKPOINT khi có nodes tương ứng", () => {
     const f1Nodes: MapNode[] = [
       { id: "F1-ENTRANCE", floor_id: "F1", type: "ENTRANCE", x: 0, y: 50 },
@@ -95,7 +125,7 @@ describe("iso-scene", () => {
     expect(carBays).toHaveLength(occupiedCount);
   });
 
-  it("dựng đầy đủ slab, zones, roads, labels, route và currentLocation", () => {
+  it("dựng đầy đủ slab, zones, roads, labels và route nhưng ẩn vị trí checkpoint", () => {
     const scene = buildIsoScene({
       floorId: "F1",
       nodes: canonicalMap.nodes.filter((n) => n.floor_id === "F1"),
@@ -117,7 +147,7 @@ describe("iso-scene", () => {
     expect(scene.roads).toHaveLength(5);
     expect(scene.labels.length).toBeGreaterThan(0);
     expect(scene.routePoints).toBeDefined();
-    expect(scene.currentLocationAt).toBeDefined();
+    expect(scene.currentLocationAt).toBeNull();
   });
 
   it("bỏ qua slot không có MapNode trong danh sách nodes (không tạo dummy node)", () => {

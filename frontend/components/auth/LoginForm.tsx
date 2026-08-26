@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
@@ -38,16 +39,16 @@ export function LoginForm({
     try {
       if (mode === "register") {
         if (password !== confirmPassword) {
-          setError("Mat khau xac nhan khong khop.");
+          setError("Mật khẩu xác nhận không khớp.");
           return;
         }
         const result = await signUp({ fullName, email, password });
         if (result.confirmationRequired) {
-          setNotice("Vui long xac nhan email truoc khi dang nhap ParkSmart.");
+          setNotice("Vui lòng xác nhận email trước khi đăng nhập ParkSmart.");
           return;
         }
         if (!result.profile) {
-          setError(result.error ?? "Khong the dang ky.");
+          setError(result.error ?? "Không thể đăng ký.");
           return;
         }
         router.replace(roleHome(result.profile.role));
@@ -57,7 +58,7 @@ export function LoginForm({
 
       const result = await signIn(email, password);
       if (!result.profile) {
-        setError(result.error ?? "Khong the dang nhap.");
+        setError(result.error ?? "Không thể đăng nhập.");
         return;
       }
       router.replace(roleHome(result.profile.role));
@@ -71,7 +72,7 @@ export function LoginForm({
     return (
       <div className={styles.loginCard} role="status">
         <strong>ParkSmart AI</strong>
-        <p>Dang xac minh phien dang nhap...</p>
+        <p>Đang xác minh phiên đăng nhập...</p>
       </div>
     );
   }
@@ -84,8 +85,8 @@ export function LoginForm({
           <h1>{mode === "login" ? "Đăng nhập ParkSmart" : "Đăng ký ParkSmart"}</h1>
           <p>
             {mode === "login"
-              ? "Su dung tai khoan ParkSmart cua ban."
-              : "Tu dang ky luon tao tai khoan nguoi dung."}
+              ? "Sử dụng tài khoản ParkSmart của bạn."
+              : "Tự đăng ký luôn tạo tài khoản người dùng."}
           </p>
         </div>
       </div>
@@ -187,9 +188,9 @@ export function LoginForm({
             ? "Đăng nhập"
             : "Đăng ký"}
       </button>
-
       <p className={styles.securityNote}>
-        Vai tro do backend ParkSmart quyet dinh; man hinh nay khong cho phep chon quyen.
+        Vai trò do backend ParkSmart quyết định; màn hình này không cho phép chọn quyền.{" "}
+        <Link href="/privacy">Quyền riêng tư</Link>
       </p>
     </form>
   );

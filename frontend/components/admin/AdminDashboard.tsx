@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ReportDetailDrawer,
@@ -25,12 +25,13 @@ import type {
   SlotStatus,
   WrongParkingReport,
   WrongParkingReportStatus,
+  WrongParkingReportVerificationOutcome,
+  SlotObservation,
   ZoneId,
 } from "@/lib/types";
 
 const ZONES: ZoneId[] = ["A", "B", "C", "D"];
 const REPORT_REFRESH_INTERVAL_MS = 3_000;
-type MutationName = "park" | "leave" | "reset" | "scenario";
 type FilterValue<T extends string> = T | "ALL";
 
 function formatUpdatedAt(value: string | null) {
@@ -51,9 +52,6 @@ export function AdminDashboard() {
   const [statusFilter, setStatusFilter] =
     useState<FilterValue<SlotStatus>>("ALL");
   const [evFilter, setEvFilter] = useState<"ALL" | "EV" | "NO_EV">("ALL");
-  const [parkSlotId, setParkSlotId] = useState("");
-  const [parkVehicleId, setParkVehicleId] = useState("SIM-CAR-01");
-  const [leaveSlotId, setLeaveSlotId] = useState("");
   const [events, setEvents] = useState<ParkingEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
@@ -64,9 +62,18 @@ export function AdminDashboard() {
   const [reportsLoading, setReportsLoading] = useState(true);
   const [reportsError, setReportsError] = useState<string | null>(null);
   const [reportsLastUpdatedAt, setReportsLastUpdatedAt] = useState<Date | null>(null);
-  const [mutationPending, setMutationPending] = useState<MutationName | null>(null);
+  const [observations, setObservations] = useState<SlotObservation[]>([]);
+  const [observationsLoading, setObservationsLoading] = useState(true);
+  const [observationsError, setObservationsError] = useState<string | null>(null);
+  const [selectedObservationId, setSelectedObservationId] = useState<string | null>(null);
+  const [observationRejectReason, setObservationRejectReason] = useState("");
+  const [observationMutationPending, setObservationMutationPending] = useState(false);
   const [operationNotice, setOperationNotice] = useState<string | null>(null);
   const [selectedReportSlotId, setSelectedReportSlotId] = useState<string | null>(null);
+  const [selectedAdminSlotId, setSelectedAdminSlotId] = useState<string | null>(null);
+  const [selectedSlotStatus, setSelectedSlotStatus] =
+    useState<Exclude<SlotStatus, "RESERVED">>("AVAILABLE");
+  const [slotStatusMutationPending, setSlotStatusMutationPending] = useState(false);
   const [drawerReports, setDrawerReports] = useState<WrongParkingReport[]>([]);
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [drawerError, setDrawerError] = useState<string | null>(null);
@@ -74,9 +81,31 @@ export function AdminDashboard() {
     useState<PendingReportMutation | null>(null);
   const [newReportNotice, setNewReportNotice] =
     useState<WrongParkingReport | null>(null);
-  const mutationLockRef = useRef(false);
   const reportMutationLockRef = useRef(false);
   const observedReportIdsRef = useRef<Set<string> | null>(null);
+
+  const loadObservations = useCallback(async (
+    signal?: AbortSignal,
+    showLoading = true,
+  ) => {
+    if (showLoading) setObservationsLoading(true);
+    setObservationsError(null);
+    try {
+      const result = await parkSmartApi.getAdminObservations(
+        { status: "PENDING", limit: 100 },
+        signal,
+      );
+      if (!signal?.aborted) setObservations(result);
+    } catch (error) {
+      if (!signal?.aborted) {
+        setObservationsError(
+          formatApiErrorForOperator(error, "Không thể tải quan sát chờ xác minh."),
+        );
+      }
+    } finally {
+      if (!signal?.aborted && showLoading) setObservationsLoading(false);
+    }
+  }, []);
 
   const loadEvents = useCallback(async (signal?: AbortSignal) => {
     setEventsLoading(true);
@@ -171,12 +200,18 @@ export function AdminDashboard() {
 
   useEffect(() => {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => void loadReports(controller.signal), 0);
+    const timer = window.setTimeout(
+      () => void Promise.all([
+        loadReports(controller.signal),
+        loadObservations(controller.signal),
+      ]),
+      0,
+    );
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [loadReports]);
+  }, [loadObservations, loadReports]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -192,7 +227,10 @@ export function AdminDashboard() {
       }
       requestPending = true;
       try {
-        await loadReports(controller.signal, false);
+        await Promise.all([
+          loadReports(controller.signal, false),
+          loadObservations(controller.signal, false),
+        ]);
       } catch (error) {
         if (!controller.signal.aborted) {
           setReportsError(
@@ -227,23 +265,7 @@ export function AdminDashboard() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       unsubscribe();
     };
-  }, [loadReports]);
-
-  const availableSlots = useMemo(
-    () => data.slots.filter((slot) => slot.status === "AVAILABLE"),
-    [data.slots],
-  );
-  const occupiedSlots = useMemo(
-    () => data.slots.filter((slot) => slot.status === "OCCUPIED"),
-    [data.slots],
-  );
-
-  const effectiveParkSlotId = availableSlots.some((slot) => slot.id === parkSlotId)
-    ? parkSlotId
-    : availableSlots[0]?.id ?? "";
-  const effectiveLeaveSlotId = occupiedSlots.some((slot) => slot.id === leaveSlotId)
-    ? leaveSlotId
-    : occupiedSlots[0]?.id ?? "";
+  }, [loadObservations, loadReports]);
 
   const filteredSlots = useMemo(
     () =>
@@ -264,8 +286,20 @@ export function AdminDashboard() {
       }, {}),
     [openReports],
   );
+  const pendingObservationCountBySlot = useMemo(
+    () =>
+      observations.reduce<Record<string, number>>((counts, observation) => {
+        counts[observation.slot_id] = (counts[observation.slot_id] ?? 0) + 1;
+        return counts;
+      }, {}),
+    [observations],
+  );
+  const selectedObservation =
+    observations.find((observation) => observation.id === selectedObservationId) ?? null;
   const selectedReportedSlot =
     data.slots.find((slot) => slot.id === selectedReportSlotId) ?? null;
+  const selectedAdminSlot =
+    data.slots.find((slot) => slot.id === selectedAdminSlotId) ?? null;
 
   const utilization = data.status?.total
     ? Math.round(
@@ -275,10 +309,6 @@ export function AdminDashboard() {
   const availableEv = data.slots.filter(
     (slot) => slot.has_charger && slot.status === "AVAILABLE",
   ).length;
-  const leaveSlot =
-    occupiedSlots.find((slot) => slot.id === effectiveLeaveSlotId) ?? null;
-  const operationDisabled = mutationPending !== null;
-
   async function loadDrawerReports(slotId = selectedReportSlotId) {
     if (!slotId) return;
     setDrawerLoading(true);
@@ -299,10 +329,115 @@ export function AdminDashboard() {
   }
 
   function openReportedSlot(slotId: string) {
+    const slot = data.slots.find((candidate) => candidate.id === slotId);
+    setZoneFilter("ALL");
+    setStatusFilter("ALL");
+    setEvFilter("ALL");
+    setSelectedAdminSlotId(slotId);
+    setSelectedSlotStatus(slot?.status === "OCCUPIED" ? "OCCUPIED" : "AVAILABLE");
     setSelectedReportSlotId(slotId);
     setDrawerReports([]);
     setDrawerError(null);
     void loadDrawerReports(slotId);
+  }
+
+  function selectObservation(observation: SlotObservation) {
+    const slot = data.slots.find((candidate) => candidate.id === observation.slot_id);
+    setZoneFilter("ALL");
+    setStatusFilter("ALL");
+    setEvFilter("ALL");
+    setSelectedReportSlotId(null);
+    setSelectedAdminSlotId(observation.slot_id);
+    setSelectedSlotStatus(slot?.status === "OCCUPIED" ? "OCCUPIED" : "AVAILABLE");
+    setSelectedObservationId(observation.id);
+    setObservationRejectReason("");
+  }
+
+  function openObservedSlot(slotId: string) {
+    const observation = observations.find((item) => item.slot_id === slotId);
+    if (observation) selectObservation(observation);
+  }
+
+  function inspectSlot(slotId: string) {
+    if (selectedAdminSlotId === slotId) {
+      setSelectedAdminSlotId(null);
+      setSelectedObservationId(null);
+      setSelectedReportSlotId(null);
+      return;
+    }
+    const slot = data.slots.find((candidate) => candidate.id === slotId);
+    setZoneFilter("ALL");
+    setStatusFilter("ALL");
+    setEvFilter("ALL");
+    setSelectedAdminSlotId(slotId);
+    setSelectedSlotStatus(slot?.status === "OCCUPIED" ? "OCCUPIED" : "AVAILABLE");
+    setSelectedObservationId(null);
+    setSelectedReportSlotId(null);
+  }
+
+  async function updateSelectedSlotStatus() {
+    if (!selectedAdminSlot || slotStatusMutationPending) return;
+    setSlotStatusMutationPending(true);
+    setOperationNotice(null);
+    try {
+      await parkSmartApi.updateAdminSlotStatus(selectedAdminSlot.id, {
+        status: selectedSlotStatus,
+        expected_version: selectedAdminSlot.version,
+      });
+      await Promise.all([
+        data.refresh(),
+        loadEvents(),
+        loadReports(undefined, false),
+        loadObservations(undefined, false),
+      ]);
+      setOperationNotice(
+        `Đã cập nhật ${formatParkingLocation(selectedAdminSlot.id)} thành ${formatSlotStatus(selectedSlotStatus)}.`,
+      );
+    } catch (error) {
+      await Promise.all([data.refresh(), loadEvents()]);
+      setOperationNotice(
+        formatApiErrorForOperator(error, "Không thể cập nhật trạng thái ô đỗ."),
+      );
+    } finally {
+      setSlotStatusMutationPending(false);
+    }
+  }
+
+  async function mutateObservation(action: "verify" | "reject") {
+    if (!selectedObservation || observationMutationPending) return;
+    setObservationMutationPending(true);
+    setObservationsError(null);
+    try {
+      if (action === "verify") {
+        await parkSmartApi.verifyAdminObservation(selectedObservation.id, {
+          expected_version: selectedObservation.version,
+        });
+      } else {
+        await parkSmartApi.rejectAdminObservation(selectedObservation.id, {
+          expected_version: selectedObservation.version,
+          reason: observationRejectReason.trim() || null,
+        });
+      }
+      setSelectedObservationId(null);
+      await Promise.all([
+        loadObservations(undefined, false),
+        loadReports(undefined, false),
+        loadEvents(),
+        data.refresh(),
+      ]);
+      setOperationNotice(
+        action === "verify" ? "Đã xác minh đóng góp." : "Đã từ chối đóng góp.",
+      );
+    } catch (error) {
+      await Promise.all([loadObservations(undefined, false), data.refresh()]);
+      setObservationsError(
+        error instanceof ApiError && error.code === "OBSERVATION_VERSION_CONFLICT"
+          ? "Quan sát đã thay đổi trên server. Dữ liệu mới nhất đã được tải lại."
+          : formatApiErrorForOperator(error, "Không thể xử lý quan sát."),
+      );
+    } finally {
+      setObservationMutationPending(false);
+    }
   }
 
   async function mutateReport(
@@ -319,17 +454,16 @@ export function AdminDashboard() {
       await Promise.all([
         loadReports(undefined, false),
         loadDrawerReports(report.slot_id),
+        loadObservations(undefined, false),
+        loadEvents(),
+        data.refresh(),
       ]);
       setOperationNotice(
         action === "resolve"
           ? `Đã resolve report ${report.id}.`
-          : action === "confirm"
-            ? `Da confirm report ${report.id}.`
-            : action === "reject"
-              ? `Da reject report ${report.id}.`
-              : action === "reopen"
-                ? `Đã reopen report ${report.id}.`
-                : `Đã xóa vĩnh viễn report ${report.id}.`,
+          : action === "reopen"
+            ? `Đã reopen report ${report.id}.`
+            : `Đã xóa vĩnh viễn report ${report.id}.`,
       );
       return true;
     } catch (error) {
@@ -364,11 +498,13 @@ export function AdminDashboard() {
 
   function resolveReport(
     report: WrongParkingReport,
+    outcome: Exclude<WrongParkingReportVerificationOutcome, "PENDING">,
     resolutionNote: string | null,
   ) {
     return mutateReport(report, "resolve", () =>
       parkSmartApi.resolveAdminReport(report.id, {
         status: "RESOLVED",
+        verification_outcome: outcome,
         resolution_note: resolutionNote,
         expected_version: report.version,
       }),
@@ -391,24 +527,6 @@ export function AdminDashboard() {
     );
   }
 
-  function confirmReport(report: WrongParkingReport, reviewNote: string | null) {
-    return mutateReport(report, "confirm", () =>
-      parkSmartApi.confirmAdminReport(report.id, {
-        review_note: reviewNote,
-        expected_version: report.version,
-      }),
-    );
-  }
-
-  function rejectReport(report: WrongParkingReport, reviewNote: string | null) {
-    return mutateReport(report, "reject", () =>
-      parkSmartApi.rejectAdminReport(report.id, {
-        review_note: reviewNote,
-        expected_version: report.version,
-      }),
-    );
-  }
-
   async function loadReportEvidence(report: WrongParkingReport) {
     try {
       const result = await parkSmartApi.getAdminReportEvidenceUrl(report.id);
@@ -419,58 +537,6 @@ export function AdminDashboard() {
       );
       return null;
     }
-  }
-
-  async function runMutation(
-    name: MutationName,
-    action: () => Promise<unknown>,
-    successMessage: string,
-  ) {
-    if (mutationLockRef.current) return;
-    mutationLockRef.current = true;
-    setMutationPending(name);
-    setOperationNotice(null);
-    try {
-      await action();
-      await data.refresh();
-      await loadEvents();
-      setOperationNotice(successMessage);
-    } catch (error) {
-      setOperationNotice(
-        formatApiErrorForOperator(error, "Không thể hoàn tất thao tác vận hành."),
-      );
-    } finally {
-      mutationLockRef.current = false;
-      setMutationPending(null);
-    }
-  }
-
-  function submitPark(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!effectiveParkSlotId || !/^SIM-CAR-[0-9]{2,}$/.test(parkVehicleId)) return;
-    void runMutation(
-      "park",
-      () =>
-        parkSmartApi.parkSimulatedVehicle({
-          slot_id: effectiveParkSlotId,
-          vehicle_id: parkVehicleId,
-        }),
-      `Đã ghi nhận ${parkVehicleId} đỗ tại ${formatParkingLocation(effectiveParkSlotId)}.`,
-    );
-  }
-
-  function submitLeave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!leaveSlot?.occupied_by_vehicle_id) return;
-    void runMutation(
-      "leave",
-      () =>
-        parkSmartApi.leaveSimulatedVehicle({
-          slot_id: leaveSlot.id,
-          vehicle_id: leaveSlot.occupied_by_vehicle_id as string,
-        }),
-      `Đã ghi nhận xe rời ${formatParkingLocation(leaveSlot.id)}.`,
-    );
   }
 
   async function retryDashboard() {
@@ -484,7 +550,7 @@ export function AdminDashboard() {
         <div>
           <p className="eyebrow green">TRUNG TÂM VẬN HÀNH</p>
           <h1>Bảng điều khiển vận hành</h1>
-          <p>Quản trị viên thử nghiệm · các thao tác mô phỏng chỉ hoạt động trong chế độ thử nghiệm</p>
+          <p>Theo dõi trạng thái bãi xe và xác minh đóng góp cộng đồng</p>
         </div>
         <div className="admin-top-actions">
           <button
@@ -602,63 +668,183 @@ export function AdminDashboard() {
                   map={data.map}
                   slots={filteredSlots}
                   status={data.status}
-                  heading="Bản đồ vận hành tầng F1"
+                  heading="Bản đồ vận hành nhiều tầng"
                   description="Lọc theo khu, trạng thái hoặc khả năng sạc điện"
                   showSummary={false}
                   openReportCountBySlot={openReportCountBySlot}
+                  pendingObservationCountBySlot={pendingObservationCountBySlot}
+                  selectedSlotId={selectedAdminSlotId ?? selectedObservation?.slot_id ?? null}
+                  onSelectSlot={inspectSlot}
                   onOpenReportedSlot={openReportedSlot}
+                  onOpenObservedSlot={openObservedSlot}
                 />
+              )}
+              {selectedAdminSlot && (
+                <aside className="card admin-slot-detail" aria-labelledby="admin-slot-detail-title">
+                  <header>
+                    <div>
+                      <p className="eyebrow green">CHI TIẾT Ô ĐỖ</p>
+                      <h2 id="admin-slot-detail-title">{formatParkingLocation(selectedAdminSlot.id)}</h2>
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary-button admin-detail-close"
+                      aria-label="Đóng chi tiết ô đỗ"
+                      onClick={() => {
+                        setSelectedAdminSlotId(null);
+                        setSelectedObservationId(null);
+                        setSelectedReportSlotId(null);
+                      }}
+                    >Đóng ×</button>
+                  </header>
+                  <dl>
+                    <div><dt>Trạng thái</dt><dd>{formatSlotStatus(selectedAdminSlot.status)}</dd></div>
+                    <div><dt>Phiên bản</dt><dd>{selectedAdminSlot.version}</dd></div>
+                    <div><dt>Xe đang ghi nhận</dt><dd>{selectedAdminSlot.occupied_by_vehicle_id ?? "Không có"}</dd></div>
+                    <div><dt>Report đang mở</dt><dd>{openReportCountBySlot[selectedAdminSlot.id] ?? 0}</dd></div>
+                    <div><dt>Quan sát chờ xác minh</dt><dd>{pendingObservationCountBySlot[selectedAdminSlot.id] ?? 0}</dd></div>
+                  </dl>
+                  <div className="admin-slot-issue-actions">
+                    {(openReportCountBySlot[selectedAdminSlot.id] ?? 0) > 0 && (
+                      <button type="button" className="secondary-button" onClick={() => openReportedSlot(selectedAdminSlot.id)}>
+                        Xem report của ô này
+                      </button>
+                    )}
+                    {(pendingObservationCountBySlot[selectedAdminSlot.id] ?? 0) > 0 && (
+                      <button type="button" className="secondary-button" onClick={() => openObservedSlot(selectedAdminSlot.id)}>
+                        Xem quan sát chờ xác minh
+                      </button>
+                    )}
+                  </div>
+                  <div className="admin-slot-status-control">
+                    <label>
+                      Cập nhật trạng thái
+                      <select
+                        value={selectedSlotStatus}
+                        disabled={slotStatusMutationPending || selectedAdminSlot.status === "RESERVED"}
+                        onChange={(event) => setSelectedSlotStatus(event.target.value as Exclude<SlotStatus, "RESERVED">)}
+                      >
+                        <option value="AVAILABLE">Đang trống</option>
+                        <option value="OCCUPIED">Đã có xe</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={
+                        slotStatusMutationPending ||
+                        selectedAdminSlot.status === "RESERVED" ||
+                        selectedAdminSlot.status === selectedSlotStatus
+                      }
+                      onClick={() => void updateSelectedSlotStatus()}
+                    >
+                      {slotStatusMutationPending ? "Đang cập nhật…" : "Lưu trạng thái"}
+                    </button>
+                  </div>
+                  {selectedAdminSlot.status === "RESERVED" && (
+                    <p className="admin-slot-guard" role="note">
+                      Ô đang được giữ chỗ. Hãy xử lý reservation trước khi thay đổi trạng thái.
+                    </p>
+                  )}
+                </aside>
+              )}
+              {selectedObservation && (
+                <aside className="card observation-detail-panel" aria-labelledby="observation-detail-title">
+                  <header>
+                    <div>
+                      <p className="eyebrow green">CHI TIẾT QUAN SÁT</p>
+                      <h2 id="observation-detail-title">
+                        {formatParkingLocation(selectedObservation.slot_id)}
+                      </h2>
+                    </div>
+                    <button
+                      type="button"
+                      className="modal-close"
+                      aria-label="Đóng chi tiết quan sát"
+                      disabled={observationMutationPending}
+                      onClick={() => setSelectedObservationId(null)}
+                    >×</button>
+                  </header>
+                  <dl>
+                    <div><dt>Người gửi</dt><dd>Người dùng …{selectedObservation.observer_user_id.slice(-4)}</dd></div>
+                    <div><dt>Tầng / khu / ô</dt><dd>{formatParkingLocation(selectedObservation.slot_id)}</dd></div>
+                    <div><dt>Quan sát</dt><dd>{formatSlotStatus(selectedObservation.observed_status)}</dd></div>
+                    <div><dt>Trạng thái hiện tại</dt><dd>{formatSlotStatus(data.slots.find((slot) => slot.id === selectedObservation.slot_id)?.status ?? "AVAILABLE")}</dd></div>
+                    <div><dt>Được gửi</dt><dd>{formatUpdatedAt(selectedObservation.created_at)}</dd></div>
+                    <div><dt>Hết hạn</dt><dd>{formatUpdatedAt(selectedObservation.expires_at)}</dd></div>
+                    <div><dt>Điểm chờ</dt><dd>{selectedObservation.reward_points}</dd></div>
+                  </dl>
+                  <label>
+                    Lý do từ chối (không bắt buộc)
+                    <textarea
+                      maxLength={500}
+                      value={observationRejectReason}
+                      disabled={observationMutationPending}
+                      onChange={(event) => setObservationRejectReason(event.target.value)}
+                    />
+                  </label>
+                  <div className="contribution-actions">
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={observationMutationPending}
+                      onClick={() => void mutateObservation("verify")}
+                    >{observationMutationPending ? "Đang xử lý…" : "Xác minh"}</button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={observationMutationPending}
+                      onClick={() => void mutateObservation("reject")}
+                    >Từ chối</button>
+                  </div>
+                </aside>
               )}
               {filteredSlots.length === 0 && (
                 <div className="admin-empty" role="status">Không có ô nào phù hợp với bộ lọc hiện tại.</div>
               )}
             </div>
 
-            <aside className="admin-operations card">
-              <div className="admin-section-heading">
-                <div><p className="eyebrow green">MÔ PHỎNG BÃI XE</p><h2>Điều khiển thủ công</h2></div>
-              </div>
-              <form onSubmit={submitPark}>
-                <h3>Ghi nhận xe đỗ</h3>
-                <label>Ô đang trống
-                  <select value={effectiveParkSlotId} onChange={(event) => setParkSlotId(event.target.value)} disabled={operationDisabled || availableSlots.length === 0}>
-                    {availableSlots.map((slot) => <option key={slot.id} value={slot.id}>{formatParkingLocation(slot.id)}</option>)}
-                  </select>
-                </label>
-                <label>Mã xe mô phỏng
-                  <input value={parkVehicleId} onChange={(event) => setParkVehicleId(event.target.value.toUpperCase())} pattern="SIM-CAR-[0-9]{2,}" placeholder="SIM-CAR-01" disabled={operationDisabled} />
-                </label>
-                <button className="primary-button" disabled={operationDisabled || !effectiveParkSlotId || !/^SIM-CAR-[0-9]{2,}$/.test(parkVehicleId)}>
-                  {mutationPending === "park" ? "Đang xử lý…" : "Ghi nhận xe đỗ"}
-                </button>
-              </form>
+          </section>
 
-              <form onSubmit={submitLeave}>
-                <h3>Ghi nhận xe rời ô</h3>
-                <label>Ô đang có xe
-                  <select value={effectiveLeaveSlotId} onChange={(event) => setLeaveSlotId(event.target.value)} disabled={operationDisabled || occupiedSlots.length === 0}>
-                    {occupiedSlots.map((slot) => <option key={slot.id} value={slot.id}>{formatParkingLocation(slot.id)} · {slot.occupied_by_vehicle_id}</option>)}
-                  </select>
-                </label>
-                <button className="secondary-button" disabled={operationDisabled || !leaveSlot?.occupied_by_vehicle_id}>
-                  {mutationPending === "leave" ? "Đang xử lý…" : "Ghi nhận xe rời ô"}
-                </button>
-              </form>
-
-              <div className="admin-scenario-actions">
-                <button type="button" className="secondary-button" disabled={operationDisabled} onClick={() => void runMutation("reset", () => parkSmartApi.resetDemo(), "Đã đưa dữ liệu thử nghiệm về trạng thái ban đầu.")}>
-                  {mutationPending === "reset" ? "Đang đặt lại…" : "Đặt lại dữ liệu thử nghiệm"}
-                </button>
-                <button type="button" className="primary-button" disabled={operationDisabled} onClick={() => void runMutation("scenario", () => parkSmartApi.runFixedScenario(), "Đã chạy xong kịch bản cố định.")}>
-                  {mutationPending === "scenario" ? "Đang chạy…" : "Chạy kịch bản cố định"}
-                </button>
+          <section className="card admin-events" aria-labelledby="pending-contributions-title">
+            <div className="admin-section-heading">
+              <div>
+                <p className="eyebrow green">CỘNG ĐỒNG PARKSMART</p>
+                <h2 id="pending-contributions-title">Đóng góp chờ xác minh</h2>
+                <p>Quan sát ô bên cạnh</p>
               </div>
-            </aside>
+              <button type="button" onClick={() => void loadObservations()} disabled={observationsLoading}>
+                {observationsLoading ? "Đang tải…" : "Tải lại"}
+              </button>
+            </div>
+            {observationsError && <div className="admin-error" role="alert">{observationsError}</div>}
+            {!observationsLoading && !observationsError && observations.length === 0 && (
+              <p className="admin-empty">Không có quan sát nào đang chờ.</p>
+            )}
+            <div className="admin-report-list">
+              {observations.map((observation) => (
+                <button
+                  type="button"
+                  key={observation.id}
+                  className="admin-report-row observation-row"
+                  data-observation-id={observation.id}
+                  onClick={() => selectObservation(observation)}
+                >
+                  <div>
+                    <b>{formatParkingLocation(observation.slot_id)}</b>
+                    <small>Người dùng …{observation.observer_user_id.slice(-4)}</small>
+                  </div>
+                  <p>Quan sát: {formatSlotStatus(observation.observed_status)}</p>
+                  <span className="reward-pill">+{observation.reward_points} chờ</span>
+                  <time dateTime={observation.created_at}>{formatUpdatedAt(observation.created_at)}</time>
+                </button>
+              ))}
+            </div>
           </section>
 
           <section className="card admin-events">
             <div className="admin-section-heading">
-              <div><p className="eyebrow green">PHẢN ÁNH TỪ NGƯỜI DÙNG</p><h2>Báo cáo xe đỗ sai vị trí</h2></div>
+              <div><p className="eyebrow green">ĐÓNG GÓP CHỜ XÁC MINH</p><h2>Report xe đỗ sai</h2></div>
               <div className="admin-report-refresh">
                 <label>
                   Trạng thái report
@@ -748,8 +934,6 @@ export function AdminDashboard() {
           onResolve={resolveReport}
           onReopen={reopenReport}
           onDelete={deleteReport}
-          onConfirm={confirmReport}
-          onReject={rejectReport}
           onLoadEvidence={loadReportEvidence}
         />
       )}

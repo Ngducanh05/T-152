@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
 import { MVP_AGENT_THREAD_STORAGE_KEY } from "@/lib/demo";
-import type { ChatResponse, ChatUiAction, SlotStatus } from "@/lib/types";
+import type {
+  ChatResponse,
+  ChatUiAction,
+  SlotObservation,
+  SlotStatus,
+} from "@/lib/types";
 import { activeReservation } from "@/test/fixtures";
 import type { ParkSmartSnapshot } from "./use-parksmart-data";
 
@@ -13,6 +18,7 @@ afterEach(() => {
   cleanup();
   sessionStorage.clear();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 function chatResponse(overrides: Partial<ChatResponse> = {}): ChatResponse {
@@ -60,6 +66,20 @@ function fixture() {
     currentLocation: { user_id: "USER-001", node_id: "F1-ENTRANCE" },
     activeReservation: null,
     activeSession: null,
+    rewardSummary: {
+      available_points: 0,
+      pending_points: 0,
+      verified_contributions: 0,
+      daily_pending_points: 0,
+      daily_earned_points: 0,
+      daily_limit_points: 100,
+    },
+    rewardConfiguration: {
+      adjacent_observation_reward_points: 10,
+      wrong_parking_report_reward_points: 20,
+      contribution_daily_points_limit: 100,
+    },
+    contributions: [],
   };
   const refresh = vi.fn(async () => snapshot);
   const data: WorkflowData = {
@@ -82,6 +102,7 @@ function fixture() {
   };
   const api = {
     confirmLocation: vi.fn(),
+    scanLocation: vi.fn(),
     recommend: vi.fn(async () => recommendation),
     createReservation: vi.fn(),
     cancelReservation: vi.fn(),
@@ -97,6 +118,198 @@ function fixture() {
 }
 
 describe("useParkingWorkflow", () => {
+  it("opens the QR scanner for its deterministic welcome action", async () => {
+    const { api, data } = fixture();
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    const action = result.current.messages[0].uiActions.find(
+      (candidate) => candidate.type === "SCAN_LOCATION_QR",
+    );
+    expect(action).toBeDefined();
+    await act(async () => {
+      await result.current.executeUiAction("welcome", action!);
+    });
+    expect(result.current.requestedPanel).toEqual({ kind: "qr-location" });
+  });
+
+  it("uses one QR API call and direct recommendations without agent chat", async () => {
+    const { api, data } = fixture();
+    data.currentLocation = null;
+    const applyCurrentLocation = vi.fn();
+    data.applyCurrentLocation = applyCurrentLocation;
+    api.scanLocation.mockResolvedValue({
+      user_id: "USER-001",
+      marker_id: "PSLOC-F3-D-W",
+      node_id: "F3-D-W",
+      floor_id: "F3",
+      zone_id: "D",
+      label: "Tầng 3 · Khu D · lối Tây",
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    const preference = result.current.messages[0].uiActions.find(
+      (candidate) => candidate.type === "SELECT_PARKING_PREFERENCE",
+    );
+    await act(async () => {
+      await result.current.executeUiAction("welcome", preference!);
+      await result.current.scanLocationQr("parksmart:location:v1:PSLOC-F3-D-W");
+    });
+    expect(api.scanLocation).toHaveBeenCalledOnce();
+    expect(applyCurrentLocation).toHaveBeenCalledWith({ user_id: "USER-001", node_id: "F3-D-W" });
+    expect(api.recommend).toHaveBeenCalledWith(expect.objectContaining({ start_node_id: "F3-D-W", floor_id: "F3" }));
+    expect(api.chat).not.toHaveBeenCalled();
+  });
+
+  it("keeps deferred preferences after a failed scan and uses floor-safe recommendation labels", async () => {
+    const { api, data } = fixture();
+    data.currentLocation = null;
+    api.scanLocation
+      .mockRejectedValueOnce(new Error("scan failed"))
+      .mockResolvedValueOnce({
+        user_id: "USER-001",
+        marker_id: "PSLOC-F3-D-W",
+        node_id: "F3-D-W",
+        floor_id: "F3",
+        zone_id: "D",
+        label: "Tầng 3 · Khu D · lối Tây",
+      });
+    api.recommend.mockResolvedValue({
+      recommendations: [{
+        slot_id: "F3-D03",
+        score: 92,
+        distance_m: 76,
+        reasons: ["Gần vị trí hiện tại"],
+      }],
+      parking_state_version: 1,
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    const preference = result.current.messages[0].uiActions.find(
+      (candidate) => candidate.type === "SELECT_PARKING_PREFERENCE",
+    );
+
+    await act(async () => {
+      await result.current.executeUiAction("welcome", preference!);
+      await result.current.scanLocationQr("parksmart:location:v1:PSLOC-F3-D-W");
+      await result.current.scanLocationQr("parksmart:location:v1:PSLOC-F3-D-W");
+    });
+
+    expect(api.scanLocation).toHaveBeenCalledTimes(2);
+    expect(api.recommend).toHaveBeenCalledWith(expect.objectContaining({
+      start_node_id: "F3-D-W",
+      floor_id: "F3",
+    }));
+    const recommendationMessage = result.current.messages.at(-1);
+    expect(recommendationMessage?.uiActions[0].label).toBe("Chọn F3-D03");
+    expect(api.chat).not.toHaveBeenCalled();
+  });
+
+  it("allows a deterministic recommendation error to replace the QR success notice", async () => {
+    const { api, data } = fixture();
+    data.currentLocation = null;
+    api.scanLocation.mockResolvedValue({
+      user_id: "USER-001",
+      marker_id: "PSLOC-F3-D-W",
+      node_id: "F3-D-W",
+      floor_id: "F3",
+      zone_id: "D",
+      label: "Tầng 3 · Khu D · lối Tây",
+    });
+    api.recommend.mockRejectedValue(new ApiError({
+      code: "AGENT_TOOL_UNAVAILABLE",
+      message: "Recommendation unavailable.",
+      status: 503,
+    }));
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    const preference = result.current.messages[0].uiActions.find(
+      (candidate) => candidate.type === "SELECT_PARKING_PREFERENCE",
+    );
+
+    await act(async () => {
+      await result.current.executeUiAction("welcome", preference!);
+      await result.current.scanLocationQr("parksmart:location:v1:PSLOC-F3-D-W");
+    });
+
+    expect(result.current.notice).toContain("AGENT_TOOL_UNAVAILABLE");
+    expect(result.current.notice).not.toContain("Đã xác định");
+    expect(api.chat).not.toHaveBeenCalled();
+  });
+
+  it("resumes a real Agent QR action once with structured location and no fake user bubble", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AGENT_ENABLED", "true");
+    sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-location-resume");
+    const { api, data } = fixture();
+    const scanAction: ChatUiAction = {
+      id: "agent-scan-location",
+      type: "SCAN_LOCATION_QR",
+      label: "Quét QR vị trí",
+      payload: {},
+      style: "primary",
+      requires_confirmation: false,
+    };
+    api.chat
+      .mockResolvedValueOnce(chatResponse({ ui_actions: [scanAction] }))
+      .mockResolvedValueOnce(chatResponse({ message: "Đã tiếp tục yêu cầu." }));
+    api.scanLocation.mockResolvedValue({
+      user_id: "USER-001",
+      marker_id: "PSLOC-F3-D-W",
+      node_id: "F3-D-W",
+      floor_id: "F3",
+      zone_id: "D",
+      label: "Tầng 3 · Khu D · lối Tây",
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    await waitFor(() => expect(result.current.threadId).toBe("thread-location-resume"));
+
+    await act(async () => {
+      await result.current.sendAgentMessage("Tìm chỗ đỗ");
+    });
+    const agentMessage = result.current.messages.at(-1)!;
+    await act(async () => {
+      await result.current.executeUiAction("agent-2", agentMessage.uiActions[0]);
+    });
+    expect(result.current.requestedPanel).toEqual({ kind: "qr-location" });
+    api.chat.mockClear();
+    const userMessageCount = result.current.messages.filter((message) => message.role === "user").length;
+
+    await act(async () => {
+      await result.current.scanLocationQr("parksmart:location:v1:PSLOC-F3-D-W");
+      await result.current.scanLocationQr("parksmart:location:v1:PSLOC-F3-D-W");
+    });
+
+    expect(api.scanLocation).toHaveBeenCalledOnce();
+    expect(api.chat).toHaveBeenCalledOnce();
+    expect(api.chat).toHaveBeenCalledWith(expect.objectContaining({
+      current_location: "F3-D-W",
+      message: "Vị trí đã được xác nhận bằng QR. Hãy tiếp tục yêu cầu trước đó.",
+    }));
+    expect(api.chat.mock.calls[0][0].message).not.toContain("F3-D-W");
+    expect(result.current.messages.filter((message) => message.role === "user")).toHaveLength(userMessageCount);
+  });
+
+  it("does not resume Agent chat from the welcome QR action", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AGENT_ENABLED", "true");
+    sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-welcome-qr");
+    const { api, data } = fixture();
+    api.scanLocation.mockResolvedValue({
+      user_id: "USER-001",
+      marker_id: "PSLOC-F3-D-W",
+      node_id: "F3-D-W",
+      floor_id: "F3",
+      zone_id: "D",
+      label: "Tầng 3 · Khu D · lối Tây",
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    await waitFor(() => expect(result.current.threadId).toBe("thread-welcome-qr"));
+    const action = result.current.messages[0].uiActions.find(
+      (candidate) => candidate.type === "SCAN_LOCATION_QR",
+    );
+
+    await act(async () => {
+      await result.current.executeUiAction("welcome", action!);
+      await result.current.scanLocationQr("parksmart:location:v1:PSLOC-F3-D-W");
+    });
+
+    expect(api.chat).not.toHaveBeenCalled();
+  });
+
   it("confirms a slot location without reserving it or creating a parking session", async () => {
     const { api, data, refresh, slot } = fixture();
     api.confirmLocation.mockResolvedValue({
@@ -114,7 +327,7 @@ describe("useParkingWorkflow", () => {
       user_id: "USER-001",
       node_id: "F1-D01",
     });
-    expect(refresh).toHaveBeenCalledOnce();
+    expect(refresh).not.toHaveBeenCalled();
     expect(api.createReservation).not.toHaveBeenCalled();
     expect(api.confirmParking).not.toHaveBeenCalled();
     expect(api.getActiveSession).not.toHaveBeenCalled();
@@ -179,6 +392,7 @@ describe("useParkingWorkflow", () => {
     expect(api.recommend).toHaveBeenCalledWith({
       user_id: "USER-001",
       start_node_id: "F1-ENTRANCE",
+      floor_id: "F1",
       charging_required: true,
       accessible_required: false,
       near_elevator: true,
@@ -327,13 +541,13 @@ describe("useParkingWorkflow", () => {
       slot_id: "F1-D03",
       destination_node_id: "F1-D03",
     };
-    let finishObservation!: () => void;
+    let finishObservation!: (value: SlotObservation) => void;
     api.observeAdjacentSlot.mockImplementation(
-      () => new Promise<void>((resolve) => { finishObservation = resolve; }),
+      () => new Promise<SlotObservation>((resolve) => { finishObservation = resolve; }),
     );
     const { result } = renderHook(() => useParkingWorkflow(data, api));
 
-    let firstRequest!: Promise<void>;
+    let firstRequest!: Promise<SlotObservation | null>;
     act(() => {
       firstRequest = result.current.updateAdjacentSlotStatus(slot.id, "OCCUPIED");
       void result.current.updateAdjacentSlotStatus(slot.id, "OCCUPIED");
@@ -343,19 +557,35 @@ describe("useParkingWorkflow", () => {
     expect(api.observeAdjacentSlot).toHaveBeenCalledWith(slot.id, {
       user_id: "USER-001",
       observed_status: "OCCUPIED",
-      expected_version: slot.version,
+      expected_slot_version: slot.version,
     });
     expect(refresh).not.toHaveBeenCalled();
     expect(slot.status).toBe("AVAILABLE");
     expect(result.current.pendingAdjacentSlotId).toBe(slot.id);
 
     await act(async () => {
-      finishObservation();
+      finishObservation({
+        id: "OBSERVATION-001",
+        observer_user_id: "USER-001",
+        observer_session_id: "SESSION-001",
+        slot_id: slot.id,
+        observed_status: "OCCUPIED",
+        verification_status: "PENDING",
+        reward_points: 10,
+        reward_status: "PENDING",
+        observed_slot_version: slot.version,
+        created_at: "2026-08-23T10:00:00Z",
+        expires_at: "2026-08-23T10:30:00Z",
+        verified_at: null,
+        verified_by: null,
+        rejection_reason: null,
+        version: 0,
+      });
       await firstRequest;
     });
     expect(refresh).toHaveBeenCalledOnce();
     expect(result.current.pendingAdjacentSlotId).toBeNull();
-    expect(result.current.notice).toContain("có xe đỗ");
+    expect(result.current.notice).toBeNull();
   });
 
   it("waits for reservation success before refreshing authoritative UI state", async () => {
@@ -451,6 +681,19 @@ describe("useParkingWorkflow", () => {
       current_location: "F1-ENTRANCE",
       message: "Chỉ đường tới đó",
     });
+  });
+
+  it("does not call Agent chat when the public Agent flag is disabled", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AGENT_ENABLED", "false");
+    const { api, data } = fixture();
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      expect(await result.current.sendAgentMessage("Tìm chỗ đỗ")).toBeNull();
+    });
+
+    expect(api.chat).not.toHaveBeenCalled();
+    expect(result.current.pending).toBeNull();
   });
 
   it("returns the Agent response message after preserving structured UI effects", async () => {
@@ -573,6 +816,47 @@ describe("useParkingWorkflow", () => {
     expect(result.current.recommendedSlotIds).toEqual([]);
     expect(result.current.selectedSlotId).toBeNull();
     expect(result.current.activeRoute).toBeNull();
+  });
+
+  it("shows the daily quota notice without retrying or clearing parking state", async () => {
+    sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-quota");
+    const { api, data } = fixture();
+    api.chat.mockRejectedValue(
+      new ApiError({
+        code: "AGENT_DAILY_LIMIT_REACHED",
+        message: "Daily limit reached.",
+        status: 429,
+      }),
+    );
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+    await waitFor(() => expect(result.current.threadId).toBe("thread-quota"));
+
+    await act(async () => {
+      await result.current.requestRecommendations({
+        chargingRequired: true,
+        accessibleRequired: false,
+        nearElevator: false,
+      });
+    });
+    act(() => result.current.selectCandidate("F1-D01"));
+
+    await act(async () => {
+      await result.current.sendAgentMessage("Hỏi Agent");
+      await result.current.retryAgentMessage();
+    });
+
+    expect(result.current.notice).toBe(
+      "Bạn đã dùng hết lượt trợ lý AI hôm nay. Bạn vẫn có thể tìm chỗ, giữ chỗ và báo sự cố bằng các thao tác có sẵn. Vui lòng thử lại vào ngày mai.",
+    );
+    expect(result.current.retryMessage).toBeNull();
+    expect(api.chat).toHaveBeenCalledOnce();
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: "user",
+      text: "Hỏi Agent",
+    });
+    expect(result.current.recommendedSlotIds).toEqual([]);
+    expect(result.current.selectedSlotId).toBe("F1-D01");
+    expect(result.current.currentLocationId).toBe("F1-ENTRANCE");
   });
 
   it("creates and persists a new Agent thread when resetting the demo", async () => {

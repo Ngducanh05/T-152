@@ -10,7 +10,7 @@ export type ReservationStatus =
   | "EXPIRED"
   | "CANCELLED";
 export type ParkingSessionStatus = "ACTIVE" | "COMPLETED" | "CANCELLED";
-export type ActorType = "USER" | "SIMULATOR" | "CAMERA" | "SYSTEM";
+export type ActorType = "USER" | "ADMIN" | "SIMULATOR" | "CAMERA" | "SYSTEM";
 export type ParkingEventType =
   | "VEHICLE_ENTERED"
   | "SLOT_RESERVED"
@@ -65,7 +65,59 @@ export type AdjacentSlotObservedStatus = "AVAILABLE" | "OCCUPIED";
 export interface AdjacentSlotObservationRequest {
   user_id: EntityId;
   observed_status: AdjacentSlotObservedStatus;
-  expected_version: number;
+  expected_slot_version: number;
+}
+
+export type SlotObservationStatus = "PENDING" | "VERIFIED" | "REJECTED" | "EXPIRED";
+export type RewardSourceType =
+  | "ADJACENT_SLOT_OBSERVATION"
+  | "WRONG_PARKING_REPORT";
+export type RewardTransactionStatus = "PENDING" | "EARNED" | "CANCELLED";
+
+export interface SlotObservation {
+  id: EntityId;
+  observer_user_id: EntityId;
+  observer_session_id: EntityId;
+  slot_id: FloorScopedId;
+  observed_status: AdjacentSlotObservedStatus;
+  verification_status: SlotObservationStatus;
+  reward_points: number;
+  reward_status: RewardTransactionStatus | null;
+  observed_slot_version: number;
+  created_at: string;
+  expires_at: string;
+  verified_at: string | null;
+  verified_by: string | null;
+  rejection_reason: string | null;
+  version: number;
+}
+
+export interface RewardSummary {
+  available_points: number;
+  pending_points: number;
+  verified_contributions: number;
+  daily_pending_points: number;
+  daily_earned_points: number;
+  daily_limit_points: number;
+}
+
+export interface RewardConfiguration {
+  adjacent_observation_reward_points: number;
+  wrong_parking_report_reward_points: number;
+  contribution_daily_points_limit: number;
+}
+
+export interface ContributionRecord {
+  id: EntityId;
+  source_type: RewardSourceType;
+  source_reference: EntityId;
+  observer_session_id: EntityId | null;
+  floor_id: FloorId;
+  slot_id: FloorScopedId;
+  points: number;
+  status: RewardTransactionStatus | null;
+  created_at: string;
+  settled_at: string | null;
 }
 
 export interface MapNode {
@@ -109,6 +161,20 @@ export interface Location {
 export interface ConfirmLocationRequest {
   user_id: EntityId;
   node_id: FloorScopedId;
+}
+
+export interface ScanLocationRequest {
+  user_id: EntityId;
+  qr_payload: string;
+}
+
+export interface ScannedLocation {
+  user_id: EntityId;
+  marker_id: string;
+  node_id: FloorScopedId;
+  floor_id: FloorId;
+  zone_id: ZoneId;
+  label: string;
 }
 
 export interface RecommendationRequest {
@@ -222,6 +288,7 @@ interface ChatUiActionBase<TType extends string, TPayload> {
 }
 
 export type ChatUiAction =
+  | ChatUiActionBase<"SCAN_LOCATION_QR", Record<string, never>>
   | ChatUiActionBase<"SELECT_LOCATION", { node_id?: FloorScopedId }>
   | ChatUiActionBase<
       "SELECT_PARKING_PREFERENCE",
@@ -294,7 +361,6 @@ export interface WrongParkingReport {
   slot_id: FloorScopedId;
   reason_code: WrongParkingReason;
   status: WrongParkingReportStatus;
-  review_status: WrongParkingReviewStatus;
   observed_plate_number: string | null;
   description: string | null;
   evidence_storage_path: string | null;
@@ -302,17 +368,23 @@ export interface WrongParkingReport {
   evidence_size_bytes: number | null;
   created_at: string;
   updated_at: string;
-  reviewed_at: string | null;
-  reviewed_by: string | null;
-  review_note: string | null;
   resolved_at: string | null;
   resolved_by: string | null;
   resolution_note: string | null;
+  verification_outcome: WrongParkingReportVerificationOutcome;
+  reward_points: number;
+  reward_status: RewardTransactionStatus | null;
+  duplicate_candidate_of_id: EntityId | null;
   version: number;
 }
 
 export type WrongParkingReportStatus = "OPEN" | "RESOLVED";
-export type WrongParkingReviewStatus = "PENDING" | "CONFIRMED" | "REJECTED";
+export type WrongParkingReportVerificationOutcome =
+  | "PENDING"
+  | "CONFIRMED"
+  | "REJECTED"
+  | "DUPLICATE"
+  | "UNVERIFIABLE";
 export type WrongParkingReason =
   | "WRONG_SLOT"
   | "CROSSED_LINE"
@@ -337,7 +409,30 @@ export interface AdminReportFilters {
 
 export interface ResolveWrongParkingReportRequest {
   status: "RESOLVED";
+  verification_outcome: Exclude<WrongParkingReportVerificationOutcome, "PENDING">;
   resolution_note?: string | null;
+  expected_version: number;
+}
+
+export interface AdminObservationFilters {
+  status?: SlotObservationStatus;
+  floorId?: FloorId;
+  slotId?: FloorScopedId;
+  userId?: EntityId;
+  limit?: number;
+}
+
+export interface VerifySlotObservationRequest {
+  expected_version: number;
+}
+
+export interface RejectSlotObservationRequest {
+  expected_version: number;
+  reason?: string | null;
+}
+
+export interface UpdateParkingSlotStatusRequest {
+  status: Exclude<SlotStatus, "RESERVED">;
   expected_version: number;
 }
 export type ResolveWrongParkingReportResponse = WrongParkingReport;
@@ -346,11 +441,6 @@ export interface ReopenWrongParkingReportRequest {
   expected_version: number;
 }
 export type ReopenWrongParkingReportResponse = WrongParkingReport;
-
-export interface ReviewWrongParkingReportRequest {
-  review_note?: string | null;
-  expected_version: number;
-}
 
 export interface ReportEvidenceUrlResponse {
   signed_url: string;

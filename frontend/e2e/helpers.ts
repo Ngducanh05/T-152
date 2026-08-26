@@ -7,6 +7,15 @@ export interface E2eWrongParkingReport {
   id: string;
   slot_id: string;
   status: "OPEN" | "RESOLVED";
+  verification_outcome:
+    | "PENDING"
+    | "CONFIRMED"
+    | "REJECTED"
+    | "DUPLICATE"
+    | "UNVERIFIABLE";
+  reward_points: number;
+  reward_status: "PENDING" | "EARNED" | "CANCELLED" | null;
+  duplicate_candidate_of_id: string | null;
   version: number;
 }
 
@@ -67,12 +76,17 @@ export async function confirmLocation(page: Page, nodeId: string) {
   const dialog = page.getByRole("dialog", { name: "Xác nhận vị trí hiện tại" });
   await expect(dialog).toBeVisible();
 
-  const slot = /^(?:F[1-3])-([A-D])(\d{2})$/.exec(nodeId);
+  const slot = /^(F[1-3])-([A-D])(\d{2})$/.exec(nodeId);
   if (slot) {
     await dialog.getByRole("button", { name: "Tôi đang cạnh một ô đỗ" }).click();
-    await dialog.getByRole("button", { name: `Khu ${slot[1]}` }).click();
     await dialog
-      .getByRole("button", { name: `Chọn ô ${slot[2]} khu ${slot[1]}` })
+      .getByRole("button", { name: `Tầng ${slot[1].slice(1)}`, exact: true })
+      .click();
+    await dialog.getByRole("button", { name: `Khu ${slot[2]}` }).click();
+    await dialog
+      .getByRole("button", {
+        name: `Chọn ô ${slot[3]} khu ${slot[2]}, tầng ${slot[1].slice(1)}`,
+      })
       .click();
   } else {
     await dialog.getByRole("button", { name: new RegExp(nodeId) }).click();

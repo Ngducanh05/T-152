@@ -9,23 +9,27 @@ import {
   parkSmartApi,
   type ParkSmartApiClient,
 } from "@/lib/api";
-import type { ParkingIdentity } from "@/lib/auth";
 import {
   getOrCreateThreadId,
   MVP_DEMO_PARKING_IDENTITY,
   rotateThreadId,
 } from "@/lib/demo";
+import type { ParkingIdentity } from "@/lib/auth";
+import { isAgentEnabled } from "@/lib/public-config";
 import type {
   ChatUiAction,
   AdjacentSlotObservedStatus,
+  FloorId,
   FloorScopedId,
   ParkingPreference,
   RecommendationCandidate,
   RouteResult,
+  SlotObservation,
 } from "@/lib/types";
 
 export type WorkflowAction =
   | "location"
+  | "qr-location"
   | "recommend"
   | "reserve"
   | "reserve-and-route"
@@ -48,11 +52,13 @@ export interface WorkflowMessage {
 
 export type WorkflowPanelRequest =
   | { kind: "location" }
+  | { kind: "qr-location" }
   | { kind: "wrong-parking-report"; slotId: FloorScopedId | null };
 
 type WorkflowApi = Pick<
   ParkSmartApiClient,
   | "confirmLocation"
+  | "scanLocation"
   | "recommend"
   | "createReservation"
   | "cancelReservation"
@@ -71,6 +77,7 @@ export interface WorkflowData
     "slots" | "currentLocation" | "activeReservation" | "activeSession"
   > {
   refresh: () => Promise<ParkSmartSnapshot>;
+  applyCurrentLocation?: ParkSmartData["applyCurrentLocation"];
 }
 
 export interface ParkingWorkflow {
@@ -90,6 +97,7 @@ export interface ParkingWorkflow {
   selectCandidate: (slotId: FloorScopedId) => void;
   clearRoute: () => void;
   confirmLocation: (nodeId: FloorScopedId) => Promise<boolean>;
+  scanLocationQr: (qrPayload: string) => Promise<boolean>;
   requestRecommendations: (preferences: {
     chargingRequired: boolean;
     accessibleRequired: boolean;
@@ -105,7 +113,7 @@ export interface ParkingWorkflow {
   updateAdjacentSlotStatus: (
     slotId: FloorScopedId,
     status: AdjacentSlotObservedStatus,
-  ) => Promise<void>;
+  ) => Promise<SlotObservation | null>;
   resetDemo: () => Promise<void>;
   sendAgentMessage: (message: string) => Promise<string | null>;
   retryAgentMessage: () => Promise<void>;
@@ -135,6 +143,7 @@ const AUTHORITATIVE_REFRESH_TOOLS = new Set([
 ]);
 
 const KNOWN_UI_ACTION_TYPES = new Set([
+  "SCAN_LOCATION_QR",
   "SELECT_LOCATION",
   "SELECT_PARKING_PREFERENCE",
   "SELECT_SLOT",
@@ -147,6 +156,7 @@ const KNOWN_UI_ACTION_TYPES = new Set([
 ]);
 
 const REPEATABLE_UI_ACTION_TYPES = new Set<ChatUiAction["type"]>([
+  "SCAN_LOCATION_QR",
   "SELECT_LOCATION",
   "SELECT_PARKING_PREFERENCE",
   "SELECT_SLOT",
@@ -155,6 +165,14 @@ const REPEATABLE_UI_ACTION_TYPES = new Set<ChatUiAction["type"]>([
 ]);
 
 const WELCOME_ACTIONS: ChatUiAction[] = [
+  {
+    id: "welcome-scan-location",
+    type: "SCAN_LOCATION_QR",
+    label: "Quét QR vị trí",
+    payload: {},
+    style: "secondary",
+    requires_confirmation: false,
+  },
   {
     id: "welcome-find-parking",
     type: "SELECT_PARKING_PREFERENCE",
@@ -207,6 +225,13 @@ function preferencesFor(value: ParkingPreference) {
   };
 }
 
+function floorIdFromNode(nodeId: FloorScopedId): FloorId | undefined {
+  const floorId = nodeId.slice(0, 2);
+  return floorId === "F1" || floorId === "F2" || floorId === "F3"
+    ? floorId
+    : undefined;
+}
+
 export function useParkingWorkflow(
   data: WorkflowData,
   api: WorkflowApi = parkSmartApi,
@@ -233,6 +258,9 @@ export function useParkingWorkflow(
   const reserveAndRouteInFlightRef = useRef(false);
   const adjacentObservationInFlightRef = useRef(false);
   const deferredPreferenceRef = useRef<ParkingPreference | null>(null);
+  const resumeAgentAfterLocationRef = useRef(false);
+  const scanInFlightRef = useRef(false);
+  const scanCompletedRef = useRef(false);
   const messageSequenceRef = useRef(0);
 
   function nextMessageId(role: WorkflowMessage["role"]) {
@@ -259,17 +287,11 @@ export function useParkingWorkflow(
     return recommendations.slice(0, 3).map((candidate) => ({
       id: `select-slot:${candidate.slot_id.toLowerCase()}`,
       type: "SELECT_SLOT" as const,
-      label: `Chọn ${candidate.slot_id.replace("F1-", "ô ")}`,
+      label: `Chọn ${candidate.slot_id}`,
       payload: { slot_id: candidate.slot_id },
       style: "primary" as const,
       requires_confirmation: false,
     }));
-  }
-
-  function requireVehicleId() {
-    if (identity.vehicleId) return identity.vehicleId;
-    setNotice("Tài khoản chưa có xe mặc định. Hãy chọn hoặc liên kết xe trước khi tiếp tục.");
-    return null;
   }
 
   useEffect(() => {
@@ -316,46 +338,85 @@ export function useParkingWorkflow(
     setNotice(null);
   }
 
+  async function continueAfterLocationConfirmation(nodeId: FloorScopedId) {
+    setAgentCurrentLocationId(null);
+    setActiveRoute(null);
+    const deferredPreference = deferredPreferenceRef.current;
+    deferredPreferenceRef.current = null;
+    if (!deferredPreference) return false;
+    try {
+      const result = await api.recommend({
+        user_id: identity.userId,
+        start_node_id: nodeId,
+        floor_id: floorIdFromNode(nodeId),
+        charging_required: deferredPreference === "EV",
+        accessible_required: deferredPreference === "ACCESSIBLE",
+        near_elevator: deferredPreference === "NEAR_ELEVATOR",
+        limit: 3,
+      });
+      setCandidates(result.recommendations);
+      setRecommendedSlotIds(result.recommendations.map((candidate) => candidate.slot_id));
+      setSelectedSlotId(null);
+      appendAgentMessage(
+        result.recommendations.length > 0
+          ? "Tôi đã tìm thấy các ô phù hợp. Hãy chọn một ô."
+          : "Hiện chưa có ô phù hợp với nhu cầu này.",
+        slotSelectionActions(result.recommendations),
+      );
+    } catch (error) {
+      setNotice(vietnameseError(error));
+    }
+    return true;
+  }
+
   async function confirmLocation(nodeId: FloorScopedId) {
     setPending("location");
     setNotice(null);
     try {
-      await api.confirmLocation({ user_id: identity.userId, node_id: nodeId });
-      await data.refresh();
-      setAgentCurrentLocationId(null);
-      setActiveRoute(null);
-      const deferredPreference = deferredPreferenceRef.current;
-      deferredPreferenceRef.current = null;
-      if (deferredPreference) {
-        try {
-          const result = await api.recommend({
-            user_id: identity.userId,
-            start_node_id: nodeId,
-            charging_required: deferredPreference === "EV",
-            accessible_required: deferredPreference === "ACCESSIBLE",
-            near_elevator: deferredPreference === "NEAR_ELEVATOR",
-            limit: 3,
-          });
-          setCandidates(result.recommendations);
-          setRecommendedSlotIds(
-            result.recommendations.map((candidate) => candidate.slot_id),
-          );
-          setSelectedSlotId(null);
-          appendAgentMessage(
-            result.recommendations.length > 0
-              ? "Tôi đã tìm thấy các ô phù hợp. Hãy chọn một ô."
-              : "Hiện chưa có ô phù hợp với nhu cầu này.",
-            slotSelectionActions(result.recommendations),
-          );
-        } catch (error) {
-          setNotice(vietnameseError(error));
-        }
-      }
+      const location = await api.confirmLocation({ user_id: identity.userId, node_id: nodeId });
+      data.applyCurrentLocation?.(location);
+      await continueAfterLocationConfirmation(nodeId);
       return true;
     } catch (error) {
       await handleMutationFailure(error);
       return false;
     } finally {
+      setPending(null);
+    }
+  }
+
+  async function scanLocationQr(qrPayload: string) {
+    if (scanInFlightRef.current || scanCompletedRef.current) return false;
+    scanInFlightRef.current = true;
+    setPending("qr-location");
+    setNotice(null);
+    try {
+      const scanned = await api.scanLocation({
+        user_id: identity.userId,
+        qr_payload: qrPayload,
+      });
+      data.applyCurrentLocation?.({ user_id: scanned.user_id, node_id: scanned.node_id });
+      scanCompletedRef.current = true;
+      setNotice(`Đã xác định: ${scanned.label}`);
+      const continuedDeterministically = await continueAfterLocationConfirmation(
+        scanned.node_id,
+      );
+      const shouldResumeAgent =
+        !continuedDeterministically && resumeAgentAfterLocationRef.current;
+      resumeAgentAfterLocationRef.current = false;
+      setRequestedPanel(null);
+      if (shouldResumeAgent) {
+        await sendAgentMessageInternal(
+          "Vị trí đã được xác nhận bằng QR. Hãy tiếp tục yêu cầu trước đó.",
+          { appendUserMessage: false, currentLocationOverride: scanned.node_id },
+        );
+      }
+      return true;
+    } catch (error) {
+      setNotice(vietnameseError(error));
+      return false;
+    } finally {
+      scanInFlightRef.current = false;
       setPending(null);
     }
   }
@@ -376,6 +437,7 @@ export function useParkingWorkflow(
       const result = await api.recommend({
         user_id: identity.userId,
         start_node_id: startNodeId,
+        floor_id: floorIdFromNode(startNodeId),
         charging_required: preferences.chargingRequired,
         accessible_required: preferences.accessibleRequired,
         near_elevator: preferences.nearElevator,
@@ -403,8 +465,10 @@ export function useParkingWorkflow(
   }
 
   async function reserveSelected() {
-    const vehicleId = requireVehicleId();
-    if (!vehicleId) return;
+    if (!identity.vehicleId) {
+      setNotice("Tài khoản chưa có xe mặc định. Hãy thêm xe trước khi giữ chỗ.");
+      return;
+    }
     const slot = data.slots.find((candidate) => candidate.id === selectedSlotId);
     if (!slot) {
       setNotice("Hãy chọn một ô trên bản đồ trước khi giữ chỗ.");
@@ -420,7 +484,7 @@ export function useParkingWorkflow(
     try {
       await api.createReservation({
         user_id: identity.userId,
-        vehicle_id: vehicleId,
+        vehicle_id: identity.vehicleId,
         slot_id: slot.id,
         expected_version: slot.version,
       });
@@ -434,8 +498,10 @@ export function useParkingWorkflow(
 
   async function reserveSelectedAndRoute(slotId = selectedSlotId ?? undefined) {
     if (reserveAndRouteInFlightRef.current) return;
-    const vehicleId = requireVehicleId();
-    if (!vehicleId) return;
+    if (!identity.vehicleId) {
+      setNotice("Tài khoản chưa có xe mặc định. Hãy thêm xe trước khi giữ chỗ.");
+      return;
+    }
     const slot = data.slots.find((candidate) => candidate.id === slotId);
     const startNodeId = data.currentLocation?.node_id;
     if (!slot || !startNodeId) {
@@ -455,7 +521,7 @@ export function useParkingWorkflow(
     try {
       await api.createReservation({
         user_id: identity.userId,
-        vehicle_id: vehicleId,
+        vehicle_id: identity.vehicleId,
         slot_id: slot.id,
         expected_version: slot.version,
       });
@@ -530,8 +596,10 @@ export function useParkingWorkflow(
   }
 
   async function confirmParking() {
-    const vehicleId = requireVehicleId();
-    if (!vehicleId) return;
+    if (!identity.vehicleId) {
+      setNotice("Tài khoản chưa có xe mặc định. Hãy thêm xe trước khi xác nhận đỗ.");
+      return;
+    }
     const reservation = data.activeReservation;
     const initialSlot = data.slots.find(
       (candidate) => candidate.id === reservation?.slot_id,
@@ -559,7 +627,7 @@ export function useParkingWorkflow(
       }
       await api.confirmParking({
         user_id: identity.userId,
-        vehicle_id: vehicleId,
+        vehicle_id: identity.vehicleId,
         reservation_id: reservation.id,
         expected_version: authoritativeSlot.version,
       });
@@ -648,7 +716,17 @@ export function useParkingWorkflow(
     }
   }
 
-  async function sendAgentMessage(message: string, appendUserMessage = true) {
+  async function sendAgentMessageInternal(
+    message: string,
+    {
+      appendUserMessage = true,
+      currentLocationOverride,
+    }: {
+      appendUserMessage?: boolean;
+      currentLocationOverride?: FloorScopedId;
+    } = {},
+  ) {
+    if (!isAgentEnabled()) return null;
     const trimmed = message.trim();
     if (!trimmed || !threadId || chatInFlightRef.current) return null;
     chatInFlightRef.current = true;
@@ -672,7 +750,7 @@ export function useParkingWorkflow(
         thread_id: threadId,
         user_id: identity.userId,
         vehicle_id: identity.vehicleId,
-        current_location: data.currentLocation?.node_id ?? null,
+        current_location: currentLocationOverride ?? data.currentLocation?.node_id ?? null,
         message: trimmed,
       });
       if (
@@ -706,6 +784,14 @@ export function useParkingWorkflow(
     } catch (error) {
       if (
         error instanceof ApiError &&
+        error.status === 429 &&
+        error.code === "AGENT_DAILY_LIMIT_REACHED"
+      ) {
+        setNotice(
+          "Bạn đã dùng hết lượt trợ lý AI hôm nay. Bạn vẫn có thể tìm chỗ, giữ chỗ và báo sự cố bằng các thao tác có sẵn. Vui lòng thử lại vào ngày mai.",
+        );
+      } else if (
+        error instanceof ApiError &&
         error.status === 503 &&
         error.code === "AGENT_TOOL_UNAVAILABLE"
       ) {
@@ -728,35 +814,35 @@ export function useParkingWorkflow(
 
   async function retryAgentMessage() {
     if (!retryMessage) return;
-    await sendAgentMessage(retryMessage, false);
+    await sendAgentMessageInternal(retryMessage, { appendUserMessage: false });
+  }
+
+  async function sendAgentMessage(message: string) {
+    return sendAgentMessageInternal(message);
   }
 
   async function updateAdjacentSlotStatus(
     slotId: FloorScopedId,
     status: AdjacentSlotObservedStatus,
   ) {
-    if (adjacentObservationInFlightRef.current) return;
+    if (adjacentObservationInFlightRef.current) return null;
     const slot = data.slots.find((candidate) => candidate.id === slotId);
     if (!data.activeSession || !slot) {
       setNotice("Chỉ có thể cập nhật ô bên cạnh sau khi bạn đã xác nhận đỗ xe.");
-      return;
+      return null;
     }
     adjacentObservationInFlightRef.current = true;
     setPending("observe-adjacent-slot");
     setPendingAdjacentSlotId(slot.id);
     setNotice(null);
     try {
-      await api.observeAdjacentSlot(slot.id, {
+      const observation = await api.observeAdjacentSlot(slot.id, {
         user_id: identity.userId,
         observed_status: status,
-        expected_version: slot.version,
+        expected_slot_version: slot.version,
       });
       await data.refresh();
-      setNotice(
-        `Cảm ơn bạn. Đã cập nhật ${slot.id} thành ${
-          status === "AVAILABLE" ? "đang trống" : "có xe đỗ"
-        }.`,
-      );
+      return observation;
     } catch (error) {
       await refreshQuietly();
       setNotice(
@@ -765,6 +851,7 @@ export function useParkingWorkflow(
           "Không thể cập nhật ô bên cạnh. Trạng thái mới nhất đã được tải lại.",
         ),
       );
+      return null;
     } finally {
       adjacentObservationInFlightRef.current = false;
       setPendingAdjacentSlotId(null);
@@ -810,14 +897,22 @@ export function useParkingWorkflow(
         return;
       }
       switch (attachedAction.type) {
+        case "SCAN_LOCATION_QR":
+          scanCompletedRef.current = false;
+          resumeAgentAfterLocationRef.current = sourceMessage.id !== "welcome";
+          setRequestedPanel({ kind: "qr-location" });
+          break;
         case "SELECT_LOCATION":
+          resumeAgentAfterLocationRef.current = false;
           setRequestedPanel({ kind: "location" });
           break;
         case "SELECT_PARKING_PREFERENCE": {
           const preference = attachedAction.payload.preference;
           if (!data.currentLocation?.node_id) {
+            scanCompletedRef.current = false;
             deferredPreferenceRef.current = preference;
-            setRequestedPanel({ kind: "location" });
+            resumeAgentAfterLocationRef.current = false;
+            setRequestedPanel({ kind: "qr-location" });
           } else {
             await requestRecommendations(preferencesFor(preference));
           }
@@ -886,6 +981,7 @@ export function useParkingWorkflow(
     selectCandidate,
     clearRoute: () => setActiveRoute(null),
     confirmLocation,
+    scanLocationQr,
     requestRecommendations,
     reserveSelected,
     reserveSelectedAndRoute,
@@ -899,6 +995,9 @@ export function useParkingWorkflow(
     sendAgentMessage,
     retryAgentMessage,
     executeUiAction,
-    clearRequestedPanel: () => setRequestedPanel(null),
+    clearRequestedPanel: () => {
+      resumeAgentAfterLocationRef.current = false;
+      setRequestedPanel(null);
+    },
   };
 }

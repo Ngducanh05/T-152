@@ -5,7 +5,7 @@ import type {
   SlotStatus,
   WrongParkingReason,
   WrongParkingReportStatus,
-  WrongParkingReviewStatus,
+  WrongParkingReportVerificationOutcome,
 } from "./types";
 
 const FLOOR_NAMES: Record<FloorId, string> = {
@@ -23,15 +23,6 @@ const LOCATION_NAMES: Record<string, string> = {
   "F1-RAMP": "Đường dốc tầng 1",
   "F2-RAMP": "Đường dốc tầng 2",
   "F3-RAMP": "Đường dốc tầng 3",
-  "F1-CP1": "Điểm kiểm tra số 1 (F1)",
-  "F1-CP2": "Điểm kiểm tra số 2 (F1)",
-  "F1-CP3": "Điểm kiểm tra số 3 (F1)",
-  "F2-CP1": "Điểm kiểm tra số 1 (F2)",
-  "F2-CP2": "Điểm kiểm tra số 2 (F2)",
-  "F2-CP3": "Điểm kiểm tra số 3 (F2)",
-  "F3-CP1": "Điểm kiểm tra số 1 (F3)",
-  "F3-CP2": "Điểm kiểm tra số 2 (F3)",
-  "F3-CP3": "Điểm kiểm tra số 3 (F3)",
 };
 
 export function formatFloorName(floorId: FloorId): string {
@@ -45,7 +36,7 @@ export function formatParkingLocation(id: string | null | undefined): string {
   const zoneLane = /^F([1-3])-([A-D])-(?:E|W)$/.exec(id);
   if (zoneLane) return `Lối xe khu ${zoneLane[2]} — ${FLOOR_NAMES[`F${zoneLane[1]}` as FloorId]} (${id})`;
   const checkpoint = /^F([1-3])-CP(\d+)$/.exec(id);
-  if (checkpoint) return `Điểm kiểm tra số ${checkpoint[2]} — ${FLOOR_NAMES[`F${checkpoint[1]}` as FloorId]} (${id})`;
+  if (checkpoint) return `Vị trí trong bãi — ${FLOOR_NAMES[`F${checkpoint[1]}` as FloorId]}`;
   const name = LOCATION_NAMES[id];
   return name ? `${name} (${id})` : id;
 }
@@ -73,10 +64,23 @@ export function formatEventType(eventType: ParkingEventType): string {
 export function formatActorType(actorType: ActorType): string {
   return {
     USER: "Người dùng",
+    ADMIN: "Quản trị viên",
     SIMULATOR: "Bộ mô phỏng",
     CAMERA: "Thiết bị ghi hình",
     SYSTEM: "Hệ thống",
   }[actorType];
+}
+
+export function formatVerificationOutcome(
+  outcome: WrongParkingReportVerificationOutcome,
+): string {
+  return {
+    PENDING: "Chờ xác minh",
+    CONFIRMED: "Đã xác nhận hợp lệ",
+    REJECTED: "Bị từ chối",
+    DUPLICATE: "Trùng report",
+    UNVERIFIABLE: "Không thể xác minh",
+  }[outcome];
 }
 
 export function formatWrongParkingReason(reason: WrongParkingReason): string {
@@ -93,14 +97,4 @@ export function formatWrongParkingReportStatus(
   status: WrongParkingReportStatus,
 ): string {
   return status === "OPEN" ? "Đang mở" : "Đã xử lý";
-}
-
-export function formatWrongParkingReviewStatus(
-  status: WrongParkingReviewStatus,
-): string {
-  return {
-    PENDING: "Chờ kiểm tra",
-    CONFIRMED: "Đã xác nhận",
-    REJECTED: "Đã từ chối",
-  }[status];
 }

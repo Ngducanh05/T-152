@@ -3,17 +3,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, parkSmartApi, type ParkSmartApiClient } from "@/lib/api";
-import { MVP_DEMO_USER_ID } from "@/lib/demo";
 import type {
   ActiveParkingSession,
+  ContributionRecord,
   Location,
   ParkingMap,
   ParkingReservation,
   ParkingSlot,
   ParkingStatus,
+  RewardConfiguration,
+  RewardSummary,
 } from "@/lib/types";
 
-export const PARKING_POLL_INTERVAL_MS = 2_000;
+export const PARKING_POLL_INTERVAL_MS = 10_000;
 
 export interface ParkSmartSnapshot {
   map: ParkingMap;
@@ -22,6 +24,9 @@ export interface ParkSmartSnapshot {
   currentLocation: Location | null;
   activeReservation: ParkingReservation | null;
   activeSession: ActiveParkingSession | null;
+  rewardSummary: RewardSummary | null;
+  rewardConfiguration: RewardConfiguration;
+  contributions: ContributionRecord[];
 }
 
 export interface ParkSmartDataState {
@@ -31,6 +36,9 @@ export interface ParkSmartDataState {
   currentLocation: Location | null;
   activeReservation: ParkingReservation | null;
   activeSession: ActiveParkingSession | null;
+  rewardSummary: RewardSummary | null;
+  rewardConfiguration: RewardConfiguration | null;
+  contributions: ContributionRecord[];
   lastUpdatedAt: string | null;
   loading: boolean;
   refreshing: boolean;
@@ -39,6 +47,7 @@ export interface ParkSmartDataState {
 
 export interface ParkSmartData extends ParkSmartDataState {
   refresh: () => Promise<ParkSmartSnapshot>;
+  applyCurrentLocation: (location: Location) => void;
 }
 
 const initialState: ParkSmartDataState = {
@@ -48,6 +57,9 @@ const initialState: ParkSmartDataState = {
   currentLocation: null,
   activeReservation: null,
   activeSession: null,
+  rewardSummary: null,
+  rewardConfiguration: null,
+  contributions: [],
   lastUpdatedAt: null,
   loading: true,
   refreshing: false,
@@ -62,24 +74,57 @@ function asApiError(error: unknown, message: string) {
 
 export async function loadAuthoritativeState(
   api: ParkSmartApiClient,
-  userId: string,
+  userId: string | null,
   signal?: AbortSignal,
 ): Promise<ParkSmartSnapshot> {
-  const [map, slots, status, currentLocation, activeReservation, activeSession] =
-    await Promise.all([
-      api.getMap(signal),
-      api.getSlots({}, signal),
-      api.getParkingStatus(signal),
-      api.getCurrentLocation(userId, signal),
-      api.getActiveReservation(userId, signal),
-      api.getActiveSession(userId, signal),
-    ]);
-  return { map, slots, status, currentLocation, activeReservation, activeSession };
+  const [map, slots, status, rewardConfiguration] = await Promise.all([
+    api.getMap(signal),
+    api.getSlots({}, signal),
+    api.getParkingStatus(signal),
+    api.getRewardConfiguration(signal),
+  ]);
+  if (!userId) {
+    return {
+      map,
+      slots,
+      status,
+      currentLocation: null,
+      activeReservation: null,
+      activeSession: null,
+      rewardSummary: null,
+      rewardConfiguration,
+      contributions: [],
+    };
+  }
+  const [
+    currentLocation,
+    activeReservation,
+    activeSession,
+    rewardSummary,
+    contributions,
+  ] = await Promise.all([
+    api.getCurrentLocation(userId, signal),
+    api.getActiveReservation(userId, signal),
+    api.getActiveSession(userId, signal),
+    api.getRewardSummary(userId, signal),
+    api.getUserContributions(userId, signal),
+  ]);
+  return {
+    map,
+    slots,
+    status,
+    currentLocation,
+    activeReservation,
+    activeSession,
+    rewardSummary,
+    rewardConfiguration,
+    contributions,
+  };
 }
 
 export function useParkSmartData(
   api: ParkSmartApiClient = parkSmartApi,
-  userId = MVP_DEMO_USER_ID,
+  userId: string | null = null,
 ): ParkSmartData {
   const [state, setState] = useState<ParkSmartDataState>(initialState);
   const mountedRef = useRef(false);
@@ -154,11 +199,19 @@ export function useParkSmartData(
           api.getSlots({}, controller.signal),
           api.getParkingStatus(controller.signal),
         ]);
+        const [rewardSummary, contributions] = userId
+          ? await Promise.all([
+              api.getRewardSummary(userId, controller.signal),
+              api.getUserContributions(userId, controller.signal),
+            ])
+          : [null, []];
         if (mountedRef.current) {
           setState((current) => ({
             ...current,
             slots,
             status,
+            rewardSummary,
+            contributions,
             lastUpdatedAt: new Date().toISOString(),
             error: null,
           }));
@@ -190,7 +243,16 @@ export function useParkSmartData(
       pollControllerRef.current = null;
       lifecycleControllerRef.current = null;
     };
-  }, [api, refresh]);
+  }, [api, refresh, userId]);
 
-  return { ...state, refresh };
+  const applyCurrentLocation = useCallback((location: Location) => {
+    setState((current) => ({
+      ...current,
+      currentLocation: location,
+      lastUpdatedAt: new Date().toISOString(),
+      error: null,
+    }));
+  }, []);
+
+  return { ...state, refresh, applyCurrentLocation };
 }

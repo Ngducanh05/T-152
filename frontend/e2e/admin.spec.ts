@@ -21,7 +21,7 @@ test("shows operational data, filters the shared map, and refreshes after a muta
   const zoneFilter = page.locator(".admin-filters select").first();
   await zoneFilter.selectOption("D");
   await expect(page.getByRole("button", { name: /^Ô đỗ / })).toHaveCount(10);
-  await expect(page.getByText("10 ô phù hợp")).toBeVisible();
+  await expect(page.getByText("30 ô phù hợp")).toBeVisible();
   await zoneFilter.selectOption("ALL");
 
   await page.locator(".admin-operations form select").first().selectOption("F1-A04");

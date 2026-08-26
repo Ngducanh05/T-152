@@ -40,7 +40,7 @@ describe("ParkingMap", () => {
     expect(screen.getByRole("button", { name: /F1-D10, Khu D/ })).toBeDefined();
     expect(screen.getByRole("button", { name: /F1-A01.*Đã giữ.*Chỗ đã giữ/ }).getAttribute("data-status")).toBe("RESERVED");
     expect(screen.getByRole("button", { name: /F1-D01.*Có sạc điện.*Được đề xuất/ })).toBeDefined();
-    expect(screen.getByTestId("current-location")).toBeDefined();
+    expect(screen.queryByTestId("current-location")).toBeNull();
     expect(container.querySelector('[data-node-id="F1-CP1"]')).toBeNull();
     expect(getDisplayPoint({ id: "F1-ELEVATOR", floor_id: "F1", type: "ELEVATOR", x: 50, y: 92 })).toEqual([50, 96]);
     expect(container.querySelector(".elevator-road")?.getAttribute("d")).toBe("M 50 50 L 50 90");
@@ -92,13 +92,42 @@ describe("ParkingMap", () => {
     expect(warnedSlot.querySelector(".map-slot-report-warning")).toHaveTextContent("2");
     fireEvent.click(warnedSlot);
     expect(onOpenReportedSlot).toHaveBeenCalledWith("F1-A01");
-    expect(onSelectSlot).not.toHaveBeenCalled();
+    expect(onSelectSlot).toHaveBeenCalledWith("F1-A01");
 
     const normalSlot = screen.getByRole("button", { name: /F1-A02, Khu A/ });
     expect(normalSlot).toHaveClass("status-available");
     expect(normalSlot).not.toHaveClass("has-open-reports");
     fireEvent.click(normalSlot);
     expect(onSelectSlot).toHaveBeenCalledWith("F1-A02");
+  });
+
+  it("reconstructs all F2/F3 bays from the canonical F1 geometry in both map modes", () => {
+    const { map, slots, status } = fixture();
+    const cloneSlots = (floorId: "F2" | "F3"): ParkingSlot[] =>
+      slots.map((slot) => ({
+        ...slot,
+        id: slot.id.replace("F1-", `${floorId}-`),
+        floor_id: floorId,
+        node_id: slot.node_id.replace("F1-", `${floorId}-`),
+      }));
+
+    render(
+      <ParkingMap
+        map={map}
+        slots={[...slots, ...cloneSlots("F2"), ...cloneSlots("F3")]}
+        status={status}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Tầng 2:/ }));
+    expect(screen.getAllByRole("button", { name: /Ô đỗ F2-/ })).toHaveLength(40);
+
+    fireEvent.click(screen.getByRole("button", { name: "Phối cảnh hầm" }));
+    expect(screen.getAllByRole("button", { name: /Ô đỗ F2-/ })).toHaveLength(40);
+
+    fireEvent.click(screen.getByRole("button", { name: /Tầng 3:/ }));
+    expect(screen.getAllByRole("button", { name: /Ô đỗ F3-/ })).toHaveLength(40);
+    expect(screen.getByTestId("isometric-map").getAttribute("aria-label")).toContain("Tầng 3");
   });
 
   it("shows complete Vietnamese gate and inter-floor labels without duplicates", () => {
@@ -154,6 +183,18 @@ describe("ParkingMap", () => {
 
     expect(screen.getByTestId("isometric-map")).toBeDefined();
     expect(screen.queryByTestId("parking-map")).toBeNull();
+  });
+
+  it("only renders vehicle artwork in the isometric view", () => {
+    const { map, slots, status } = fixture();
+    const { container } = render(
+      <ParkingMap map={map} slots={slots} status={status} />,
+    );
+
+    expect(container.querySelector(".map-slot-car")).toBeNull();
+    expect(container.querySelector(".iso-car")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Phối cảnh hầm" }));
+    expect(container.querySelectorAll(".iso-car").length).toBeGreaterThan(0);
   });
 
   it("AC-25: Bấm Sơ đồ phẳng để quay lại chế độ 2D", () => {

@@ -21,7 +21,7 @@ export interface RouteInstruction {
 type Point = readonly [number, number];
 
 const PRESENTATION = {
-  START: { icon: "●", label: "Xuất phát" },
+  START: { icon: "●", label: "Bắt đầu" },
   STRAIGHT: { icon: "↑", label: "Đi thẳng" },
   LEFT: { icon: "↰", label: "Rẽ trái" },
   RIGHT: { icon: "↱", label: "Rẽ phải" },
@@ -29,6 +29,25 @@ const PRESENTATION = {
   CONTINUE: { icon: "→", label: "Tiếp tục" },
   ARRIVE: { icon: "P", label: "Đến nơi" },
 } as const;
+
+function naturalDirection(
+  kind: RouteInstructionKind,
+  atIntersection: boolean,
+): string {
+  if (kind === "LEFT" || kind === "RIGHT") {
+    const place = atIntersection ? "Ở ngã tư phía trước" : "Tới lối rẽ phía trước";
+    return `${place}, ${kind === "LEFT" ? "rẽ trái" : "rẽ phải"}.`;
+  }
+  if (kind === "STRAIGHT") {
+    return atIntersection
+      ? "Qua ngã tư phía trước, tiếp tục đi thẳng."
+      : "Tiếp tục đi thẳng theo lối phía trước.";
+  }
+  if (kind === "U_TURN") {
+    return "Khi tới chỗ quay đầu phía trước, quay lại.";
+  }
+  return "Tiếp tục đi theo lối phía trước.";
+}
 
 function routePoints(route: RouteResult, map: ParkingMap | null): Array<Point | null> {
   if (route.polyline.length === route.path.length) {
@@ -80,36 +99,36 @@ export function buildRouteInstructions(
   }
 
   const points = routePoints(route, map);
+  const nodeById = new Map(map?.nodes.map((node) => [node.id, node]) ?? []);
   return route.path.map((nodeId, index) => {
-    const location = formatParkingLocation(nodeId);
     if (index === 0) {
       return {
         nodeId,
         kind: "START" as const,
         ...PRESENTATION.START,
-        description: `Xuất phát từ ${location}.`,
+        description: "Đi theo lối ngay phía trước.",
       };
     }
     if (index === route.path.length - 1) {
+      const destination = formatParkingLocation(nodeId);
       return {
         nodeId,
         kind: "ARRIVE" as const,
         ...PRESENTATION.ARRIVE,
-        description: `Bạn sẽ đến ${location}.`,
+        description: `Bạn sẽ đến ${destination}.`,
       };
     }
 
     const kind = turnKind(points[index - 1], points[index], points[index + 1]);
     const presentation = PRESENTATION[kind];
-    const nextLocation = formatParkingLocation(route.path[index + 1]);
     return {
       nodeId,
       kind,
       ...presentation,
-      description:
-        kind === "CONTINUE"
-          ? `Tiếp tục qua ${location} về phía ${nextLocation}.`
-          : `${presentation.label} tại ${location}, đi về phía ${nextLocation}.`,
+      description: naturalDirection(
+        kind,
+        nodeById.get(nodeId)?.type === "CHECKPOINT",
+      ),
     };
   });
 }

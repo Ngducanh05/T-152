@@ -179,6 +179,17 @@
   text-align: center;
 }
 
+.securityNote a {
+  color: #176b49;
+  font-weight: 750;
+}
+
+.securityNote a:focus-visible {
+  border-radius: 3px;
+  outline: 3px solid rgba(43, 111, 255, 0.35);
+  outline-offset: 3px;
+}
+
 .adminAuthBar {
   position: fixed;
   z-index: 80;
