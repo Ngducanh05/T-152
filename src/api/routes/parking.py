@@ -222,7 +222,7 @@ async def parking_snapshot(
 ) -> SuccessResponse[ParkingSnapshotResponse]:
     state = ParkingStateService(session)
     slots = await state.list_slots()
-    status = await state.get_parking_status()
+    status = state.summarize_slots(slots)
     return SuccessResponse(
         data=ParkingSnapshotResponse(
             slots=[_slot_response(slot) for slot in slots],

@@ -10,6 +10,11 @@ import {
   type ParkSmartApiClient,
 } from "@/lib/api";
 import {
+  clearIdempotencyKey,
+  getOrCreateIdempotencyKey,
+  type IdempotencyAttempt,
+} from "@/lib/idempotency";
+import {
   getOrCreateThreadId,
   MVP_DEMO_PARKING_IDENTITY,
   rotateThreadId,
@@ -129,6 +134,14 @@ function vietnameseError(error: unknown) {
 
 function isSlotConflict(error: unknown) {
   return error instanceof ApiError && error.code === "SLOT_NOT_AVAILABLE";
+}
+
+function isDefinitiveMutationRejection(error: unknown) {
+  return (
+    error instanceof ApiError &&
+    error.status >= 400 &&
+    error.status < 500
+  );
 }
 
 const AUTHORITATIVE_REFRESH_TOOLS = new Set([
@@ -253,6 +266,9 @@ export function useParkingWorkflow(
   const resumeAgentAfterLocationRef = useRef(false);
   const scanInFlightRef = useRef(false);
   const scanCompletedRef = useRef(false);
+  const reservationIdempotencyRef = useRef<IdempotencyAttempt | null>(null);
+  const confirmParkingIdempotencyRef = useRef<IdempotencyAttempt | null>(null);
+  const completeSessionIdempotencyRef = useRef<IdempotencyAttempt | null>(null);
   const messageSequenceRef = useRef(0);
 
   function nextMessageId(role: WorkflowMessage["role"]) {
@@ -386,7 +402,13 @@ export function useParkingWorkflow(
         user_id: identity.userId,
         qr_payload: qrPayload,
       });
-      data.applyCurrentLocation?.({ user_id: scanned.user_id, node_id: scanned.node_id });
+      data.applyCurrentLocation?.({
+        user_id: scanned.user_id,
+        node_id: scanned.node_id,
+        verified_node_id: scanned.verified_node_id ?? scanned.node_id,
+        verified_at: scanned.verified_at ?? null,
+        verified_marker_id: scanned.verified_marker_id ?? scanned.marker_id,
+      });
       scanCompletedRef.current = true;
       setNotice(`Đã xác định: ${scanned.label}`);
       const continuedDeterministically = await continueAfterLocationConfirmation(
@@ -459,6 +481,7 @@ export function useParkingWorkflow(
       setNotice("Tài khoản chưa có xe mặc định. Hãy thêm xe trước khi giữ chỗ.");
       return;
     }
+
     const slot = data.slots.find((candidate) => candidate.id === selectedSlotId);
     if (!slot) {
       setNotice("Hãy chọn một ô trên bản đồ trước khi giữ chỗ.");
@@ -468,18 +491,29 @@ export function useParkingWorkflow(
       setNotice(`Ô ${slot.id} hiện không trống. Hãy chọn một ô đang trống khác.`);
       return;
     }
+
+    const request = {
+      user_id: identity.userId,
+      vehicle_id: identity.vehicleId,
+      slot_id: slot.id,
+      expected_version: slot.version,
+    };
+    const idempotencyKey = getOrCreateIdempotencyKey(
+      reservationIdempotencyRef,
+      JSON.stringify(request),
+    );
+
     setPending("reserve");
     setNotice(null);
     clearRecommendations();
     try {
-      await api.createReservation({
-        user_id: identity.userId,
-        vehicle_id: identity.vehicleId,
-        slot_id: slot.id,
-        expected_version: slot.version,
-      });
+      await api.createReservation(request, undefined, idempotencyKey);
+      clearIdempotencyKey(reservationIdempotencyRef);
       await data.refresh();
     } catch (error) {
+      if (isDefinitiveMutationRejection(error)) {
+        clearIdempotencyKey(reservationIdempotencyRef);
+      }
       await handleMutationFailure(error);
     } finally {
       setPending(null);
@@ -492,6 +526,7 @@ export function useParkingWorkflow(
       setNotice("Tài khoản chưa có xe mặc định. Hãy thêm xe trước khi giữ chỗ.");
       return;
     }
+
     const slot = data.slots.find((candidate) => candidate.id === slotId);
     const startNodeId = data.currentLocation?.node_id;
     if (!slot || !startNodeId) {
@@ -504,18 +539,30 @@ export function useParkingWorkflow(
       return;
     }
 
+    const reservationRequest = {
+      user_id: identity.userId,
+      vehicle_id: identity.vehicleId,
+      slot_id: slot.id,
+      expected_version: slot.version,
+    };
+    const idempotencyKey = getOrCreateIdempotencyKey(
+      reservationIdempotencyRef,
+      JSON.stringify(reservationRequest),
+    );
+
     reserveAndRouteInFlightRef.current = true;
     setPending("reserve-and-route");
     setNotice(null);
     let reservationCreated = false;
     try {
-      await api.createReservation({
-        user_id: identity.userId,
-        vehicle_id: identity.vehicleId,
-        slot_id: slot.id,
-        expected_version: slot.version,
-      });
+      await api.createReservation(
+        reservationRequest,
+        undefined,
+        idempotencyKey,
+      );
+      clearIdempotencyKey(reservationIdempotencyRef);
       reservationCreated = true;
+
       const snapshot = await data.refresh();
       clearRecommendations();
       setSelectedSlotId(slot.id);
@@ -527,6 +574,9 @@ export function useParkingWorkflow(
       setActiveRoute(route);
       setNotice(`Đã giữ ô ${slot.id} và tải chỉ đường.`);
     } catch (error) {
+      if (!reservationCreated && isDefinitiveMutationRejection(error)) {
+        clearIdempotencyKey(reservationIdempotencyRef);
+      }
       if (reservationCreated) {
         setNotice(
           formatApiErrorForOperator(
@@ -592,6 +642,7 @@ export function useParkingWorkflow(
       setNotice("Tài khoản chưa có xe mặc định. Hãy thêm xe trước khi xác nhận đỗ.");
       return;
     }
+
     const reservation = data.activeReservation;
     const initialSlot = data.slots.find(
       (candidate) => candidate.id === reservation?.slot_id,
@@ -600,20 +651,31 @@ export function useParkingWorkflow(
       setNotice("Bạn chưa có chỗ đỗ đã giữ để xác nhận.");
       return;
     }
+
+    const request = {
+      user_id: identity.userId,
+      vehicle_id: identity.vehicleId,
+      reservation_id: reservation.id,
+      expected_version: initialSlot.version,
+    };
+    const idempotencyKey = getOrCreateIdempotencyKey(
+      confirmParkingIdempotencyRef,
+      JSON.stringify(request),
+    );
+
     setPending("confirm-parking");
     setNotice(null);
     clearRecommendations();
     try {
-      await api.confirmParking({
-        user_id: identity.userId,
-        vehicle_id: identity.vehicleId,
-        reservation_id: reservation.id,
-        expected_version: initialSlot.version,
-      });
+      await api.confirmParking(request, undefined, idempotencyKey);
+      clearIdempotencyKey(confirmParkingIdempotencyRef);
       await data.refresh();
       setActiveRoute(null);
       setNotice(`Đã xác nhận bạn đến ${reservation.slot_id} và hoàn tất đỗ xe.`);
     } catch (error) {
+      if (isDefinitiveMutationRejection(error)) {
+        clearIdempotencyKey(confirmParkingIdempotencyRef);
+      }
       if (error instanceof ApiError && error.code === "PARKING_ARRIVAL_NOT_VERIFIED") {
         scanCompletedRef.current = false;
         resumeAgentAfterLocationRef.current = false;
@@ -664,18 +726,34 @@ export function useParkingWorkflow(
       setNotice("Không có phiên đỗ xe đang hoạt động để kết thúc.");
       return;
     }
+
+    const request = {
+      user_id: identity.userId,
+      expected_version: slot.version,
+    };
+    const idempotencyKey = getOrCreateIdempotencyKey(
+      completeSessionIdempotencyRef,
+      JSON.stringify({ session_id: session.session_id, ...request }),
+    );
+
     setPending("complete-session");
     setNotice(null);
     clearRecommendations();
     try {
-      await api.completeSession(session.session_id, {
-        user_id: identity.userId,
-        expected_version: slot.version,
-      });
+      await api.completeSession(
+        session.session_id,
+        request,
+        undefined,
+        idempotencyKey,
+      );
+      clearIdempotencyKey(completeSessionIdempotencyRef);
       await data.refresh();
       setSelectedSlotId(null);
       setActiveRoute(null);
     } catch (error) {
+      if (isDefinitiveMutationRejection(error)) {
+        clearIdempotencyKey(completeSessionIdempotencyRef);
+      }
       await handleMutationFailure(error);
     } finally {
       setPending(null);
@@ -687,6 +765,9 @@ export function useParkingWorkflow(
     setNotice(null);
     try {
       await api.resetDemo();
+      clearIdempotencyKey(reservationIdempotencyRef);
+      clearIdempotencyKey(confirmParkingIdempotencyRef);
+      clearIdempotencyKey(completeSessionIdempotencyRef);
       await data.refresh();
       clearRecommendations();
       setSelectedSlotId(null);

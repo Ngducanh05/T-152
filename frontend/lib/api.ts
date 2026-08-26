@@ -163,6 +163,16 @@ function queryString(values: Record<string, string | number | boolean | undefine
   return query ? `?${query}` : "";
 }
 
+function idempotencyHeaders(
+  idempotencyKey?: string,
+): HeadersInit | undefined {
+  if (!idempotencyKey) return undefined;
+
+  return {
+    "Idempotency-Key": idempotencyKey,
+  };
+}
+
 export class ParkSmartApiClient {
   private readonly baseUrl: string;
   private readonly fetcher: typeof fetch;
@@ -337,10 +347,15 @@ export class ParkSmartApiClient {
     });
   }
 
-  createReservation(payload: CreateReservationRequest, signal?: AbortSignal) {
+  createReservation(
+    payload: CreateReservationRequest,
+    signal?: AbortSignal,
+    idempotencyKey?: string,
+  ) {
     return this.request<ParkingReservation>("/reservations", {
       method: "POST",
       body: JSON.stringify(payload),
+      headers: idempotencyHeaders(idempotencyKey),
       signal,
     });
   }
@@ -369,10 +384,15 @@ export class ParkSmartApiClient {
     });
   }
 
-  confirmParking(payload: ConfirmParkingRequest, signal?: AbortSignal) {
+  confirmParking(
+    payload: ConfirmParkingRequest,
+    signal?: AbortSignal,
+    idempotencyKey?: string,
+  ) {
     return this.request<ParkingSession>("/sessions/confirm-parking", {
       method: "POST",
       body: JSON.stringify(payload),
+      headers: idempotencyHeaders(idempotencyKey),
       signal,
     });
   }
@@ -390,12 +410,14 @@ export class ParkSmartApiClient {
     sessionId: string,
     payload: CompleteSessionRequest,
     signal?: AbortSignal,
+    idempotencyKey?: string,
   ) {
     return this.request<ParkingSession>(
       `/sessions/${encodeURIComponent(sessionId)}/complete`,
       {
         method: "POST",
         body: JSON.stringify(payload),
+        headers: idempotencyHeaders(idempotencyKey),
         signal,
       },
     );
@@ -479,7 +501,10 @@ export class ParkSmartApiClient {
   reportWrongParking(
     payload: CreateWrongParkingReportRequest,
     signal?: AbortSignal,
+    idempotencyKey?: string,
   ) {
+    const headers = idempotencyHeaders(idempotencyKey);
+
     if (payload.evidence) {
       const form = new FormData();
       form.set("user_id", payload.user_id);
@@ -493,12 +518,14 @@ export class ParkSmartApiClient {
       return this.request<WrongParkingReport>("/reports/wrong-parking", {
         method: "POST",
         body: form,
+        headers,
         signal,
       });
     }
     return this.request<WrongParkingReport>("/reports/wrong-parking", {
       method: "POST",
       body: JSON.stringify(payload),
+      headers,
       signal,
     });
   }

@@ -143,6 +143,9 @@ describe("useParkingWorkflow", () => {
       floor_id: "F3",
       zone_id: "D",
       label: "Tầng 3 · Khu D · lối Tây",
+      verified_node_id: "F3-D-W",
+      verified_at: "2026-08-26T10:00:00Z",
+      verified_marker_id: "PSLOC-F3-D-W",
     });
     const { result } = renderHook(() => useParkingWorkflow(data, api));
     const preference = result.current.messages[0].uiActions.find(
@@ -153,7 +156,13 @@ describe("useParkingWorkflow", () => {
       await result.current.scanLocationQr("parksmart:location:v1:PSLOC-F3-D-W");
     });
     expect(api.scanLocation).toHaveBeenCalledOnce();
-    expect(applyCurrentLocation).toHaveBeenCalledWith({ user_id: "USER-001", node_id: "F3-D-W" });
+    expect(applyCurrentLocation).toHaveBeenCalledWith({
+      user_id: "USER-001",
+      node_id: "F3-D-W",
+      verified_node_id: "F3-D-W",
+      verified_at: "2026-08-26T10:00:00Z",
+      verified_marker_id: "PSLOC-F3-D-W",
+    });
     expect(api.recommend).toHaveBeenCalledWith({
       user_id: "USER-001",
       start_node_id: "F3-D-W",
@@ -439,12 +448,16 @@ describe("useParkingWorkflow", () => {
       await result.current.reserveSelected();
     });
 
-    expect(api.createReservation).toHaveBeenCalledWith({
-      user_id: "USER-001",
-      vehicle_id: "VEHICLE-001",
-      slot_id: "F1-D01",
-      expected_version: 7,
-    });
+    expect(api.createReservation).toHaveBeenCalledWith(
+      {
+        user_id: "USER-001",
+        vehicle_id: "VEHICLE-001",
+        slot_id: "F1-D01",
+        expected_version: 7,
+      },
+      undefined,
+      expect.any(String),
+    );
     expect(refresh).toHaveBeenCalledOnce();
     expect(slot.status).toBe("AVAILABLE");
     expect(result.current.selectedSlotId).toBeNull();
@@ -462,13 +475,69 @@ describe("useParkingWorkflow", () => {
 
     expect(result.current.selectedSlotId).toBe("F1-D01");
     expect(result.current.recommendedSlotIds).toEqual([]);
-    expect(api.createReservation).toHaveBeenCalledWith({
-      user_id: "USER-001",
-      vehicle_id: "VEHICLE-001",
-      slot_id: "F1-D01",
-      expected_version: 7,
-    });
+    expect(api.createReservation).toHaveBeenCalledWith(
+      {
+        user_id: "USER-001",
+        vehicle_id: "VEHICLE-001",
+        slot_id: "F1-D01",
+        expected_version: 7,
+      },
+      undefined,
+      expect.any(String),
+    );
     expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("reuses the reservation idempotency key after an unknown transport failure", async () => {
+    const { api, data } = fixture();
+    api.createReservation
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce(activeReservation);
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    act(() => result.current.selectCandidate("F1-D01"));
+    await act(async () => {
+      await result.current.reserveSelected();
+    });
+    await act(async () => {
+      await result.current.reserveSelected();
+    });
+
+    expect(api.createReservation).toHaveBeenCalledTimes(2);
+    const firstKey = api.createReservation.mock.calls[0]?.[2];
+    const secondKey = api.createReservation.mock.calls[1]?.[2];
+    expect(firstKey).toEqual(expect.any(String));
+    expect(secondKey).toBe(firstKey);
+  });
+
+  it("rotates the reservation idempotency key after a definitive conflict", async () => {
+    const { api, data } = fixture();
+    api.createReservation
+      .mockRejectedValueOnce(
+        new ApiError({
+          code: "SLOT_NOT_AVAILABLE",
+          message: "Slot changed.",
+          status: 409,
+        }),
+      )
+      .mockResolvedValueOnce(activeReservation);
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    act(() => result.current.selectCandidate("F1-D01"));
+    await act(async () => {
+      await result.current.reserveSelected();
+    });
+    act(() => result.current.selectCandidate("F1-D01"));
+    await act(async () => {
+      await result.current.reserveSelected();
+    });
+
+    expect(api.createReservation).toHaveBeenCalledTimes(2);
+    const firstKey = api.createReservation.mock.calls[0]?.[2];
+    const secondKey = api.createReservation.mock.calls[1]?.[2];
+    expect(firstKey).toEqual(expect.any(String));
+    expect(secondKey).toEqual(expect.any(String));
+    expect(secondKey).not.toBe(firstKey);
   });
 
   it("clears recommendation highlights after selecting and confirming a parking slot", async () => {
@@ -523,12 +592,16 @@ describe("useParkingWorkflow", () => {
     });
 
     expect(api.confirmLocation).not.toHaveBeenCalled();
-    expect(api.confirmParking).toHaveBeenCalledWith({
-      user_id: "USER-001",
-      vehicle_id: "VEHICLE-001",
-      reservation_id: activeReservation.id,
-      expected_version: slot.version,
-    });
+    expect(api.confirmParking).toHaveBeenCalledWith(
+      {
+        user_id: "USER-001",
+        vehicle_id: "VEHICLE-001",
+        reservation_id: activeReservation.id,
+        expected_version: slot.version,
+      },
+      undefined,
+      expect.any(String),
+    );
     expect(refresh).toHaveBeenCalledOnce();
     expect(result.current.notice).toContain("hoàn tất đỗ xe");
   });

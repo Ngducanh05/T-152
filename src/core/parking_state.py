@@ -101,8 +101,9 @@ class ParkingStateService:
             is_accessible=is_accessible,
         )
 
-    async def get_parking_status(self) -> ParkingStatus:
-        slots = await self.list_slots()
+    @staticmethod
+    def summarize_slots(slots: list[ParkingSlot]) -> ParkingStatus:
+        """Build a parking-status view from an already loaded slot snapshot."""
         by_zone: dict[str, dict[SlotStatus, int]] = {}
         for slot in slots:
             zone_counts = by_zone.setdefault(
@@ -118,6 +119,10 @@ class ParkingStateService:
             occupied=counts[SlotStatus.OCCUPIED],
             by_zone=by_zone,
         )
+
+    async def get_parking_status(self) -> ParkingStatus:
+        slots = await self.list_slots()
+        return self.summarize_slots(slots)
 
     async def set_slot_status_by_admin(
         self,

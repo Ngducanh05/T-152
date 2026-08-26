@@ -120,7 +120,7 @@ export function LoginForm({
           <span className={styles.logoMark} aria-hidden="true">P</span>
           <div>
             <h1 id="check-email-title">Kiểm tra email</h1>
-            <p>ParkSmart đã gửi liên kết xác nhận đến:</p>
+            <p>Email cần được xác nhận trước khi đăng nhập:</p>
             <strong>{checkEmail}</strong>
           </div>
         </div>
