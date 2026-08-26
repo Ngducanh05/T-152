@@ -73,8 +73,8 @@ def derive_chat_ui_actions(
             _action(
                 action_id="select-location",
                 action_type=ChatUIActionType.SELECT_LOCATION,
-                label="Chọn vị trí hiện tại",
-                style=ChatUIActionStyle.PRIMARY,
+                label="Chọn vị trí thủ công",
+                style=ChatUIActionStyle.SECONDARY,
             )
         ]
 
@@ -87,7 +87,7 @@ def derive_chat_ui_actions(
                 _action(
                     action_id=f"select-slot:{slot_id.lower()}",
                     action_type=ChatUIActionType.SELECT_SLOT,
-                    label=f"Chọn ô {slot_id.removeprefix('F1-')}",
+                    label=f"Chọn {slot_id}",
                     payload={"slot_id": slot_id},
                     style=ChatUIActionStyle.PRIMARY,
                 )
@@ -146,7 +146,7 @@ def derive_chat_ui_actions(
             _action(
                 action_id=f"reserve-and-route:{canonical_selected_slot.lower()}",
                 action_type=ChatUIActionType.RESERVE_AND_ROUTE,
-                label=f"Giữ ô {canonical_selected_slot.removeprefix('F1-')} và chỉ đường",
+                label=f"Giữ ô {canonical_selected_slot} và chỉ đường",
                 payload={"slot_id": canonical_selected_slot},
                 style=ChatUIActionStyle.PRIMARY,
                 requires_confirmation=True,
@@ -166,7 +166,7 @@ def derive_chat_ui_actions(
             _action(
                 action_id=f"report-wrong-parking:{canonical_selected_slot.lower()}",
                 action_type=ChatUIActionType.OPEN_WRONG_PARKING_REPORT,
-                label=f"Báo xe đỗ sai tại {canonical_selected_slot.removeprefix('F1-')}",
+                label=f"Báo xe đỗ sai tại {canonical_selected_slot}",
                 payload={"slot_id": canonical_selected_slot},
             )
         )

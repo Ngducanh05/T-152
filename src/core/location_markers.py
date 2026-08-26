@@ -1,5 +1,6 @@
 """Trusted static QR markers for indoor location confirmation."""
 
+import re
 from dataclasses import dataclass
 
 from src.models.schemas import FLOOR_IDS
@@ -8,6 +9,7 @@ LOCATION_QR_PREFIX = "parksmart:location:v1:"
 MAX_LOCATION_QR_PAYLOAD_LENGTH = 256
 _ZONE_IDS = ("A", "B", "C", "D")
 _SIDES = (("W", "Tây"), ("E", "Đông"))
+_MARKER_ID_PATTERN = re.compile(r"^PSLOC-F[1-3]-[A-Z]-[WE]$")
 
 
 class InvalidLocationQrError(ValueError):
@@ -64,7 +66,7 @@ def resolve_location_qr(qr_payload: str) -> LocationMarker:
     ):
         raise InvalidLocationQrError("QR payload is not a valid ParkSmart location QR")
     marker_id = payload.removeprefix(LOCATION_QR_PREFIX)
-    if not marker_id:
+    if not _MARKER_ID_PATTERN.fullmatch(marker_id):
         raise InvalidLocationQrError("QR payload does not include a location marker ID")
     return get_location_marker(marker_id)
 

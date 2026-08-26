@@ -10,7 +10,7 @@ from src.api.dependencies import ParkingUserDependency, resolve_parking_user_id
 from src.core.database import get_db_session
 from src.core.location import LocationError, LocationService
 from src.models.common import ErrorResponse, SuccessResponse
-from src.models.schemas import EntityId, ErrorCode, FloorScopedId
+from src.models.schemas import EntityId, ErrorCode, FloorId, FloorScopedId, ZoneId
 
 router = APIRouter(prefix="/locations", tags=["Locations"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
@@ -45,8 +45,8 @@ class ScanLocationRequest(BaseModel):
 
 class ScannedLocationResponse(LocationResponse):
     marker_id: str
-    floor_id: str
-    zone_id: str
+    floor_id: FloorId
+    zone_id: ZoneId
     label: str
 
 

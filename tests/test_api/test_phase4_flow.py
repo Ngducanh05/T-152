@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import (
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 import src.core.parking_session as parking_session_module
+from src.api.dependencies import require_parking_user_or_demo
 from src.api.main import create_app
 from src.core.config import get_settings
 from src.core.database import get_db_session
@@ -30,6 +32,7 @@ from src.core.db_models import (
     Vehicle,
 )
 from src.core.seed import seed_if_missing
+from src.models.auth import AppRole, CurrentUser
 from src.models.schemas import (
     ParkingEventType,
     ParkingSessionStatus,
@@ -42,6 +45,7 @@ from src.models.schemas import (
 class Phase4Api:
     client: AsyncClient
     session_factory: async_sessionmaker[AsyncSession]
+    application: FastAPI
 
 
 @pytest_asyncio.fixture
@@ -73,7 +77,11 @@ async def phase4_api() -> AsyncGenerator[Phase4Api, None]:
             transport=ASGITransport(app=application),
             base_url="http://test",
         ) as client:
-            yield Phase4Api(client=client, session_factory=session_factory)
+            yield Phase4Api(
+                client=client,
+                session_factory=session_factory,
+                application=application,
+            )
     finally:
         application.dependency_overrides.clear()
         await engine.dispose()
@@ -115,6 +123,10 @@ async def test_scan_location_resolves_trusted_marker_and_rejects_invalid_input(
     )
     assert malformed.status_code == 422
     assert malformed.json()["error"]["code"] == "INVALID_LOCATION_QR"
+    current_after_malformed = await client.get(
+        "/api/v1/locations/current", params={"user_id": "USER-001"}
+    )
+    assert current_after_malformed.json()["data"]["node_id"] == "F3-D-W"
 
     unknown = await client.post(
         "/api/v1/locations/scan",
@@ -122,12 +134,77 @@ async def test_scan_location_resolves_trusted_marker_and_rejects_invalid_input(
     )
     assert unknown.status_code == 404
     assert unknown.json()["error"]["code"] == "LOCATION_MARKER_NOT_FOUND"
+    current_after_unknown = await client.get(
+        "/api/v1/locations/current", params={"user_id": "USER-001"}
+    )
+    assert current_after_unknown.json()["data"]["node_id"] == "F3-D-W"
+
+    invalid_suffix = await client.post(
+        "/api/v1/locations/scan",
+        json={
+            "user_id": "USER-001",
+            "qr_payload": "parksmart:location:v1:PSLOC-F3-D-W:extra",
+        },
+    )
+    assert invalid_suffix.status_code == 422
+    assert invalid_suffix.json()["error"]["code"] == "INVALID_LOCATION_QR"
 
     extra_field = await client.post(
         "/api/v1/locations/scan",
         json={"user_id": "USER-001", "qr_payload": "F3-D-W", "node_id": "F3-D-W"},
     )
     assert extra_field.status_code == 422
+
+    direct_node = await client.post(
+        "/api/v1/locations/scan",
+        json={"user_id": "USER-001", "node_id": "F3-D-W"},
+    )
+    assert direct_node.status_code == 422
+
+    manual_aisle = await client.post(
+        "/api/v1/locations/confirm",
+        json={"user_id": "USER-001", "node_id": "F3-D-W"},
+    )
+    assert manual_aisle.status_code == 422
+    assert manual_aisle.json()["error"]["code"] == "INVALID_LOCATION_NODE_TYPE"
+
+
+@pytest.mark.asyncio
+async def test_authenticated_user_cannot_change_another_parking_users_location(
+    phase4_api: Phase4Api,
+):
+    async with phase4_api.session_factory() as session, session.begin():
+        session.add(ParkingUser(id="USER-002", display_name="Second User"))
+
+    async def authenticated_user() -> CurrentUser:
+        return CurrentUser(
+            id=uuid4(),
+            email="user@example.com",
+            role=AppRole.USER,
+            parking_user_id="USER-001",
+        )
+
+    phase4_api.application.dependency_overrides[require_parking_user_or_demo] = (
+        authenticated_user
+    )
+    try:
+        response = await phase4_api.client.post(
+            "/api/v1/locations/scan",
+            json={
+                "user_id": "USER-002",
+                "qr_payload": "parksmart:location:v1:PSLOC-F3-D-W",
+            },
+        )
+    finally:
+        phase4_api.application.dependency_overrides.pop(
+            require_parking_user_or_demo, None
+        )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "PARKING_OWNERSHIP_MISMATCH"
+    async with phase4_api.session_factory() as session:
+        user = await session.get(ParkingUser, "USER-002")
+    assert user is not None and user.current_node_id is None
 
 
 @pytest.mark.asyncio

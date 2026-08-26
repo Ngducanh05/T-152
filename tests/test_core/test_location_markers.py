@@ -23,7 +23,15 @@ def test_resolve_location_qr_returns_allowlisted_aisle_marker(payload: str, node
 
 @pytest.mark.parametrize(
     "payload",
-    ["", "parksmart:location:v1:", "F3-D-W", "https://evil.example/F3-D-W", "tầng 3 khu D"],
+    [
+        "",
+        "parksmart:location:v1:",
+        "F3-D-W",
+        "https://evil.example/F3-D-W",
+        "tầng 3 khu D",
+        "parksmart:location:v1:hello/world",
+        "parksmart:location:v1:PSLOC-F3-D-W:extra",
+    ],
 )
 def test_invalid_location_qr_payloads_are_rejected(payload: str):
     with pytest.raises(InvalidLocationQrError):

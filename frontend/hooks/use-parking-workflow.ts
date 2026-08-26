@@ -260,6 +260,7 @@ export function useParkingWorkflow(
   const deferredPreferenceRef = useRef<ParkingPreference | null>(null);
   const resumeAgentAfterLocationRef = useRef(false);
   const scanInFlightRef = useRef(false);
+  const scanCompletedRef = useRef(false);
   const messageSequenceRef = useRef(0);
 
   function nextMessageId(role: WorkflowMessage["role"]) {
@@ -286,7 +287,7 @@ export function useParkingWorkflow(
     return recommendations.slice(0, 3).map((candidate) => ({
       id: `select-slot:${candidate.slot_id.toLowerCase()}`,
       type: "SELECT_SLOT" as const,
-      label: `Chọn ${candidate.slot_id.replace("F1-", "ô ")}`,
+      label: `Chọn ${candidate.slot_id}`,
       payload: { slot_id: candidate.slot_id },
       style: "primary" as const,
       requires_confirmation: false,
@@ -375,36 +376,6 @@ export function useParkingWorkflow(
       const location = await api.confirmLocation({ user_id: identity.userId, node_id: nodeId });
       data.applyCurrentLocation?.(location);
       await continueAfterLocationConfirmation(nodeId);
-      setAgentCurrentLocationId(null);
-      setActiveRoute(null);
-      const deferredPreference = deferredPreferenceRef.current;
-      deferredPreferenceRef.current = null;
-      if (deferredPreference) {
-        try {
-          const result = await api.recommend({
-            user_id: identity.userId,
-            start_node_id: nodeId,
-            floor_id: floorIdFromNode(nodeId),
-            charging_required: deferredPreference === "EV",
-            accessible_required: deferredPreference === "ACCESSIBLE",
-            near_elevator: deferredPreference === "NEAR_ELEVATOR",
-            limit: 3,
-          });
-          setCandidates(result.recommendations);
-          setRecommendedSlotIds(
-            result.recommendations.map((candidate) => candidate.slot_id),
-          );
-          setSelectedSlotId(null);
-          appendAgentMessage(
-            result.recommendations.length > 0
-              ? "Tôi đã tìm thấy các ô phù hợp. Hãy chọn một ô."
-              : "Hiện chưa có ô phù hợp với nhu cầu này.",
-            slotSelectionActions(result.recommendations),
-          );
-        } catch (error) {
-          setNotice(vietnameseError(error));
-        }
-      }
       return true;
     } catch (error) {
       await handleMutationFailure(error);
@@ -415,7 +386,7 @@ export function useParkingWorkflow(
   }
 
   async function scanLocationQr(qrPayload: string) {
-    if (scanInFlightRef.current) return false;
+    if (scanInFlightRef.current || scanCompletedRef.current) return false;
     scanInFlightRef.current = true;
     setPending("qr-location");
     setNotice(null);
@@ -425,6 +396,8 @@ export function useParkingWorkflow(
         qr_payload: qrPayload,
       });
       data.applyCurrentLocation?.({ user_id: scanned.user_id, node_id: scanned.node_id });
+      scanCompletedRef.current = true;
+      setNotice(`Đã xác định: ${scanned.label}`);
       const continuedDeterministically = await continueAfterLocationConfirmation(
         scanned.node_id,
       );
@@ -432,7 +405,6 @@ export function useParkingWorkflow(
         !continuedDeterministically && resumeAgentAfterLocationRef.current;
       resumeAgentAfterLocationRef.current = false;
       setRequestedPanel(null);
-      setNotice(`Đã xác định: ${scanned.label}`);
       if (shouldResumeAgent) {
         await sendAgentMessageInternal(
           "Vị trí đã được xác nhận bằng QR. Hãy tiếp tục yêu cầu trước đó.",
@@ -926,15 +898,18 @@ export function useParkingWorkflow(
       }
       switch (attachedAction.type) {
         case "SCAN_LOCATION_QR":
+          scanCompletedRef.current = false;
           resumeAgentAfterLocationRef.current = sourceMessage.id !== "welcome";
           setRequestedPanel({ kind: "qr-location" });
           break;
         case "SELECT_LOCATION":
+          resumeAgentAfterLocationRef.current = false;
           setRequestedPanel({ kind: "location" });
           break;
         case "SELECT_PARKING_PREFERENCE": {
           const preference = attachedAction.payload.preference;
           if (!data.currentLocation?.node_id) {
+            scanCompletedRef.current = false;
             deferredPreferenceRef.current = preference;
             resumeAgentAfterLocationRef.current = false;
             setRequestedPanel({ kind: "qr-location" });
@@ -1020,6 +995,9 @@ export function useParkingWorkflow(
     sendAgentMessage,
     retryAgentMessage,
     executeUiAction,
-    clearRequestedPanel: () => setRequestedPanel(null),
+    clearRequestedPanel: () => {
+      resumeAgentAfterLocationRef.current = false;
+      setRequestedPanel(null);
+    },
   };
 }

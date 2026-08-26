@@ -47,6 +47,10 @@ def test_missing_location_offers_qr_then_manual_location_picker():
         ChatUIActionType.SELECT_LOCATION,
     ]
     assert [action.style.value for action in actions] == ["primary", "secondary"]
+    assert [action.label for action in actions] == [
+        "Quét QR vị trí",
+        "Chọn vị trí thủ công",
+    ]
     assert all(action.payload == {} for action in actions)
 
 
@@ -59,6 +63,7 @@ def test_f2_and_f3_recommendations_are_canonical_ui_actions():
         successful_tool_names={"recommend_parking_slot"},
     )
     assert [action.payload["slot_id"] for action in actions] == ["F2-C01", "F3-D03"]
+    assert [action.label for action in actions] == ["Chọn F2-C01", "Chọn F3-D03"]
 
 
 def test_recommendation_actions_use_only_canonical_verified_slot_ids():
@@ -123,6 +128,8 @@ def test_verified_route_can_offer_reserve_and_report_without_business_logic():
     ]
     assert actions[0].payload == {"slot_id": "F1-D01"}
     assert actions[0].requires_confirmation is True
+    assert actions[0].label == "Giữ ô F1-D01 và chỉ đường"
+    assert actions[1].label == "Báo xe đỗ sai tại F1-D01"
 
 
 def test_active_session_offers_find_complete_and_verified_report_actions():
