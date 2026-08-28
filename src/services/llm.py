@@ -32,7 +32,6 @@ def get_llm(
     return ChatOpenAI(
         model=resolved_settings.llm_model,
         api_key=api_key,
-        temperature=0,
         timeout=resolved_settings.llm_timeout_seconds,
         max_retries=resolved_settings.llm_max_retries,
     )
