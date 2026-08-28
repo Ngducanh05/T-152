@@ -11,6 +11,10 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from src.agents.context import AgentRuntimeContext
 from src.agents.nodes.assistant import build_assistant_node
+from src.agents.nodes.guard_input import (
+    CROSS_IDENTITY_ERROR_CODE,
+    guard_cross_identity_request,
+)
 from src.agents.nodes.observe_tool import observe_tool_result
 from src.agents.nodes.prepare_context import prepare_context
 from src.agents.state import AgentState
@@ -35,6 +39,12 @@ def _safe_tool_node_error(error: Exception) -> str:
 
 def _route_after_assistant(state: AgentState) -> str:
     return tools_condition(state)
+
+
+def _route_after_guard(state: AgentState) -> str:
+    if str(state.get("error", "")).startswith(f"{CROSS_IDENTITY_ERROR_CODE}:"):
+        return END
+    return "assistant"
 
 
 def _lazy_bound_model_provider(
@@ -77,6 +87,7 @@ def build_graph(
     model_provider = _lazy_bound_model_provider(model, graph_tools)
     graph = StateGraph(AgentState, context_schema=AgentRuntimeContext)
     graph.add_node("prepare_context", prepare_context)
+    graph.add_node("guard_input", guard_cross_identity_request)
     graph.add_node(
         "assistant",
         build_assistant_node(model_provider, max_steps=max_steps),
@@ -88,7 +99,12 @@ def build_graph(
     graph.add_node("observe_tool_result", observe_tool_result)
 
     graph.add_edge(START, "prepare_context")
-    graph.add_edge("prepare_context", "assistant")
+    graph.add_edge("prepare_context", "guard_input")
+    graph.add_conditional_edges(
+        "guard_input",
+        _route_after_guard,
+        {"assistant": "assistant", END: END},
+    )
     graph.add_conditional_edges(
         "assistant",
         _route_after_assistant,

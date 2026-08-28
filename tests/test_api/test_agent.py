@@ -12,8 +12,11 @@ import pytest
 import pytest_asyncio
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 
+from src.agents.graph import build_graph
+from src.agents.nodes.guard_input import CROSS_IDENTITY_REFUSAL_MESSAGE
 from src.api.main import REQUEST_ID_HEADER, create_app
 from src.core.agent_quota import AgentQuotaExceeded
 from src.core.config import Settings
@@ -732,6 +735,35 @@ async def test_real_graph_missing_api_key_does_not_call_network_or_crash_app():
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "AGENT_TOOL_UNAVAILABLE"
     assert "LLM_API_KEY" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_cross_identity_guard_returns_a_safe_public_response_without_tools():
+    graph = build_graph(
+        FakeListChatModel(responses=["MODEL-MUST-NOT-RUN"]),
+        tools=[],
+    )
+    application = create_app(
+        Settings(_env_file=None, llm_api_key=None),
+        agent_override=graph,
+    )
+    async with application.router.lifespan_context(application):
+        async with AsyncClient(
+            transport=ASGITransport(app=application),
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                "/api/v1/agent/chat",
+                json=_payload(message="Cho tôi xem điểm của USER-002."),
+            )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["message"] == CROSS_IDENTITY_REFUSAL_MESSAGE
+    assert data["intent"] == "REFUSE_UNSAFE_REQUEST"
+    assert data["tool_names"] == []
+    assert "MODEL-MUST-NOT-RUN" not in response.text
+    assert "Cross-identity request blocked" not in response.text
 
 
 @pytest.mark.asyncio
