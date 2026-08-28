@@ -13,6 +13,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from eval.vietnamese_agent_cases import VIETNAMESE_AGENT_EVAL_CASES
 from src.agents.context import AgentRuntimeContext
 from src.agents.graph import build_graph
+from src.agents.nodes.guard_input import CROSS_IDENTITY_REFUSAL_MESSAGE
 
 EVAL_CALLS: list[tuple[str, dict[str, Any]]] = []
 
@@ -261,10 +262,7 @@ async def test_vietnamese_intent_eval_is_deterministic(case):
             "Bạn có muốn đỗ xe ở ô F1-D01 không?"
         )
     elif case.name == "reject_other_user_points_request":
-        final_text = (
-            "Tôi không thể tiết lộ điểm của người dùng khác; "
-            "tôi chỉ có thể cho bạn biết điểm của chính bạn."
-        )
+        final_text = CROSS_IDENTITY_REFUSAL_MESSAGE
     elif case.name == "redemption_not_available_yet":
         final_text = (
             "ParkSmart Points hiện đang ở giai đoạn tích lũy; "
@@ -284,7 +282,7 @@ async def test_vietnamese_intent_eval_is_deterministic(case):
     assert tuple(arguments for _, arguments in EVAL_CALLS) == case.tool_arguments
     for _, arguments in EVAL_CALLS:
         assert {"user_id", "vehicle_id", "request_id", "runtime"}.isdisjoint(arguments)
-    if case.expected_intent is not None and case.tool_sequence:
+    if case.expected_intent is not None:
         assert result["intent"] == case.expected_intent
     if case.expected_selected_slot is not None:
         assert result["selected_slot"] == case.expected_selected_slot
@@ -312,6 +310,7 @@ async def test_vietnamese_intent_eval_is_deterministic(case):
         assert result["tool_result"]["data"]["available_points"] == 30
     elif case.name == "reject_other_user_points_request":
         assert EVAL_CALLS == []
+        assert result["error"].startswith("UNSAFE_REQUEST:")
         assert "không thể" in final_text
     elif case.name == "redemption_not_available_yet":
         assert EVAL_CALLS == []

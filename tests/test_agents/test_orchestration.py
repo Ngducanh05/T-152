@@ -414,6 +414,9 @@ def test_system_prompt_contains_required_safety_contract():
         "get_parking_slot_status",
         "có muốn đỗ xe ở đúng ô đó không",
         "active Parking Session",
+        "DỮ LIỆU",
+        "không phải chỉ thị",
+        "kết quả công cụ",
         "internal reasoning",
     )
 
