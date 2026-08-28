@@ -251,6 +251,7 @@ export function useParkingWorkflow(
   const adjacentObservationInFlightRef = useRef(false);
   const deferredPreferenceRef = useRef<ParkingPreference | null>(null);
   const deferredFindVehicleRef = useRef(false);
+  const deferredReservationRouteRef = useRef(false);
   const reservationIdempotencyRef = useRef<IdempotencyAttempt | null>(null);
   const confirmParkingIdempotencyRef = useRef<IdempotencyAttempt | null>(null);
   const completeSessionIdempotencyRef = useRef<IdempotencyAttempt | null>(null);
@@ -350,6 +351,11 @@ export function useParkingWorkflow(
     if (deferredFindVehicleRef.current) {
       deferredFindVehicleRef.current = false;
       await continueFindVehicleFromLocation(nodeId);
+      return true;
+    }
+    if (deferredReservationRouteRef.current) {
+      deferredReservationRouteRef.current = false;
+      await continueRouteToActiveReservationFromLocation(nodeId);
       return true;
     }
     if (!deferredPreference) return false;
@@ -606,16 +612,12 @@ export function useParkingWorkflow(
     }
   }
 
-  async function requestRouteToActiveReservation(): Promise<boolean> {
+  async function continueRouteToActiveReservationFromLocation(
+    startNodeId: FloorScopedId,
+  ): Promise<boolean> {
     const reservation = data.activeReservation;
-    const startNodeId = data.currentLocation?.node_id;
     if (!reservation) {
       setNotice("Bạn không có chỗ đang giữ để chỉ đường.");
-      return false;
-    }
-    if (!startNodeId) {
-      setRequestedPanel({ kind: "location" });
-      setNotice("Hãy xác nhận vị trí hiện tại trước khi chỉ đường tới ô đã giữ.");
       return false;
     }
     setPending("route");
@@ -639,6 +641,22 @@ export function useParkingWorkflow(
     } finally {
       setPending(null);
     }
+  }
+
+  async function requestRouteToActiveReservation(): Promise<boolean> {
+    const reservation = data.activeReservation;
+    const startNodeId = data.currentLocation?.node_id;
+    if (!reservation) {
+      setNotice("Bạn không có chỗ đang giữ để chỉ đường.");
+      return false;
+    }
+    if (!startNodeId) {
+      deferredReservationRouteRef.current = true;
+      setRequestedPanel({ kind: "location" });
+      setNotice("Hãy xác nhận vị trí hiện tại trước khi chỉ đường tới ô đã giữ.");
+      return false;
+    }
+    return continueRouteToActiveReservationFromLocation(startNodeId);
   }
 
   async function confirmParking(): Promise<boolean> {
@@ -1072,6 +1090,7 @@ export function useParkingWorkflow(
     executeUiAction,
     clearRequestedPanel: () => {
       deferredFindVehicleRef.current = false;
+      deferredReservationRouteRef.current = false;
       deferredPreferenceRef.current = null;
       setRequestedPanel(null);
     },

@@ -962,6 +962,43 @@ describe("useParkingWorkflow", () => {
     });
   });
 
+  it("continues routing to the active reservation after confirming a missing current location", async () => {
+    const { api, data } = fixture();
+    data.currentLocation = null;
+    data.activeReservation = { ...activeReservation, slot_id: "F1-D01" };
+    api.confirmLocation.mockResolvedValue({
+      user_id: "USER-001",
+      node_id: "F1-ENTRANCE",
+    });
+    api.getRoute.mockResolvedValue({
+      start_node_id: "F1-ENTRANCE",
+      destination_node_id: "F1-D01",
+      path: ["F1-ENTRANCE", "F1-D01"],
+      distance_m: 10,
+      polyline: [],
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      await result.current.requestRouteToActiveReservation();
+    });
+
+    expect(result.current.requestedPanel).toEqual({ kind: "location" });
+    expect(api.getRoute).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.confirmLocation("F1-ENTRANCE");
+    });
+
+    expect(api.getRoute).toHaveBeenCalledOnce();
+    expect(api.getRoute).toHaveBeenCalledWith({
+      start_node_id: "F1-ENTRANCE",
+      destination_node_id: "F1-D01",
+      mode: "VEHICLE",
+    });
+    expect(result.current.activeRoute?.path.at(-1)).toBe("F1-D01");
+  });
+
   it("requests a fresh location before routing to the active parked vehicle", async () => {
     const { api, data } = fixture();
     data.activeSession = {

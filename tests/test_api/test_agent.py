@@ -15,6 +15,7 @@ from httpx import ASGITransport, AsyncClient
 from langchain_core.messages import AIMessage, ToolMessage
 
 from src.api.main import REQUEST_ID_HEADER, create_app
+from src.api.routes.agent import _requires_fresh_find_vehicle
 from src.core.agent_quota import AgentQuotaExceeded
 from src.core.config import Settings
 
@@ -236,6 +237,22 @@ def _payload(
         "vehicle_id": "VEHICLE-001",
         "message": message,
     }
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Chỉ đường tới xe", True),
+        ("Chỉ đường đến xe của tôi", True),
+        ("Dẫn tôi tới xe", True),
+        ("Đưa tôi về xe", True),
+        ("Tìm xe của tôi", True),
+        ("Chỉ đường tới ô F1-D01", False),
+        ("Tìm ô có sạc", False),
+    ],
+)
+def test_requires_fresh_find_vehicle(message: str, expected: bool):
+    assert _requires_fresh_find_vehicle(message) is expected
 
 
 @pytest.mark.asyncio

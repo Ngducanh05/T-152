@@ -57,7 +57,7 @@ def _requires_fresh_find_vehicle(message: str) -> bool:
         character
         for character in unicodedata.normalize("NFKD", message.casefold())
         if not unicodedata.combining(character)
-    )
+    ).replace("đ", "d")
     normalized = " ".join(normalized.split())
     return any(
         phrase in normalized
@@ -67,6 +67,19 @@ def _requires_fresh_find_vehicle(message: str) -> bool:
             "xe toi o dau",
             "xe cua toi o dau",
             "tim xe cua toi",
+            "chi duong toi xe",
+            "chi duong den xe",
+            "chi duong ve xe",
+            "chi duong toi xe cua toi",
+            "chi duong den xe cua toi",
+            "dan duong toi xe",
+            "dan duong den xe",
+            "dan toi toi xe",
+            "dan toi den xe",
+            "dan toi ve xe",
+            "dua toi toi xe",
+            "dua toi den xe",
+            "dua toi ve xe",
             "find my car",
             "where is my car",
             "where did i park",

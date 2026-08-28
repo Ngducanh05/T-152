@@ -407,7 +407,6 @@ async def test_confirm_vs_expiry_has_no_deadlock_and_one_terminal_winner(
                 await ParkingSessionService(
                     session,
                     clock=lambda: base + timedelta(seconds=1),
-                    settings=settings,
                 ).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
             return "confirmed"
         except (ParkingSessionError, ParkingStateError):
