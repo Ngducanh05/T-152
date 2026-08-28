@@ -5,7 +5,7 @@ from src.core.config import Settings
 
 
 def test_wrong_parking_report_daily_limit_defaults_to_unlimited() -> None:
-    assert Settings().wrong_parking_report_daily_limit == 0
+    assert Settings(_env_file=None).wrong_parking_report_daily_limit == 0
 
 
 @pytest.mark.parametrize("value", [-1, 101])

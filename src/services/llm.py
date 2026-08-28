@@ -4,6 +4,8 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.core.config import Settings, get_settings
 
+EFFECTIVE_LLM_TEMPERATURE = 0.0
+
 
 class LLMConfigurationError(RuntimeError):
     """Raised when the real LLM cannot be configured safely."""
@@ -34,7 +36,10 @@ def get_llm(
     return ChatOpenAI(
         model=resolved_settings.llm_model,
         api_key=api_key,
-        temperature=0,
+        temperature=EFFECTIVE_LLM_TEMPERATURE,
         timeout=resolved_settings.llm_timeout_seconds,
         max_retries=resolved_settings.llm_max_retries,
     )
+
+
+__all__ = ["EFFECTIVE_LLM_TEMPERATURE", "LLMConfigurationError", "get_llm"]
