@@ -1,5 +1,21 @@
 # ParkSmart AI Deployment Runbook
 
+## Current Public Beta Topology
+
+| Layer | Platform | Release model |
+|---|---|---|
+| Frontend | Vercel Hobby, `https://parksmart-ai-beta.vercel.app` | Manual `vercel deploy --prod` from `frontend/` |
+| Backend | Render Free Existing Image | Manual deploy of immutable private-image tag |
+| Registry | Private Docker Hub repository | Local `linux/amd64` build and push |
+| Data/Auth/Storage | Supabase Free | Alembic-controlled DB schema plus reviewed platform hardening |
+| AI | Server-side LLM provider | Agent enabled with quota; Speech disabled |
+
+This architecture bypasses the GitHub Organization App restriction: neither Render nor
+Vercel needs repository read access. The local machine is required only to publish a new
+release; deployed services keep running after the operator terminal is closed. Render Free
+may spin down on idle, and Supabase Free may pause after low activity, so public beta is
+best-effort rather than 24/7 production.
+
 ## Backend Required Environment Variables
 
 ```text
@@ -59,16 +75,19 @@ docker buildx build --platform linux/amd64 --load -t "${IMAGE_REF}" .
 docker push "${IMAGE_REF}"
 ```
 
-Do not put a Docker Hub username, token, or real image reference in the repository. Use a
-Docker Hub access token limited to read-only access for Render's private registry
-credential. Keep push credentials only in the operator's local credential store; Render
-does not need write access.
+Do not put a Docker Hub username, token, or real image reference in the repository. Prefer
+a Docker Hub token limited to read-only access for Render's private registry credential.
+Before saving it in Render, prove it can pull the immutable private tag with Docker CLI.
+If a Docker Hub personal private repository accepts the PAT for login but rejects private
+pulls at read-only scope, use a dedicated Render token with Read & Write but no Delete,
+short/reviewed expiry and independent revocation. Never reuse the operator's push token or
+Docker Hub password.
 
 In Render:
 
 1. Create or update a Web Service using **Existing Image** and the immutable
    `<docker-hub-namespace>/<private-repository>:<short-git-sha>` reference.
-2. Attach the read-only private registry credential.
+2. Attach the least-privilege registry credential that passed a private pull test.
 3. Configure backend environment variables in Render; do not bake secrets,
    `DATABASE_URL`, or `PORT` into the image.
 4. Set Render's **Health Check Path** to `/api/v1/health/database`. This database

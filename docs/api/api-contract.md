@@ -2,7 +2,12 @@
 
 ## Status and scope
 
-This document defines the shared Phase 0 identifiers, enums, Pydantic data contracts, and response envelopes. It does not define ORM models, database migrations, repositories, transactions, or parking business logic.
+This document defines the current identifiers, enums, Pydantic data contracts, and response envelopes. It does not define ORM models, database migrations, repositories, transactions, or parking business logic.
+
+Public beta enables Agent chat with persistent daily quota and bounded step budget. Speech
+retains its API contract but is disabled by configuration, so callers receive
+`SPEECH_DISABLED`. Demo and simulator mutations are disabled in production. See
+[`../PUBLIC_BETA.md`](../PUBLIC_BETA.md) for the deployed feature matrix.
 
 ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 
@@ -349,6 +354,17 @@ Mọi response tiếp tục dùng `SuccessResponse`/`ErrorResponse` chuẩn.
 
 Reward còn `PENDING` không phải điểm khả dụng. Chỉ outcome `CONFIRMED` hoặc observation
 `VERIFIED` chuyển sang `EARNED`; các outcome âm/không xác minh chuyển `CANCELLED`.
+
+### Roadmap ngoài API contract hiện tại: đổi voucher
+
+Các endpoint phía trên chỉ hỗ trợ contribution và tích lũy điểm. Public beta **không có**
+endpoint redemption, reward debit, voucher catalog/record hoặc tích hợp pricing. Mức đổi
+100/200/400 điểm lấy 15/30/60 phút đỗ xe là đề xuất cho sản phẩm thật, không phải contract
+đang hoạt động và không được client/Agent tự suy đoán.
+
+Trước khi thêm endpoint, team phải duyệt ADR, migration và contract cho idempotency,
+ownership, atomic debit/issuance, voucher expiry/application/refund và audit. Xem
+[đặc tả ParkSmart Points voucher](../PARKSMART_POINTS_VOUCHERS.md).
 
 ## Supabase authentication
 

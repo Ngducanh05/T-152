@@ -1,9 +1,10 @@
 # ParkSmart AI — Architecture
 
-Tài liệu này mô tả kiến trúc đang được triển khai của ParkSmart AI: hai giao
+Tài liệu này mô tả kiến trúc public beta đang vận hành của ParkSmart AI: hai giao
 diện Next.js cho người dùng và quản trị viên, FastAPI chứa Agent cùng các dịch
-vụ nghiệp vụ, PostgreSQL là nơi lưu trạng thái authoritative, và các dịch vụ
-LLM/STT bên ngoài chỉ được gọi qua backend khi cần.
+vụ nghiệp vụ, PostgreSQL là nơi lưu trạng thái authoritative, và LLM chỉ được
+gọi qua backend. Xem [PUBLIC_BETA.md](PUBLIC_BETA.md) cho mục tiêu, feature matrix và
+giới hạn phát hành.
 
 ## Nguyên tắc chính
 
@@ -14,7 +15,9 @@ LLM/STT bên ngoài chỉ được gọi qua backend khi cần.
 - Routing dùng parking graph; frontend chỉ vẽ route backend trả về.
 - User UI và Admin UI dùng chung API contract và Core Services.
 - Simulator mutation chỉ hoạt động trong demo mode hoặc với quyền admin.
-- Voice là một kênh nhập/xuất; text cuối cùng vẫn đi qua Agent endpoint như chat.
+- Voice/Speech có feature flag nhưng đang tắt ở cả frontend và backend public beta.
+- Agent và report dùng persistent daily quota theo user/ngày UTC để giới hạn chi phí.
+- Frontend chỉ mount AuthProvider sau khi database readiness thành công.
 - Không có QR trong MVP.
 
 ---
@@ -27,13 +30,13 @@ flowchart TB
         UserUI["User UI — /"]
         AdminUI["Admin UI — /admin"]
         Shared["Shared API client, types and polling"]
-        WebSpeech["Browser Web Speech — STT/TTS"]
+        Readiness["Backend readiness gate"]
     end
 
     subgraph Backend["FastAPI backend process"]
         PublicAPI["Parking, location, reservation, routing and report APIs"]
         AgentAPI["POST /api/v1/agent/chat"]
-        SpeechAPI["POST /api/v1/speech/transcriptions — fallback"]
+        SpeechAPI["Speech API — disabled in public beta"]
         AdminAPI["Admin report, events and simulator APIs"]
         Agent["LangGraph Agent"]
         Tools["Agent Tools"]
@@ -50,18 +53,17 @@ flowchart TB
         Auth["Supabase Auth"]
         Storage["Supabase private Storage"]
         LLM["LLM API"]
-        STT["Speech-to-Text API"]
     end
 
     UserUI --> Shared
     AdminUI --> Shared
     UserUI --> Auth
     AdminUI --> Auth
-    WebSpeech --> UserUI
+    Readiness --> UserUI
+    Readiness --> AdminUI
     Shared --> PublicAPI
     UserUI --> AgentAPI
     AdminUI --> AdminAPI
-    UserUI -. "Web Speech unavailable" .-> SpeechAPI
 
     AgentAPI --> Agent
     Agent --> LLM
@@ -71,7 +73,6 @@ flowchart TB
     AdminAPI --> Core
     AdminAPI --> Simulator
     Simulator --> Core
-    SpeechAPI --> STT
     PublicAPI --> Storage
     AdminAPI --> Storage
 
@@ -83,7 +84,7 @@ flowchart TB
 
 | Giao diện | Trách nhiệm | Không được làm |
 |---|---|---|
-| User UI `/` | Chat mobile-first, lựa chọn vị trí bằng thao tác chạm, tìm/giữ ô, route dạng turn-by-turn, phiên đỗ xe, báo cáo nhanh, text và voice | Hiển thị map/mật độ/dữ liệu vận hành, dùng GPS, reset demo, tự sửa trạng thái hoặc auto-send transcript |
+| User UI `/` | Chat mobile-first, lựa chọn vị trí bằng thao tác chạm, tìm/giữ ô, route dạng turn-by-turn, phiên đỗ xe, quan sát cộng đồng và báo cáo đỗ sai | Hiển thị dữ liệu vận hành admin, dùng GPS, reset demo, tự sửa trạng thái hoặc giả lập Voice đang bật |
 | Admin UI `/admin` | KPI mật độ, filter map F1/F2/F3, chi tiết slot có thể đóng, cảnh báo report/observation, resolve/reopen/hard-delete và parking events | Tự ghi database, hiển thị simulator controls, dùng browser storage làm source of truth hoặc tính business transition ở frontend |
 
 `/admin` dùng `CurrentUser.app_role` khi authentication được bật. Trong demo
@@ -116,11 +117,7 @@ sequenceDiagram
     participant Core as Core Services
     participant DB as PostgreSQL
 
-    User->>UI: Text, voice hoặc thao tác UI
-    opt Voice
-        UI->>UI: SpeechRecognition tạo transcript
-        User->>UI: Kiểm tra transcript rồi gửi
-    end
+    User->>UI: Text hoặc thao tác UI
     UI->>API: POST /api/v1/agent/chat
     API->>Agent: Message + trusted runtime context
     Agent->>Tools: Gọi tool phù hợp
@@ -136,9 +133,8 @@ sequenceDiagram
     UI-->>User: Message, reusable tap action, turn-by-turn route và optional TTS
 ```
 
-Nếu Browser Speech Recognition không khả dụng, frontend có thể ghi âm và gửi
-audio tới `/api/v1/speech/transcriptions`. Backend giữ API key STT; frontend
-không gọi provider trực tiếp và không lưu raw audio sau request.
+`/api/v1/speech/transcriptions` vẫn có contract để phát triển tương lai nhưng public beta
+trả `SPEECH_DISABLED` và frontend không khởi tạo Web Speech/audio upload.
 
 ### 2.2 Admin operations flow
 
@@ -279,30 +275,38 @@ xác minh; mọi transition hợp lệ tạo ParkingEvent và chỉ hiển thị
 
 ## 5. Deployment architecture hiện tại
 
-Runtime chia sẻ hiện dùng PostgreSQL, Auth và private Storage trên Supabase. Agent và
-Simulator vẫn là module backend, nhưng simulator không còn được trình bày trên admin UI;
-endpoint simulator chỉ dành cho development/test được bảo vệ. Frontend Next.js chạy riêng
-bằng npm trong development hoặc triển khai độc lập với FastAPI.
+Production public beta dùng Vercel Hobby cho Next.js, Render Free cho backend image-backed,
+private Docker Hub làm registry, và Supabase cho PostgreSQL/Auth/Storage. Cách này không cần
+Render/Vercel GitHub App đọc private repository của Organization. Agent và Simulator vẫn là
+module backend, nhưng `DEMO_MODE=false`, `SIMULATOR_ENABLED=false` và Speech bị tắt.
 
 ```mermaid
 flowchart LR
-    API["FastAPI backend"] --> DB[("Supabase PostgreSQL")]
-    API --> Auth["Supabase Auth"]
-    API --> Storage["Private evidence Storage"]
+    Operator["Local release"] -->|"linux/amd64 + SHA tag"| Registry["Private Docker Hub"]
+    Registry --> Render["Render Free: FastAPI image"]
+    Render --> DB[("Supabase PostgreSQL")]
+    Render --> Auth["Supabase Auth"]
+    Render --> Storage["Private evidence Storage"]
 
-    Browser["Browser: User UI / Admin UI / Web Speech"] --> Next["Next.js dev or deployed frontend"]
-    Next --> API
-    API --> LLM["LLM provider"]
-    API -. "STT fallback" .-> STT["Speech-to-Text provider"]
+    Browser["Browser: User UI / Admin UI / Privacy"] --> Next["Vercel Hobby: Next.js"]
+    Browser --> Auth
+    Next --> Render
+    Browser --> Render
+    Render --> LLM["LLM provider"]
 ```
 
 | Runtime | Nội dung |
 |---|---|
-| Browser | `/`, `/admin`, Browser Speech Recognition và `speechSynthesis` |
-| Next.js | User/Admin rendering, API client và polling |
-| Backend | FastAPI, LangGraph Agent, tools, Core Services và simulator module không có admin UI |
+| Browser | `/`, `/admin`, `/privacy`, Supabase session theo tab và API bearer token |
+| Vercel/Next.js | User/Admin rendering, API client, polling và database readiness gate |
+| Render backend | FastAPI, LangGraph Agent, quotas, tools, Core Services và simulator module bị tắt production |
+| Docker Hub | Private immutable backend images; Render pull bằng registry credential |
 | Supabase | PostgreSQL authoritative, Auth và private report-evidence Storage |
-| External provider | LLM; STT chỉ khi browser fallback được dùng |
+| External provider | LLM server-side; Speech provider không được gọi trong public beta |
+
+`/health` là liveness. `/api/v1/health/database` là Render health check và điều kiện để
+frontend readiness gate mount AuthProvider. Render Free có thể spin down; gate retry tuần tự
+nhưng không gửi keep-alive. Image-backed deploy là thủ công và dùng tag SHA bất biến.
 
 Production tương lai có thể thay Simulator bằng:
 
@@ -362,6 +366,29 @@ ngoài mép làn; xe đang đỗ là khối hộp chữ nhật isometric ba mặ
 API vẫn đưa thay đổi qua Parking State Service, optimistic version và parking event ledger.
 User UI polling cả reward summary/contribution ledger cùng parking state nên settlement của
 admin xuất hiện tự động mà không cần reload và không optimistic cộng điểm.
+
+### Target product: voucher redemption (chưa triển khai)
+
+Public beta dừng ở ledger `PENDING`/`EARNED`/`CANCELLED`; chưa có debit, voucher hoặc
+pricing/checkout. Sản phẩm thật dự kiến cho phép đổi 100/200/400 điểm `EARNED` thành voucher
+15/30/60 phút đỗ xe miễn phí:
+
+```mermaid
+flowchart LR
+    UI["Rewards UI"] --> API["Redemption API"]
+    API --> Service["Redemption Service"]
+    Service --> Ledger[("Reward ledger")]
+    Service --> Catalog[("Voucher catalog")]
+    Service --> Voucher[("Issued vouchers")]
+    Voucher --> Pricing["Parking pricing/checkout"]
+    Pricing --> Session["Completed parking session"]
+```
+
+Redemption Service phải giữ ownership, idempotency và atomic balance/debit/issuance; LLM
+không quyết định tỷ lệ, số dư hoặc phát hành voucher. Voucher chỉ tác động bước tính phí sau
+parking session, không tác động recommendation, reservation, slot state hay quyền tiếp cận.
+Schema hiện tại chưa hỗ trợ luồng này; cần ADR, Alembic migration và API contract riêng trước
+khi triển khai. Xem [đặc tả ParkSmart Points voucher](PARKSMART_POINTS_VOUCHERS.md).
 
 Canonical seed tạo 120 slot và graph cho cả F1/F2/F3. Seed là idempotent: chỉ thêm
 node/edge/slot còn thiếu, vì vậy database Supabase từng chỉ có F1 có thể được bổ sung F2/F3

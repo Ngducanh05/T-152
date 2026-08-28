@@ -17,6 +17,7 @@ submit action. The modal keeps its action reachable through an internal scroll r
 sticky submit dock on short viewports.
 
 Admin evidence access remains tied to report authorization and uses a short-lived signed
-URL. Hard-delete removes the Storage object together with the report row; any retained
-reward-ledger source reference must not copy the image path, plate number or description
-into reward metadata.
+URL. Hard-delete removes the database row and performs best-effort Storage cleanup; a
+cleanup failure is warning-logged for operator follow-up and does not retain evidence data
+inside the reward ledger. Any retained reward source reference must not copy the image
+path, plate number or description into reward metadata.

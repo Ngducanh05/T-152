@@ -21,15 +21,25 @@ trạng thái triển khai hiện tại sau đây và các tài liệu kiến tr
   người dùng chọn khu;
 - quan sát ô bên cạnh và report đỗ sai tạo contribution/reward `PENDING`; chỉ xác minh admin
   mới chuyển reward thành `EARNED`;
+- đổi ParkSmart Points thành voucher 15/30/60 phút là định hướng sản phẩm thật, chưa thuộc
+  code/schema public beta; xem `docs/PARKSMART_POINTS_VOUCHERS.md` trước khi thiết kế ADR,
+  migration hoặc API redemption;
 - report chỉ được gửi sau bước xác nhận rõ ràng; biển số, mô tả và ảnh là tùy chọn, ảnh được
   backend lưu trong bucket Supabase riêng tư;
 - dashboard admin không còn bộ điều khiển simulator; admin vẫn xem bản đồ, mở/đóng chi tiết
   ô, xác minh contribution/report và đổi trạng thái ô qua Parking State Service;
 - Supabase session phía browser dùng `sessionStorage` để tab user và tab admin độc lập.
+- public beta phát hành frontend bằng Vercel CLI và backend bằng private Docker image trên
+  Render Existing Image; GitHub Organization App không nằm trên đường deploy;
+- Agent bật với quota 5 request/user/ngày UTC và tối đa 4 bước/request; report giới hạn 5
+  submission/user/ngày UTC;
+- Voice/Speech, Demo và Simulator đều tắt trong production; readiness gate xử lý cold start;
+- production schema ở Alembic `20260824_0012`, gồm persistent Agent/report quota tables.
 
 Phần mô tả “một tầng F1”, seed 40 ô và giao diện điều khiển simulator ở kế hoạch cũ không
 còn phản ánh sản phẩm hiện tại. API hiện hành được định nghĩa tại
-`docs/api/api-contract.md`; kiến trúc hiện hành nằm tại `docs/architecture.md`.
+`docs/api/api-contract.md`; kiến trúc hiện hành nằm tại `docs/PUBLIC_BETA.md` và
+`docs/architecture.md`.
 
 ---
 

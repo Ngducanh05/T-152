@@ -5,6 +5,11 @@ FastAPI. Bản đồ, trạng thái slot, recommendation, reservation, route, pa
 session và Agent chat đều dùng backend; frontend không tự chuyển trạng thái ô
 hoặc tự tính đường đi.
 
+Production public beta chạy trên Vercel Hobby và gọi FastAPI image-backed trên Render.
+`BackendReadinessGate` đợi `/api/v1/health/database` thành công trước khi mount
+`AuthProvider`, nhờ đó Render cold start không bị diễn giải thành lỗi đăng nhập. Voice bị
+tắt; Agent chat, privacy disclosure và user/admin flows vẫn hoạt động.
+
 ## Chạy giao diện trên Windows PowerShell
 
 Chuẩn bị một lần từ thư mục gốc repository:
@@ -23,7 +28,29 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
 NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<public key>
 NEXT_PUBLIC_DEMO_MODE=false
+NEXT_PUBLIC_AGENT_ENABLED=true
+NEXT_PUBLIC_SPEECH_ENABLED=false
+NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL=<real monitored email>
 ```
+
+Các biến `NEXT_PUBLIC_*` là build-time values và xuất hiện trong browser bundle. Không đặt
+LLM key, Supabase service-role key hoặc secret backend trong các biến này. Sau khi thay cờ,
+URL hoặc privacy email, phải build/deploy Vercel lại.
+
+## Public beta deployment
+
+Từ thư mục `frontend`, liên kết project một lần rồi deploy source local bằng Vercel CLI:
+
+```bash
+npx vercel link
+npx vercel env ls production
+npx vercel deploy --prod --logs
+```
+
+Production cần thêm `PARKSMART_BACKEND_ORIGIN=<render-origin>` cho Next.js rewrite và
+`NEXT_PUBLIC_API_BASE_URL=<render-origin>/api/v1`. Supabase Auth `Site URL` và redirect
+allowlist phải dùng production Vercel origin; backend `CORS_ORIGINS` cũng phải khớp origin
+đó. Không commit `.vercel/`, `.env.local` hoặc `VERCEL_OIDC_TOKEN`.
 
 Supabase Auth dùng `sessionStorage` và storage key riêng cho từng tab. Nhờ đó một tab
 có thể đăng nhập user và tab khác đăng nhập admin mà không ghi đè session. Đóng tab sẽ

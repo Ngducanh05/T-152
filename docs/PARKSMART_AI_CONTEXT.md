@@ -24,12 +24,22 @@ nguồn ngữ cảnh hiện hành gồm:
 - report progressive: chọn lý do chưa gửi ngay, biển số/mô tả/ảnh tùy chọn, nút gửi xác nhận;
 - verified adjacent observations, verified wrong-parking reports và ParkSmart Points từ
   reward ledger, không cộng điểm trước khi admin xác minh;
+- định hướng sản phẩm thật cho phép đổi 100/200/400 điểm lấy voucher 15/30/60 phút đỗ xe;
+  chức năng này chưa có trong public beta và được đặc tả tại
+  `docs/PARKSMART_POINTS_VOUCHERS.md`;
 - Agent lọc đề xuất theo `floor_id` mà không bắt buộc `zone_id`;
 - dashboard admin không hiển thị bộ điều khiển simulator và cho phép đóng panel chi tiết ô.
+- public beta chạy Next.js trên Vercel, FastAPI từ private Docker image trên Render và
+  PostgreSQL/Auth/Storage trên Supabase;
+- Agent bật với daily quota/step budget; report có daily quota và bounded evidence upload;
+- Voice/Speech, Demo và Simulator đều tắt trong production;
+- readiness gate xử lý Render cold start trước khi khởi tạo AuthProvider;
+- trang `/privacy`, admin provisioning runbook và database test safety guard là release gate.
 
 Khi baseline bên dưới nói “một tầng”, “40 ô” hoặc yêu cầu simulator controls, dùng
-`docs/architecture.md`, `docs/architecture/parking-map-spec.md` và
-`docs/api/api-contract.md` làm nguồn chuẩn mới hơn.
+`docs/PUBLIC_BETA.md`, `docs/architecture.md`, `docs/architecture/parking-map-spec.md` và
+`docs/api/api-contract.md` làm nguồn chuẩn mới hơn. Các phần Voice và kế hoạch triển khai
+hai tuần bên dưới là baseline lịch sử, không mô tả feature đang bật trong public beta.
 
 ## 1. Mục đích tài liệu
 

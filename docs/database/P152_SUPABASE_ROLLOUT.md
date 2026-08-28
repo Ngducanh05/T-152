@@ -68,7 +68,7 @@ uv run alembic current
 Expected head:
 
 ```text
-20260824_0010
+20260824_0012
 ```
 
 Confirm these tables exist in Studio:
@@ -78,6 +78,8 @@ profiles
 map_nodes
 parking_users
 vehicles
+agent_daily_usage
+report_daily_usage
 map_edges
 parking_slots
 parking_reservations
@@ -291,7 +293,7 @@ Then:
 
 1. Obtain project URL and publishable key.
 2. Obtain DB connection string.
-3. Apply Alembic through `20260824_0010`.
+3. Apply Alembic through `20260824_0012`.
 4. Apply the same platform hardening SQL.
 5. Seed intended dev/staging business data.
 6. Create Auth users.

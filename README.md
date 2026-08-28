@@ -10,6 +10,18 @@ Supabase Auth cung cấp đăng nhập/đăng ký; backend tự tạo ParkSmart 
 identity cho tài khoản người dùng mới. Role và quyền admin luôn lấy từ `profiles` do
 backend quản lý, không tin role trong token metadata.
 
+## Trạng thái public beta
+
+Public beta hiện chạy theo kiến trúc cloud tách rời: Next.js trên Vercel Hobby, FastAPI từ
+private Docker image trên Render Free, và PostgreSQL/Auth/private Storage trên Supabase.
+Agent được bật với quota 5 request/user/ngày UTC và step budget 4; Voice/Speech, Demo và
+Simulator đều tắt trong production. Đây là bản thử nghiệm best-effort, có cold start và
+không cam kết vận hành 24/7.
+
+Mục tiêu, feature matrix, topology, giới hạn và các chức năng chưa triển khai được tổng hợp
+tại [`docs/PUBLIC_BETA.md`](docs/PUBLIC_BETA.md). Runbook phát hành nằm tại
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
 Demo mặc định dùng `USER-001` và `VEHICLE-001`. Khi bật `DEMO_MODE` và
 `SIMULATOR_ENABLED`, operator có thể đưa demo về baseline: 120 ô, 119 AVAILABLE,
 0 RESERVED, 1 OCCUPIED; chỉ `F1-B03` bị chiếm bởi `SIM-CAR-02`.
@@ -338,6 +350,17 @@ frontend không tự cộng điểm và observation không cập nhật `parking
 - report chỉ `CONFIRMED` mới earn; `REJECTED`, `DUPLICATE`, `UNVERIFIABLE` cancel;
 - reopen không tạo hoặc settle reward lần nữa; hard-delete giữ ledger, đồng thời cancel reward còn pending.
 
+### Định hướng sản phẩm thật: đổi voucher đỗ xe
+
+Public beta hiện chỉ hỗ trợ tích lũy và xác minh điểm, **chưa hỗ trợ đổi hoặc sử dụng
+voucher**. Với sản phẩm thật, mức quy đổi đề xuất là 100 điểm lấy 15 phút, 200 điểm lấy 30
+phút và 400 điểm lấy 60 phút đỗ xe miễn phí. Voucher dự kiến có hiệu lực 30 ngày, dùng một
+lần, tối đa một voucher và 60 phút miễn phí cho mỗi parking session; không chuyển nhượng,
+không đổi thành tiền và phút thừa không được bảo lưu.
+
+Thiết kế nghiệp vụ, kiến trúc mục tiêu, an toàn transaction và ranh giới public beta được mô
+tả tại [ParkSmart Points và voucher đỗ xe](docs/PARKSMART_POINTS_VOUCHERS.md).
+
 Dashboard admin tiếp tục dùng `ParkingMap`/`IsometricMap`, floor tabs và polling hiện có.
 Observation pending thêm viền/icon cam, report mở giữ cảnh báo đỏ, còn outline xanh biểu thị
 target đang chọn; màu `AVAILABLE`/`RESERVED`/`OCCUPIED` không bị thay thế.
@@ -389,6 +412,10 @@ output bằng expected text.
 
 Sơ đồ components, data flow, Agent flow và deployment hiện tại nằm tại
 [`docs/architecture.md`](docs/architecture.md).
+
+Tóm tắt canonical cho public beta nằm tại
+[`docs/PUBLIC_BETA.md`](docs/PUBLIC_BETA.md); các kế hoạch MVP hai tuần trong repository là
+tài liệu lịch sử khi chúng mâu thuẫn với trạng thái này.
 
 Lỗi frontend hiển thị lời giải thích tiếng Việt, `ApiError.code` và `request_id`
 để operator đối chiếu log. Backend log cùng `request_id` tại request boundary,

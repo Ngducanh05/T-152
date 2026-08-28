@@ -2,10 +2,15 @@
 
 Source of truth:
 - `src/core/db_models.py`
-- Alembic revisions `20260804_0001` through merge head `20260824_0010`
+- Alembic revisions `20260804_0001` through head `20260824_0012`
 
-This document describes the schema after Alembic revision `20260824_0010` and
+This document describes the schema after Alembic revision `20260824_0012` and
 Supabase platform hardening.
+
+This schema supports contribution Points only. It has no reward debit, voucher catalog,
+issued-voucher or pricing tables; the proposed real-product redemption model is documented
+separately in [PARKSMART_POINTS_VOUCHERS.md](../PARKSMART_POINTS_VOUCHERS.md) and requires a
+reviewed ADR plus a future Alembic migration before implementation.
 
 ## Identity boundary
 
@@ -46,6 +51,8 @@ erDiagram
     PARKING_SLOTS ||--o{ SLOT_OBSERVATIONS : observed_slot
 
     PARKING_USERS ||--o{ REWARD_TRANSACTIONS : earns
+    PARKING_USERS ||--o{ AGENT_DAILY_USAGE : consumes
+    PARKING_USERS ||--o{ REPORT_DAILY_USAGE : submits
 ```
 
 ## Table inventory
@@ -64,6 +71,8 @@ erDiagram
 | `wrong_parking_reports` | Wrong-parking report lifecycle | `id varchar(64)` | reporter user, slot |
 | `slot_observations` | Pending/verified/rejected/expired adjacent observations | `id varchar(64)` | observer user, parking session, slot |
 | `reward_transactions` | Authoritative pending/earned/cancelled Points ledger | `id varchar(64)` | user; source stored as immutable type/reference |
+| `agent_daily_usage` | Persistent Agent request quota by UTC day | `(user_id, usage_date)` | `user_id -> parking_users.id` |
+| `report_daily_usage` | Persistent wrong-parking submission quota by UTC day | `(user_id, usage_date)` | `user_id -> parking_users.id` |
 
 `location_checkpoints` is historical only. It was created in `0002` and removed by `0003`.
 
@@ -78,6 +87,10 @@ erDiagram
 - `slot_observations(observer_session_id, slot_id)` is unique.
 - `reward_transactions(source_type, source_reference)` is unique and prevents double reward.
 - Evidence stores only the private Storage object path/type/size; image bytes are not stored in PostgreSQL.
+- Agent quota consumption is serialized per trusted parking user and committed before graph
+  invocation; provider/tool failures after that point still consume the request.
+- Report quota consumption and report creation share one transaction; rollback removes both.
+- Supabase hardening enables RLS and revokes Data API privileges for both quota tables.
 
 ## Supabase identity constraint
 
