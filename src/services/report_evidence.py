@@ -1,12 +1,15 @@
 """Backend-controlled Supabase Storage access for report evidence."""
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from uuid import uuid4
 
 import httpx
 from fastapi import HTTPException, status
+from opentelemetry.trace import SpanKind
 
 from src.core.config import Settings
+from src.core.observability import get_active_observability
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
 
@@ -94,6 +97,23 @@ class ReportEvidenceStorage:
             status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
+    @staticmethod
+    def _operation_context(name: str, operation: str, method: str):
+        runtime = get_active_observability()
+        return runtime, (
+            runtime.start_span(
+                name,
+                kind=SpanKind.CLIENT,
+                attributes={
+                    "external.system": "supabase",
+                    "external.operation": operation,
+                    "http.request.method": method,
+                },
+            )
+            if runtime is not None
+            else nullcontext(None)
+        )
+
     async def upload(
         self,
         *,
@@ -133,19 +153,36 @@ class ReportEvidenceStorage:
             "Content-Type": content_type,
             "x-upsert": "false",
         }
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                response = await client.post(
-                    (f"{base_url}/storage/v1/object/{self.settings.supabase_report_evidence_bucket}/{storage_path}"),
-                    headers=headers,
-                    content=data,
-                )
-        except httpx.HTTPError as error:
+        runtime, context_manager = self._operation_context(
+            "external.supabase.storage.upload", "storage.upload", "POST"
+        )
+        provider_error: httpx.HTTPError | None = None
+        with context_manager as span:
+            try:
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    response = await client.post(
+                        (f"{base_url}/storage/v1/object/{self.settings.supabase_report_evidence_bucket}/{storage_path}"),
+                        headers=headers,
+                        content=data,
+                    )
+            except httpx.HTTPError as error:
+                provider_error = error
+                if runtime is not None:
+                    runtime.mark_span_failed(span, exception=error)
+            else:
+                if span is not None:
+                    span.set_attribute("http.response.status_code", response.status_code)
+                    span.set_attribute(
+                        "outcome", "success" if response.status_code in {status.HTTP_200_OK, status.HTTP_201_CREATED} else "error"
+                    )
+                if response.status_code not in {status.HTTP_200_OK, status.HTTP_201_CREATED} and runtime is not None:
+                    runtime.mark_span_failed(span, error_code="REPORT_EVIDENCE_INVALID")
+        if provider_error is not None:
             raise _storage_error(
                 "REPORT_EVIDENCE_INVALID",
                 "Report evidence storage is unavailable.",
                 status.HTTP_503_SERVICE_UNAVAILABLE,
-            ) from error
+            ) from provider_error
         if response.status_code not in {status.HTTP_200_OK, status.HTTP_201_CREATED}:
             raise _storage_error(
                 "REPORT_EVIDENCE_INVALID",
@@ -161,25 +198,40 @@ class ReportEvidenceStorage:
         base_url = self.settings.supabase_url.rstrip("/")
         service_key = self.settings.supabase_service_role_key
         assert service_key is not None
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    (
-                        f"{base_url}/storage/v1/object/sign/"
-                        f"{self.settings.supabase_report_evidence_bucket}/{storage_path}"
-                    ),
-                    headers={
-                        "apikey": service_key,
-                        "Authorization": f"Bearer {service_key}",
-                    },
-                    json={"expiresIn": expires_in},
-                )
-        except httpx.HTTPError as error:
+        runtime, context_manager = self._operation_context(
+            "external.supabase.storage.sign", "storage.sign", "POST"
+        )
+        provider_error: httpx.HTTPError | None = None
+        with context_manager as span:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.post(
+                        (
+                            f"{base_url}/storage/v1/object/sign/"
+                            f"{self.settings.supabase_report_evidence_bucket}/{storage_path}"
+                        ),
+                        headers={
+                            "apikey": service_key,
+                            "Authorization": f"Bearer {service_key}",
+                        },
+                        json={"expiresIn": expires_in},
+                    )
+            except httpx.HTTPError as error:
+                provider_error = error
+                if runtime is not None:
+                    runtime.mark_span_failed(span, exception=error)
+            else:
+                if span is not None:
+                    span.set_attribute("http.response.status_code", response.status_code)
+                    span.set_attribute("outcome", "success" if response.status_code == status.HTTP_200_OK else "error")
+                if response.status_code != status.HTTP_200_OK and runtime is not None:
+                    runtime.mark_span_failed(span, error_code="REPORT_EVIDENCE_INVALID")
+        if provider_error is not None:
             raise _storage_error(
                 "REPORT_EVIDENCE_INVALID",
                 "Report evidence is temporarily unavailable.",
                 status.HTTP_503_SERVICE_UNAVAILABLE,
-            ) from error
+            ) from provider_error
         if response.status_code != status.HTTP_200_OK:
             raise _storage_error(
                 "REPORT_EVIDENCE_INVALID",
@@ -207,17 +259,33 @@ class ReportEvidenceStorage:
         base_url = self.settings.supabase_url.rstrip("/")
         service_key = self.settings.supabase_service_role_key
         assert service_key is not None
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.request(
-                    "DELETE",
-                    f"{base_url}/storage/v1/object/{self.settings.supabase_report_evidence_bucket}",
-                    headers={
-                        "apikey": service_key,
-                        "Authorization": f"Bearer {service_key}",
-                    },
-                    json={"prefixes": [storage_path]},
-                )
-        except httpx.HTTPError:
+        runtime, context_manager = self._operation_context(
+            "external.supabase.storage.delete", "storage.delete", "DELETE"
+        )
+        provider_error: httpx.HTTPError | None = None
+        with context_manager as span:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.request(
+                        "DELETE",
+                        f"{base_url}/storage/v1/object/{self.settings.supabase_report_evidence_bucket}",
+                        headers={
+                            "apikey": service_key,
+                            "Authorization": f"Bearer {service_key}",
+                        },
+                        json={"prefixes": [storage_path]},
+                    )
+            except httpx.HTTPError as error:
+                provider_error = error
+                if runtime is not None:
+                    runtime.mark_span_failed(span, exception=error)
+            else:
+                success = status.HTTP_200_OK <= response.status_code < status.HTTP_300_MULTIPLE_CHOICES
+                if span is not None:
+                    span.set_attribute("http.response.status_code", response.status_code)
+                    span.set_attribute("outcome", "success" if success else "error")
+                if not success and runtime is not None:
+                    runtime.mark_span_failed(span, error_code="REPORT_EVIDENCE_INVALID")
+        if provider_error is not None:
             return False
         return status.HTTP_200_OK <= response.status_code < status.HTTP_300_MULTIPLE_CHOICES

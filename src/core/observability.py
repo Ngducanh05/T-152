@@ -4,6 +4,8 @@ import logging
 import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar, Token
+from typing import Any
 from urllib.parse import unquote
 
 from opentelemetry import trace
@@ -14,11 +16,31 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import Span, SpanKind
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 from src.core.config import Settings
 
 logger = logging.getLogger(__name__)
 _SUPPORTED_SAMPLER = "parentbased_traceidratio"
+_ACTIVE_OBSERVABILITY: ContextVar["ObservabilityRuntime | None"] = ContextVar(
+    "active_observability", default=None
+)
+
+
+def bind_observability_runtime(runtime: "ObservabilityRuntime") -> Token["ObservabilityRuntime | None"]:
+    """Bind the application-owned runtime to the current request context."""
+    return _ACTIVE_OBSERVABILITY.set(runtime)
+
+
+def reset_observability_runtime(token: Token["ObservabilityRuntime | None"]) -> None:
+    """Reset a runtime binding returned by :func:`bind_observability_runtime`."""
+    _ACTIVE_OBSERVABILITY.reset(token)
+
+
+def get_active_observability() -> "ObservabilityRuntime | None":
+    """Return the request-local application-owned observability runtime."""
+    return _ACTIVE_OBSERVABILITY.get()
 
 
 def _trace_endpoint(endpoint: str) -> str:
@@ -59,6 +81,7 @@ class ObservabilityRuntime:
         self.exporter: OTLPSpanExporter | None = None
         self.processor: BatchSpanProcessor | None = None
         self._shutdown = False
+        self._engine_listeners: dict[int, tuple[Engine, tuple[Any, Any, Any]]] = {}
 
         if not settings.observability_enabled:
             return
@@ -95,6 +118,52 @@ class ObservabilityRuntime:
         self.enabled = True
 
     @contextmanager
+    def start_span(
+        self,
+        name: str,
+        *,
+        kind: SpanKind = SpanKind.INTERNAL,
+        attributes: Mapping[str, object] | None = None,
+    ) -> Iterator[Span | None]:
+        """Create a privacy-safe current span from this runtime's tracer only."""
+        if not self.enabled:
+            with nullcontext(None) as span:
+                yield span
+            return
+        with self.tracer.start_as_current_span(
+            name,
+            kind=kind,
+            attributes=dict(attributes or {}),
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
+            try:
+                yield span
+            except Exception as error:  # noqa: BLE001 - safe telemetry boundary
+                span.set_attribute("outcome", "error")
+                self.mark_span_failed(span, exception=error)
+                raise
+
+    @staticmethod
+    def mark_span_failed(
+        span: Span | None,
+        *,
+        exception: BaseException | None = None,
+        exception_type: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        """Mark a span failed without recording exception payloads or stack traces."""
+        if span is None:
+            return
+        span.set_status(trace.Status(trace.StatusCode.ERROR))
+        if exception is not None:
+            span.set_attribute("error.type", type(exception).__name__)
+        elif exception_type:
+            span.set_attribute("error.type", exception_type)
+        if error_code:
+            span.set_attribute("error.code", error_code)
+
+    @contextmanager
     def start_http_server_span(
         self,
         *,
@@ -119,6 +188,60 @@ class ObservabilityRuntime:
         ) as span:
             yield span
 
+    def instrument_sqlalchemy_engine(self, sync_engine: Engine) -> None:
+        """Attach safe query timing spans to an engine once for this runtime."""
+        if not self.enabled or id(sync_engine) in self._engine_listeners:
+            return
+
+        def before_cursor_execute(
+            conn: object,
+            cursor: object,
+            statement: str,
+            parameters: object,
+            execution_context: object,
+            executemany: object,
+        ) -> None:
+            del conn, cursor, parameters, executemany
+            keyword = statement.lstrip().split(None, 1)[0].upper() if statement.strip() else "OTHER"
+            operation = keyword if keyword in {"SELECT", "INSERT", "UPDATE", "DELETE", "BEGIN", "COMMIT", "ROLLBACK"} else "OTHER"
+            dialect = getattr(sync_engine, "dialect", None)
+            span = self.tracer.start_span(
+                "db.query",
+                kind=SpanKind.CLIENT,
+                attributes={
+                    "db.system.name": str(getattr(dialect, "name", "unknown")),
+                    "db.operation.name": operation,
+                },
+            )
+            setattr(execution_context, "_parksmart_observability_span", span)
+
+        def after_cursor_execute(
+            conn: object,
+            cursor: object,
+            statement: str,
+            parameters: object,
+            execution_context: object,
+            executemany: object,
+        ) -> None:
+            del conn, cursor, statement, parameters, executemany
+            span = getattr(execution_context, "_parksmart_observability_span", None)
+            if span is not None:
+                span.end()
+                delattr(execution_context, "_parksmart_observability_span")
+
+        def handle_error(exception_context: object) -> None:
+            execution_context = getattr(exception_context, "execution_context", None)
+            span = getattr(execution_context, "_parksmart_observability_span", None)
+            if span is not None:
+                self.mark_span_failed(span, exception=getattr(exception_context, "original_exception", None))
+                span.end()
+                delattr(execution_context, "_parksmart_observability_span")
+
+        event.listen(sync_engine, "before_cursor_execute", before_cursor_execute)
+        event.listen(sync_engine, "after_cursor_execute", after_cursor_execute)
+        event.listen(sync_engine, "handle_error", handle_error)
+        self._engine_listeners[id(sync_engine)] = (sync_engine, (before_cursor_execute, after_cursor_execute, handle_error))
+
     @staticmethod
     def trace_id_for_span(span: Span | None) -> str | None:
         if span is None:
@@ -132,6 +255,11 @@ class ObservabilityRuntime:
         if self._shutdown:
             return
         self._shutdown = True
+        for engine, listeners in self._engine_listeners.values():
+            event.remove(engine, "before_cursor_execute", listeners[0])
+            event.remove(engine, "after_cursor_execute", listeners[1])
+            event.remove(engine, "handle_error", listeners[2])
+        self._engine_listeners.clear()
         if self.provider is not None:
             self.provider.force_flush()
             self.provider.shutdown()
@@ -142,9 +270,14 @@ def configure_langsmith(settings: Settings) -> None:
     api_key = (settings.langsmith_api_key or "").strip()
     if not settings.langsmith_tracing or not api_key:
         os.environ["LANGSMITH_TRACING"] = "false"
+        os.environ["LANGCHAIN_TRACING_V2"] = "false"
+        os.environ["LANGSMITH_HIDE_INPUTS"] = "true"
+        os.environ["LANGSMITH_HIDE_OUTPUTS"] = "true"
+        os.environ["LANGSMITH_HIDE_METADATA"] = "true"
         return
 
     os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
     os.environ["LANGSMITH_API_KEY"] = api_key
     os.environ["LANGSMITH_PROJECT"] = settings.langsmith_project
     os.environ["LANGSMITH_HIDE_INPUTS"] = "true"

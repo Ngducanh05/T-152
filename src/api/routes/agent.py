@@ -8,7 +8,7 @@ import logging
 import re
 import unicodedata
 from collections.abc import AsyncIterator, Awaitable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from math import ceil
@@ -35,6 +35,8 @@ from src.core.agent_quota import (
 )
 from src.core.database import get_session_factory
 from src.core.db_models import ParkingSlot
+from src.core.logging import mask_identifier
+from src.core.observability import get_active_observability
 from src.core.parking_session import (
     ParkedVehicle,
     ParkingSessionError,
@@ -379,14 +381,14 @@ async def chat(
                 logger.info(
                     "agent_quota_checked request_id=%s user_id=%s status=exceeded",
                     request_id,
-                    user_id,
+                    mask_identifier(user_id),
                 )
                 raise _daily_limit_reached(error) from error
             except AgentQuotaError as error:
                 logger.warning(
                     "agent_quota_checked request_id=%s user_id=%s status=error code=%s",
                     request_id,
-                    user_id,
+                    mask_identifier(user_id),
                     error.code.value,
                 )
                 status_code = 404 if error.code is ErrorCode.USER_NOT_FOUND else 409
@@ -398,7 +400,7 @@ async def chat(
             logger.info(
                 "agent_quota_checked request_id=%s user_id=%s status=%s",
                 request_id,
-                user_id,
+                mask_identifier(user_id),
                 "disabled" if settings.agent_daily_request_limit == 0 else "consumed",
             )
             runtime_context = AgentRuntimeContext(
@@ -411,32 +413,54 @@ async def chat(
             logger.info(
                 "agent_chat_started request_id=%s user_id=%s thread_id=%s",
                 request_id,
-                user_id,
-                payload.thread_id,
+                mask_identifier(user_id),
+                mask_identifier(payload.thread_id),
             )
             config = {"configurable": {"thread_id": namespaced_thread_id}}
-            async with asyncio.timeout(request.app.state.agent_chat_timeout_seconds):
-                result = await request.app.state.agent.ainvoke(
-                    {"messages": [HumanMessage(content=payload.message, id=message_id)]},
-                    config=config,
-                    context=runtime_context,
+            observability = get_active_observability()
+            context_manager = (
+                observability.start_span(
+                    "agent.run",
+                    attributes={
+                        "agent.timeout_seconds": request.app.state.agent_chat_timeout_seconds,
+                        "agent.fresh_find_requested": fresh_find_requested,
+                    },
                 )
+                if observability is not None
+                else nullcontext(None)
+            )
+            with context_manager as span:
+                async with asyncio.timeout(request.app.state.agent_chat_timeout_seconds):
+                    result = await request.app.state.agent.ainvoke(
+                        {"messages": [HumanMessage(content=payload.message, id=message_id)]},
+                        config=config,
+                        context=runtime_context,
+                    )
+                if span is not None and isinstance(result, dict):
+                    for key, attribute in (
+                        ("intent", "agent.intent"),
+                        ("agent_step_count", "agent.step_count"),
+                        ("tool_call_count", "agent.tool_call_count"),
+                    ):
+                        value = result.get(key)
+                        if isinstance(value, (str, int)):
+                            span.set_attribute(attribute, value)
     except TimeoutError as error:
         logger.warning(
             "agent_chat_timeout request_id=%s user_id=%s thread_id=%s",
             request_id,
-            user_id,
-            payload.thread_id,
+            mask_identifier(user_id),
+            mask_identifier(payload.thread_id),
         )
         raise _service_unavailable("Agent request timed out. Please try again.") from error
     except HTTPException:
         raise
     except Exception as error:
-        logger.exception(
+        logger.error(
             "agent_chat_failed request_id=%s user_id=%s thread_id=%s exception_type=%s",
             request_id,
-            user_id,
-            payload.thread_id,
+            mask_identifier(user_id),
+            mask_identifier(payload.thread_id),
             type(error).__name__,
         )
         raise _service_unavailable("The parking assistant is temporarily unavailable. Please try again.") from error
@@ -457,15 +481,15 @@ async def chat(
             logger.warning(
                 "agent_chat_unavailable request_id=%s user_id=%s thread_id=%s",
                 request_id,
-                user_id,
-                payload.thread_id,
+                mask_identifier(user_id),
+                mask_identifier(payload.thread_id),
             )
             raise _service_unavailable("The parking assistant is temporarily unavailable. Please try again.")
         logger.warning(
             "agent_chat_recovered_recommendation request_id=%s user_id=%s thread_id=%s recommendation_count=%s",
             request_id,
-            user_id,
-            payload.thread_id,
+            mask_identifier(user_id),
+            mask_identifier(payload.thread_id),
             len(recommendation_ids),
         )
 
@@ -519,8 +543,8 @@ async def chat(
     logger.info(
         "agent_chat_completed request_id=%s user_id=%s thread_id=%s tool_count=%s",
         request_id,
-        user_id,
-        payload.thread_id,
+        mask_identifier(user_id),
+        mask_identifier(payload.thread_id),
         len(response.tool_names),
     )
     return SuccessResponse(data=response)

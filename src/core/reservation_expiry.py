@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Callable
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.core.config import Settings
 from src.core.db_models import ParkingReservation, ParkingSlot
+from src.core.observability import ObservabilityRuntime, get_active_observability
 from src.core.parking_state import ParkingStateService
 from src.models.schemas import ReservationStatus
 
@@ -78,6 +80,7 @@ async def run_reservation_expiry_worker(
     *,
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
+    observability: ObservabilityRuntime | None = None,
 ) -> None:
     """Run periodic expiry without making request handlers own global cleanup."""
     while not stop_event.is_set():
@@ -91,10 +94,25 @@ async def run_reservation_expiry_worker(
             pass
 
         try:
-            async with session_factory() as session, session.begin():
-                await ReservationExpiryService(session).expire_batch(batch_size=settings.reservation_expiry_batch_size)
-        except Exception:  # noqa: BLE001 - worker boundary logs and retries
-            logger.exception("reservation_expiry_worker_failed")
+            runtime = observability or get_active_observability()
+            context = (
+                runtime.start_span(
+                    "worker.reservation_expiry.batch",
+                    attributes={"worker.batch_size": settings.reservation_expiry_batch_size},
+                )
+                if runtime is not None
+                else nullcontext(None)
+            )
+            with context as span:
+                async with session_factory() as session, session.begin():
+                    expired_count = await ReservationExpiryService(session).expire_batch(
+                        batch_size=settings.reservation_expiry_batch_size
+                    )
+                if span is not None:
+                    span.set_attribute("worker.expired_count", expired_count)
+                    span.set_attribute("outcome", "success")
+        except Exception as error:  # noqa: BLE001 - worker boundary logs and retries
+            logger.error("reservation_expiry_worker_failed exception_type=%s", type(error).__name__)
 
 
 __all__ = ["ReservationExpiryService", "run_reservation_expiry_worker"]

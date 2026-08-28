@@ -2,11 +2,17 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from starlette.requests import Request
 
 from src.api.main import create_app
 from src.core.config import Settings
-from src.services.speech import SpeechTranscriptionError
+from src.core.observability import (
+    ObservabilityRuntime,
+    bind_observability_runtime,
+    reset_observability_runtime,
+)
+from src.services.speech import SpeechTranscriptionError, transcribe_audio
 
 
 @pytest.fixture
@@ -18,6 +24,61 @@ def speech_app():
             speech_max_audio_bytes=8,
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_speech_span_excludes_audio_key_and_transcript(monkeypatch: pytest.MonkeyPatch) -> None:
+    exporter = InMemorySpanExporter()
+    monkeypatch.setattr("src.core.observability.OTLPSpanExporter", lambda **_kwargs: exporter)
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def raise_for_status() -> None:
+            return None
+
+        @staticmethod
+        def json() -> dict[str, str]:
+            return {"text": "PRIVATE-TRANSCRIPT"}
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def post(self, *_args: object, **_kwargs: object) -> FakeResponse:
+            return FakeResponse()
+
+    monkeypatch.setattr("src.services.speech.httpx.AsyncClient", FakeAsyncClient)
+    settings = Settings(_env_file=None, llm_api_key="PRIVATE-API-KEY", speech_transcription_model="safe-model")
+    runtime = ObservabilityRuntime(
+        Settings(
+            _env_file=None,
+            observability_enabled=True,
+            otel_exporter_otlp_endpoint="https://tenant.example/otlp",
+            otel_exporter_otlp_headers="Authorization=Basic%20redacted",
+        )
+    )
+    audio = b"PRIVATE-AUDIO-BYTES"
+    binding = bind_observability_runtime(runtime)
+    try:
+        assert await transcribe_audio(audio, media_type="audio/webm", settings=settings) == "PRIVATE-TRANSCRIPT"
+    finally:
+        reset_observability_runtime(binding)
+        runtime.shutdown()
+
+    span = next(span for span in exporter.get_finished_spans() if span.name == "external.openai.speech.transcribe")
+    assert span.attributes["gen_ai.request.model"] == "safe-model"
+    assert span.attributes["audio.media_type"] == "audio/webm"
+    rendered = str((span.attributes, span.events))
+    for private_value in ("PRIVATE-API-KEY", "PRIVATE-AUDIO-BYTES", "PRIVATE-TRANSCRIPT"):
+        assert private_value not in rendered
 
 
 async def test_transcribes_supported_audio_without_persisting_it(speech_app):

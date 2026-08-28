@@ -3,8 +3,14 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import jwt
 import pytest
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from src.core.config import Settings
+from src.core.observability import (
+    ObservabilityRuntime,
+    bind_observability_runtime,
+    reset_observability_runtime,
+)
 from src.services.auth_service import SupabaseTokenVerifier
 
 
@@ -86,3 +92,36 @@ async def test_auth_provider_unavailable_is_stable_503() -> None:
 
     assert getattr(exc_info.value, "status_code", None) == 503
     assert getattr(exc_info.value, "detail", {}).get("code") == "AUTH_PROVIDER_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_remote_verification_span_excludes_credentials_and_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    exporter = InMemorySpanExporter()
+    monkeypatch.setattr("src.core.observability.OTLPSpanExporter", lambda **_kwargs: exporter)
+    runtime = ObservabilityRuntime(
+        Settings(
+            _env_file=None,
+            observability_enabled=True,
+            otel_exporter_otlp_endpoint="https://tenant.example/otlp",
+            otel_exporter_otlp_headers="Authorization=Basic%20redacted",
+        )
+    )
+    verifier = SupabaseTokenVerifier(
+        settings(), client=StubClient([StubResponse(200, {"id": "PRIVATE-USER-ID", "email": "private@example.com"})])
+    )  # type: ignore[arg-type]
+    access_token = token(expires_at=datetime.now(UTC) + timedelta(minutes=5))
+    binding = bind_observability_runtime(runtime)
+    try:
+        await verifier.verify(access_token)
+    finally:
+        reset_observability_runtime(binding)
+        runtime.shutdown()
+
+    span = next(span for span in exporter.get_finished_spans() if span.name == "external.supabase.auth.verify")
+    rendered = str(span.attributes)
+    assert span.attributes["http.request.method"] == "GET"
+    assert span.attributes["http.response.status_code"] == 200
+    assert access_token not in rendered
+    assert "PRIVATE-USER-ID" not in rendered
+    assert "private@example.com" not in rendered
+    assert "project.supabase.co" not in rendered

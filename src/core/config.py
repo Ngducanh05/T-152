@@ -163,6 +163,10 @@ class Settings(BaseSettings):
                 failures.append("OTEL_EXPORTER_OTLP_HEADERS is required")
             if self.otel_traces_sampler.lower() != "parentbased_traceidratio":
                 failures.append("OTEL_TRACES_SAMPLER is unsupported")
+            if self.otel_exporter_otlp_protocol.lower() != "http/protobuf":
+                failures.append("OTEL_EXPORTER_OTLP_PROTOCOL is unsupported")
+            if self.otel_traces_exporter.lower() != "otlp":
+                failures.append("OTEL_TRACES_EXPORTER is unsupported")
         if self.langsmith_tracing and not (self.langsmith_api_key or "").strip():
             failures.append("LANGSMITH_API_KEY is required")
 

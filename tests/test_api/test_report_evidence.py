@@ -4,10 +4,16 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import HTTPException
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from starlette.datastructures import Headers, UploadFile
 
 from src.api.routes.reports import _read_bounded_evidence
 from src.core.config import Settings
+from src.core.observability import (
+    ObservabilityRuntime,
+    bind_observability_runtime,
+    reset_observability_runtime,
+)
 from src.services.report_evidence import ReportEvidenceStorage, validate_report_image
 
 
@@ -102,6 +108,73 @@ async def test_report_evidence_delete_accepts_synthetic_demo_path_when_unconfigu
     )
 
     assert await storage.delete("reports/REPORT-001/evidence.jpg") is True
+
+
+@pytest.mark.asyncio
+async def test_storage_spans_exclude_evidence_and_storage_identifiers(monkeypatch: pytest.MonkeyPatch) -> None:
+    exporter = InMemorySpanExporter()
+    monkeypatch.setattr("src.core.observability.OTLPSpanExporter", lambda **_kwargs: exporter)
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json() -> dict[str, str]:
+            return {"signedURL": "/object/sign/PRIVATE-SIGNED-URL"}
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def post(self, *_args: object, **_kwargs: object) -> FakeResponse:
+            return FakeResponse()
+
+        async def request(self, *_args: object, **_kwargs: object) -> FakeResponse:
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    runtime = ObservabilityRuntime(
+        Settings(
+            _env_file=None,
+            observability_enabled=True,
+            otel_exporter_otlp_endpoint="https://tenant.example/otlp",
+            otel_exporter_otlp_headers="Authorization=Basic%20redacted",
+        )
+    )
+    storage = ReportEvidenceStorage(
+        Settings(
+            _env_file=None,
+            demo_mode=False,
+            supabase_url="https://project.supabase.co",
+            supabase_service_role_key="PRIVATE-ROLE-KEY",
+            supabase_report_evidence_bucket="private-bucket",
+        )
+    )
+    image = b"\xff\xd8\xffPRIVATE-IMAGE-BYTES"
+    binding = bind_observability_runtime(runtime)
+    try:
+        evidence = await storage.upload(report_id="PRIVATE-REPORT-ID", data=image, content_type="image/jpeg")
+        await storage.create_signed_url(evidence.storage_path)
+        await storage.delete(evidence.storage_path)
+    finally:
+        reset_observability_runtime(binding)
+        runtime.shutdown()
+
+    spans = exporter.get_finished_spans()
+    assert {span.name for span in spans} == {
+        "external.supabase.storage.upload",
+        "external.supabase.storage.sign",
+        "external.supabase.storage.delete",
+    }
+    rendered = str([(span.attributes, span.events) for span in spans])
+    for private_value in ("PRIVATE-REPORT-ID", "PRIVATE-ROLE-KEY", "PRIVATE-IMAGE-BYTES", "private-bucket"):
+        assert private_value not in rendered
 
 
 @pytest.mark.parametrize(

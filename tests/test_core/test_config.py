@@ -182,7 +182,7 @@ def test_valid_production_like_settings_are_accepted() -> None:
 
 
 def test_observability_defaults_are_valid(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("LANGSMITH_API_KEY", "LANGSMITH_PROJECT", "LANGSMITH_TRACING"):
+    for name in ("LANGSMITH_API_KEY", "LANGSMITH_PROJECT", "LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"):
         monkeypatch.delenv(name, raising=False)
     settings = Settings(_env_file=None)
 
@@ -250,6 +250,29 @@ def test_production_observability_with_otlp_configuration_is_accepted() -> None:
     )
 
     assert settings.observability_enabled is True
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("otel_exporter_otlp_protocol", "grpc", "OTEL_EXPORTER_OTLP_PROTOCOL"),
+        ("otel_traces_exporter", "none", "OTEL_TRACES_EXPORTER"),
+    ],
+)
+def test_production_observability_rejects_unsupported_trace_export_configuration(
+    field: str,
+    value: str,
+    expected: str,
+) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        _production_settings(
+            observability_enabled=True,
+            otel_exporter_otlp_endpoint="https://tenant.grafana.net/otlp",
+            otel_exporter_otlp_headers="Authorization=Basic%20test",
+            **{field: value},
+        )
+
+    assert expected in str(exc_info.value)
 
 
 def test_langchain_environment_aliases_populate_langsmith_settings(

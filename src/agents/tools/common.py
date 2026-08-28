@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import nullcontext
 from time import perf_counter
 from typing import Any
 
@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.agents.context import AgentRuntimeContext
 from src.agents.state import AgentState
 from src.core.location import LocationError
+from src.core.logging import mask_identifier
+from src.core.observability import get_active_observability
 from src.core.parking_session import ParkingSessionError
 from src.core.parking_state import ParkingStateError
 from src.core.recommendation import RecommendationError
@@ -73,12 +75,6 @@ def require_vehicle_id(runtime: AgentToolRuntime) -> str:
     return vehicle_id
 
 
-def _masked_identifier(value: object) -> str:
-    """Return a stable non-reversible identifier suitable for structured logs."""
-    digest = hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:10]
-    return f"masked-{digest}"
-
-
 def _runtime_thread_id(runtime: AgentToolRuntime) -> str:
     configurable = runtime.config.get("configurable", {})
     if not isinstance(configurable, dict):
@@ -106,8 +102,8 @@ def _log_tool_result(
         "agent_tool_completed request_id=%s thread_id=%s user_id=%s "
         "tool_name=%s duration_ms=%.2f outcome=%s error_code=%s exception_type=%s",
         runtime.context.request_id,
-        _masked_identifier(_runtime_thread_id(runtime)),
-        _masked_identifier(runtime.context.user_id),
+        mask_identifier(_runtime_thread_id(runtime)),
+        mask_identifier(runtime.context.user_id),
         tool_name,
         (perf_counter() - started_at) * 1000,
         outcome,
@@ -126,31 +122,50 @@ async def execute_tool(
     """Run one adapter operation with session ownership and safe error mapping."""
     started_at = perf_counter()
     exception_type = "NONE"
-    try:
-        async with runtime.context.session_factory() as session:
-            if write:
-                async with session.begin():
-                    result = await operation(session)
-            else:
-                result = await operation(session)
-    except AgentToolError as error:
-        result = tool_error(error.code, error.message)
-    except _DOMAIN_ERRORS as error:
-        result = tool_error(error.code, error.message)
-    except Exception as error:  # noqa: BLE001 - boundary must shield the model
-        exception_type = type(error).__name__
-        result = tool_error(
-            ErrorCode.AGENT_TOOL_UNAVAILABLE,
-            "The parking service is temporarily unavailable. Please try again.",
-            retryable=True,
+    runtime_observability = get_active_observability()
+    context_manager = (
+        runtime_observability.start_span(
+            f"agent.tool.{tool_name}",
+            attributes={"agent.tool.name": tool_name, "agent.tool.write": write},
         )
-    _log_tool_result(
-        runtime,
-        tool_name,
-        result,
-        started_at=started_at,
-        exception_type=exception_type,
+        if runtime_observability is not None
+        else nullcontext(None)
     )
+    with context_manager as span:
+        try:
+            async with runtime.context.session_factory() as session:
+                if write:
+                    async with session.begin():
+                        result = await operation(session)
+                else:
+                    result = await operation(session)
+        except AgentToolError as error:
+            result = tool_error(error.code, error.message)
+        except _DOMAIN_ERRORS as error:
+            result = tool_error(error.code, error.message)
+        except Exception as error:  # noqa: BLE001 - boundary must shield the model
+            exception_type = type(error).__name__
+            result = tool_error(
+                ErrorCode.AGENT_TOOL_UNAVAILABLE,
+                "The parking service is temporarily unavailable. Please try again.",
+                retryable=True,
+            )
+        outcome = "success" if result.get("ok") is True else "error"
+        if span is not None:
+            span.set_attribute("outcome", outcome)
+            if outcome == "error":
+                runtime_observability.mark_span_failed(
+                    span,
+                    exception_type=None if exception_type == "NONE" else exception_type,
+                    error_code=_result_error_code(result),
+                )
+        _log_tool_result(
+            runtime,
+            tool_name,
+            result,
+            started_at=started_at,
+            exception_type=exception_type,
+        )
     return result
 
 

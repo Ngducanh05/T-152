@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from langgraph.runtime import Runtime
+from opentelemetry.trace import Span
 
 from src.agents.context import AgentRuntimeContext
 from src.agents.state import AgentState
+from src.core.observability import get_active_observability
 
 
 def prepare_context(
@@ -11,8 +15,25 @@ def prepare_context(
     runtime: Runtime[AgentRuntimeContext],
 ) -> dict[str, object]:
     """Copy trusted request identity into state and reset the per-run step budget."""
+    runtime_observability = get_active_observability()
+    context_manager = (
+        runtime_observability.start_span("agent.prepare_context")
+        if runtime_observability is not None
+        else nullcontext(None)
+    )
+    with context_manager as span:
+        return _prepare_context(state, runtime, span)
+
+
+def _prepare_context(
+    state: AgentState,
+    runtime: Runtime[AgentRuntimeContext],
+    span: Span | None,
+) -> dict[str, object]:
     context = runtime.context
     if context is None:
+        if span is not None:
+            span.set_attribute("agent.missing_field_count", 1)
         return {
             "agent_step_count": 0,
             "error": "AGENT_TOOL_UNAVAILABLE: Agent runtime context is missing.",
@@ -25,6 +46,8 @@ def prepare_context(
     missing_fields = [field for field in state.get("missing_fields", []) if field not in resolved_fields]
     if context.vehicle_id is None:
         missing_fields.append("vehicle_id")
+    if span is not None:
+        span.set_attribute("agent.missing_field_count", len(set(missing_fields)))
 
     return {
         "user_id": context.user_id,

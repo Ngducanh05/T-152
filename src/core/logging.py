@@ -1,5 +1,6 @@
 """Privacy-safe application logging and request correlation helpers."""
 
+import hashlib
 import json
 import logging
 import sys
@@ -12,6 +13,12 @@ from opentelemetry import trace
 _REQUEST_ID: ContextVar[str | None] = ContextVar("request_id", default=None)
 _MANAGED_HANDLER_ATTRIBUTE = "_parksmart_managed_handler"
 _TEXT_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+
+
+def mask_identifier(value: object) -> str:
+    """Return a stable non-reversible identifier suitable for application logs."""
+    digest = hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:10]
+    return f"masked-{digest}"
 
 
 def bind_request_id(request_id: str) -> Token[str | None]:

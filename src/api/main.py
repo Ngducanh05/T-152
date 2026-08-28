@@ -20,7 +20,12 @@ from src.agents.graph import build_graph
 from src.api.routes import api_router
 from src.core.config import Settings, get_settings
 from src.core.logging import bind_request_id, configure_logging, reset_request_id
-from src.core.observability import ObservabilityRuntime, configure_langsmith
+from src.core.observability import (
+    ObservabilityRuntime,
+    bind_observability_runtime,
+    configure_langsmith,
+    reset_observability_runtime,
+)
 from src.core.reservation_expiry import run_reservation_expiry_worker
 from src.services.auth_service import SupabaseTokenVerifier
 
@@ -109,6 +114,7 @@ def create_app(
         application.state.agent_thread_ttl_seconds = application_settings.agent_thread_ttl_seconds
         application.state.agent_chat_timeout_seconds = application_settings.llm_timeout_seconds
         expiry_engine = create_async_engine(application_settings.database_url)
+        application.state.observability.instrument_sqlalchemy_engine(expiry_engine.sync_engine)
         expiry_session_factory = async_sessionmaker(expiry_engine, expire_on_commit=False)
         expiry_stop_event = asyncio.Event()
         expiry_task = asyncio.create_task(
@@ -116,6 +122,7 @@ def create_app(
                 expiry_stop_event,
                 settings=application_settings,
                 session_factory=expiry_session_factory,
+                observability=application.state.observability,
             )
         )
         try:
@@ -156,6 +163,7 @@ def create_app(
         request.state.request_id = request_id
         started_at = perf_counter()
         request_id_token = bind_request_id(request_id)
+        observability_token = bind_observability_runtime(application.state.observability)
         try:
             with observability.start_http_server_span(
                 method=request.method,
@@ -199,6 +207,7 @@ def create_app(
                 )
                 return response
         finally:
+            reset_observability_runtime(observability_token)
             reset_request_id(request_id_token)
 
     @application.exception_handler(StarletteHTTPException)

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from typing import Any
 
 from langchain_core.messages import ToolMessage
 from pydantic import TypeAdapter, ValidationError
 
 from src.agents.state import AgentState
+from src.core.observability import get_active_observability
 from src.models.schemas import RouteResult, SlotId, is_slot_id
 
 _SLOT_ID_ADAPTER = TypeAdapter(SlotId)
@@ -138,6 +140,24 @@ def _apply_success(
 
 
 def observe_tool_result(state: AgentState) -> dict[str, object]:
+    """Parse structured tool observations into the durable agent state contract."""
+    runtime_observability = get_active_observability()
+    context_manager = (
+        runtime_observability.start_span("agent.observe_tool_result")
+        if runtime_observability is not None
+        else nullcontext(None)
+    )
+    with context_manager as span:
+        update = _observe_tool_result(state)
+        if span is not None:
+            messages = _tool_messages(state)
+            span.set_attribute("agent.tool_message_count", len(messages))
+            span.set_attribute("agent.step_count", update.get("agent_step_count", state.get("agent_step_count", 0)))
+            span.set_attribute("outcome", "error" if update.get("error") else "success")
+        return update
+
+
+def _observe_tool_result(state: AgentState) -> dict[str, object]:
     """Parse structured tool observations into the durable agent state contract."""
     messages = _tool_messages(state)
     if not messages:

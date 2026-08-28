@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -8,12 +9,14 @@ import httpx
 import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from opentelemetry.trace import SpanKind
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import Settings, get_settings
 from src.core.database import get_db_session
 from src.core.db_models import AppRoleEnum, ParkingUser, Profile, Vehicle
+from src.core.observability import get_active_observability
 from src.models.auth import AppRole, CurrentUser
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -93,17 +96,43 @@ class SupabaseTokenVerifier:
             "apikey": settings.supabase_anon_key,
             "Authorization": f"Bearer {token}",
         }
-        try:
-            response = await self.client.get(
-                f"{settings.supabase_url.rstrip('/')}/auth/v1/user",
-                headers=headers,
+        runtime = get_active_observability()
+        context_manager = (
+            runtime.start_span(
+                "external.supabase.auth.verify",
+                kind=SpanKind.CLIENT,
+                attributes={
+                    "external.system": "supabase",
+                    "external.operation": "auth.verify",
+                    "http.request.method": "GET",
+                },
             )
-        except httpx.HTTPError as error:
+            if runtime is not None
+            else nullcontext(None)
+        )
+        provider_error: httpx.HTTPError | None = None
+        with context_manager as span:
+            try:
+                response = await self.client.get(
+                    f"{settings.supabase_url.rstrip('/')}/auth/v1/user",
+                    headers=headers,
+                )
+            except httpx.HTTPError as error:
+                provider_error = error
+                if runtime is not None:
+                    runtime.mark_span_failed(span, exception=error)
+            else:
+                if span is not None:
+                    span.set_attribute("http.response.status_code", response.status_code)
+                    span.set_attribute("outcome", "success" if response.status_code == status.HTTP_200_OK else "error")
+                if response.status_code != status.HTTP_200_OK and runtime is not None:
+                    runtime.mark_span_failed(span, error_code="INVALID_TOKEN")
+        if provider_error is not None:
             raise _auth_error(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 "AUTH_PROVIDER_UNAVAILABLE",
                 "Authentication provider is unavailable.",
-            ) from error
+            ) from provider_error
 
         if response.status_code != status.HTTP_200_OK:
             raise _auth_error(
