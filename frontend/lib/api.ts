@@ -15,8 +15,6 @@ import type {
   DeleteWrongParkingReportRequest,
   DeleteWrongParkingReportResponse,
   ConfirmLocationRequest,
-  ScanLocationRequest,
-  ScannedLocation,
   ConfirmParkingRequest,
   CreateReservationRequest,
   Location,
@@ -325,14 +323,6 @@ export class ParkSmartApiClient {
 
   confirmLocation(payload: ConfirmLocationRequest, signal?: AbortSignal) {
     return this.request<Location>("/locations/confirm", {
-      method: "POST",
-      body: JSON.stringify(payload),
-      signal,
-    });
-  }
-
-  scanLocation(payload: ScanLocationRequest, signal?: AbortSignal) {
-    return this.request<ScannedLocation>("/locations/scan", {
       method: "POST",
       body: JSON.stringify(payload),
       signal,

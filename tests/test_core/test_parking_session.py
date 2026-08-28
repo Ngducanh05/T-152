@@ -101,10 +101,7 @@ async def _reserve(
     await LocationService(
         session,
         clock=lambda: verification_time,
-    ).confirm_scanned_location(
-        user_id,
-        f"parksmart:location:v1:PSLOC-{slot.node_id}",
-    )
+    ).confirm_location(user_id, slot.id)
     return reservation
 
 
@@ -186,13 +183,12 @@ async def test_confirm_rejects_expired_reservation_without_occupying_slot(
 
 
 @pytest.mark.asyncio
-async def test_manual_location_does_not_verify_parking_arrival(
+async def test_missing_verified_location_does_not_confirm_parking(
     session_db: SessionDatabase,
 ):
     factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
     async with factory() as session, session.begin():
         reservation = await ReservationService(session).create_reservation("USER-001", "VEHICLE-001", "F2-C09")
-        await LocationService(session).confirm_location("USER-001", "F2-C09")
         with pytest.raises(ParkingSessionError) as error:
             await ParkingSessionService(session).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
 
@@ -201,7 +197,28 @@ async def test_manual_location_does_not_verify_parking_arrival(
 
 
 @pytest.mark.asyncio
-async def test_expired_qr_verification_does_not_confirm_parking(
+async def test_manual_confirmation_at_another_slot_does_not_confirm_parking(
+    session_db: SessionDatabase,
+):
+    factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        reservation = await ReservationService(session).create_reservation(
+            "USER-001", "VEHICLE-001", "F2-C09"
+        )
+        await LocationService(session).confirm_location("USER-001", "F2-C08")
+        with pytest.raises(ParkingSessionError) as error:
+            await ParkingSessionService(session).confirm_parking(
+                "USER-001", "VEHICLE-001", reservation.id
+            )
+
+    assert error.value.code is ErrorCode.PARKING_ARRIVAL_NOT_VERIFIED
+    assert error.value.details["reason"] == "wrong_location"
+    assert error.value.details["required_location"] == "F2-C09"
+    assert error.value.details["verified_location"] == "F2-C08"
+
+
+@pytest.mark.asyncio
+async def test_expired_manual_location_confirmation_does_not_confirm_parking(
     session_db: SessionDatabase,
 ):
     factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
@@ -211,9 +228,7 @@ async def test_expired_qr_verification_does_not_confirm_parking(
         reservation = await ReservationService(session, settings=settings).create_reservation(
             "USER-001", "VEHICLE-001", "F2-C09", now=verified_at
         )
-        await LocationService(session, clock=lambda: verified_at).confirm_scanned_location(
-            "USER-001", "parksmart:location:v1:PSLOC-F2-C-E"
-        )
+        await LocationService(session, clock=lambda: verified_at).confirm_location("USER-001", "F2-C09")
         with pytest.raises(ParkingSessionError) as error:
             await ParkingSessionService(
                 session,

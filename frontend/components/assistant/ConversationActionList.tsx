@@ -14,7 +14,9 @@ export function ConversationActionList({
   pending,
   onAction,
 }: ConversationActionListProps) {
-  const actions = message.uiActions.slice(0, 5);
+  const actions = message.uiActions
+    .filter((action) => !message.consumedActionIds.includes(action.id))
+    .slice(0, 5);
   if (actions.length === 0) return null;
 
   return (
@@ -24,10 +26,9 @@ export function ConversationActionList({
       aria-label="Thao tác cho câu trả lời này"
     >
       {actions.map((action) => {
-        const consumed = message.consumedActionIds.includes(action.id);
         const accessibleName = `${action.label}${
           action.requires_confirmation ? ", thao tác cần xác nhận" : ""
-        }${consumed ? ", đã sử dụng" : ""}`;
+        }`;
         return (
           <button
             key={action.id}
@@ -37,12 +38,11 @@ export function ConversationActionList({
               "slot_id" in action.payload ? action.payload.slot_id : undefined
             }
             aria-label={accessibleName}
-            disabled={pending || consumed}
+            disabled={pending}
             onClick={() => void onAction(message.id, action)}
           >
             <span>{action.label}</span>
-            {consumed && <small>Đã dùng</small>}
-            {!consumed && action.requires_confirmation && <small>Chạm để xác nhận</small>}
+            {action.requires_confirmation && <small>Chạm để xác nhận</small>}
           </button>
         );
       })}

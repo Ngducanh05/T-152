@@ -105,57 +105,12 @@ def _reservation_payload(
 
 
 @pytest.mark.asyncio
-async def test_scan_location_resolves_trusted_marker_and_rejects_invalid_input(
+async def test_location_scan_endpoint_is_not_available(
     phase4_api: Phase4Api,
 ):
     client = phase4_api.client
-    success = await client.post(
-        "/api/v1/locations/scan",
-        json={"user_id": "USER-001", "qr_payload": "parksmart:location:v1:PSLOC-F3-D-W"},
-    )
-    assert success.status_code == 200
-    assert success.json()["data"]["node_id"] == "F3-D-W"
-    assert success.json()["data"]["marker_id"] == "PSLOC-F3-D-W"
-
-    malformed = await client.post(
-        "/api/v1/locations/scan",
-        json={"user_id": "USER-001", "qr_payload": "F3-D-W"},
-    )
-    assert malformed.status_code == 422
-    assert malformed.json()["error"]["code"] == "INVALID_LOCATION_QR"
-    current_after_malformed = await client.get("/api/v1/locations/current", params={"user_id": "USER-001"})
-    assert current_after_malformed.json()["data"]["node_id"] == "F3-D-W"
-
-    unknown = await client.post(
-        "/api/v1/locations/scan",
-        json={"user_id": "USER-001", "qr_payload": "parksmart:location:v1:PSLOC-F3-Z-W"},
-    )
-    assert unknown.status_code == 404
-    assert unknown.json()["error"]["code"] == "LOCATION_MARKER_NOT_FOUND"
-    current_after_unknown = await client.get("/api/v1/locations/current", params={"user_id": "USER-001"})
-    assert current_after_unknown.json()["data"]["node_id"] == "F3-D-W"
-
-    invalid_suffix = await client.post(
-        "/api/v1/locations/scan",
-        json={
-            "user_id": "USER-001",
-            "qr_payload": "parksmart:location:v1:PSLOC-F3-D-W:extra",
-        },
-    )
-    assert invalid_suffix.status_code == 422
-    assert invalid_suffix.json()["error"]["code"] == "INVALID_LOCATION_QR"
-
-    extra_field = await client.post(
-        "/api/v1/locations/scan",
-        json={"user_id": "USER-001", "qr_payload": "F3-D-W", "node_id": "F3-D-W"},
-    )
-    assert extra_field.status_code == 422
-
-    direct_node = await client.post(
-        "/api/v1/locations/scan",
-        json={"user_id": "USER-001", "node_id": "F3-D-W"},
-    )
-    assert direct_node.status_code == 422
+    response = await client.post("/api/v1/locations/scan", json={"user_id": "USER-001"})
+    assert response.status_code == 404
 
     manual_aisle = await client.post(
         "/api/v1/locations/confirm",
@@ -183,11 +138,8 @@ async def test_authenticated_user_cannot_change_another_parking_users_location(
     phase4_api.application.dependency_overrides[require_parking_user_or_demo] = authenticated_user
     try:
         response = await phase4_api.client.post(
-            "/api/v1/locations/scan",
-            json={
-                "user_id": "USER-002",
-                "qr_payload": "parksmart:location:v1:PSLOC-F3-D-W",
-            },
+            "/api/v1/locations/confirm",
+            json={"user_id": "USER-002", "node_id": "F1-CP1"},
         )
     finally:
         phase4_api.application.dependency_overrides.pop(require_parking_user_or_demo, None)
@@ -245,6 +197,13 @@ async def test_phase4_end_to_end_flow(phase4_api: Phase4Api):
     )
     assert route_to_slot.status_code == 200
     assert route_to_slot.json()["data"]["path"][-1] == slot_id
+
+    arrival = await client.post(
+        "/api/v1/locations/confirm",
+        json={"user_id": "USER-001", "node_id": slot_id},
+    )
+    assert arrival.status_code == 200
+    assert arrival.json()["data"]["verified_node_id"] == slot_id
 
     confirmed = await client.post(
         "/api/v1/sessions/confirm-parking",

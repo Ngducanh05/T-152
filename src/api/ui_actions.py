@@ -48,6 +48,7 @@ def derive_chat_ui_actions(
     active_reservation_id: str | None = None,
     active_session_id: str | None = None,
     route: RouteResult | None = None,
+    supports_accessible_parking: bool = True,
 ) -> list[ChatUIAction]:
     """Build safe actions without inspecting LLM text or accepting arbitrary targets."""
     actions: list[ChatUIAction] = []
@@ -56,16 +57,10 @@ def derive_chat_ui_actions(
     if not current_location:
         return [
             _action(
-                action_id="scan-location-qr",
-                action_type=ChatUIActionType.SCAN_LOCATION_QR,
-                label="Quét QR vị trí",
-                style=ChatUIActionStyle.PRIMARY,
-            ),
-            _action(
                 action_id="select-location",
                 action_type=ChatUIActionType.SELECT_LOCATION,
-                label="Chọn vị trí thủ công",
-                style=ChatUIActionStyle.SECONDARY,
+                label="Xác nhận vị trí",
+                style=ChatUIActionStyle.PRIMARY,
             ),
         ]
 
@@ -158,9 +153,10 @@ def derive_chat_ui_actions(
     if not actions:
         preferences = (
             ("EV", "Tìm ô có sạc"),
-            ("ACCESSIBLE", "Tìm ô dễ tiếp cận"),
             ("NEAR_ELEVATOR", "Tìm ô gần thang máy"),
         )
+        if supports_accessible_parking:
+            preferences = preferences[:1] + (("ACCESSIBLE", "Tìm ô dễ tiếp cận"),) + preferences[1:]
         for preference, label in preferences:
             actions.append(
                 _action(

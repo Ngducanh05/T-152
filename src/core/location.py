@@ -1,4 +1,4 @@
-"""Navigation hints and QR-verified physical locations."""
+"""Validated, user-confirmed canonical parking locations."""
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -8,12 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.db_models import MapNode, ParkingSlot, ParkingUser
 from src.core.errors import DomainError
-from src.core.location_markers import (
-    InvalidLocationQrError,
-    LocationMarker,
-    LocationMarkerNotFoundError,
-    resolve_location_qr,
-)
 from src.models.schemas import ErrorCode, MapNodeType
 
 _CONFIRMABLE_NODE_TYPES = frozenset(
@@ -66,32 +60,8 @@ class LocationService:
                     details={"slot_id": node_id},
                 )
 
-        await self._persist_location(user_id, node_id)
+        await self._persist_verified_location(user_id, node_id)
         return node_id
-
-    async def confirm_scanned_location(self, user_id: str, qr_payload: str) -> LocationMarker:
-        try:
-            marker = resolve_location_qr(qr_payload)
-        except InvalidLocationQrError as error:
-            raise LocationError(ErrorCode.INVALID_LOCATION_QR, str(error)) from error
-        except LocationMarkerNotFoundError as error:
-            raise LocationError(ErrorCode.LOCATION_MARKER_NOT_FOUND, str(error)) from error
-
-        node = await self.session.get(MapNode, marker.node_id)
-        if node is None:
-            raise LocationError(
-                ErrorCode.LOCATION_NODE_NOT_FOUND,
-                f"Location node {marker.node_id} was not found",
-                details={"node_id": marker.node_id},
-            )
-        if node.floor_id != marker.floor_id or node.type is not MapNodeType.AISLE or node.id != marker.node_id:
-            raise LocationError(
-                ErrorCode.LOCATION_NODE_NOT_FOUND,
-                "Location marker does not match a canonical aisle node",
-                details={"marker_id": marker.marker_id, "node_id": marker.node_id},
-            )
-        await self._persist_verified_location(user_id, marker)
-        return marker
 
     async def get_current_location(self, user_id: str) -> str | None:
         user = await self.session.get(ParkingUser, user_id)
@@ -111,15 +81,10 @@ class LocationService:
             self._raise_user_not_found(user_id)
         return user
 
-    async def _persist_location(self, user_id: str, node_id: str) -> None:
-        user = await self._lock_user(user_id)
-        user.current_node_id = node_id
-        await self.session.flush()
-
     async def _persist_verified_location(
         self,
         user_id: str,
-        marker: LocationMarker,
+        node_id: str,
     ) -> None:
         verified_at = self.clock()
         if verified_at.utcoffset() != timedelta(0):
@@ -128,10 +93,9 @@ class LocationService:
                 "Location clock must return a timezone-aware UTC datetime",
             )
         user = await self._lock_user(user_id)
-        user.current_node_id = marker.node_id
-        user.verified_node_id = marker.node_id
+        user.current_node_id = node_id
+        user.verified_node_id = node_id
         user.verified_at = verified_at
-        user.verified_marker_id = marker.marker_id
         await self.session.flush()
 
     @staticmethod

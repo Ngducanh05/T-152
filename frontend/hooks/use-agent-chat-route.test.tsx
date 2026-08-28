@@ -45,7 +45,6 @@ describe("Agent structured UI effects", () => {
     };
     const api = {
       confirmLocation: vi.fn(),
-      scanLocation: vi.fn(),
       recommend: vi.fn(),
     createReservation: vi.fn(),
     cancelReservation: vi.fn(),

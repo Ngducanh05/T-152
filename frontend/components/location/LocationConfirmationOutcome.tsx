@@ -7,7 +7,7 @@ interface LocationConfirmationOutcomeProps {
   locationId: FloorScopedId;
   activeReservation: ParkingReservation | null;
   pending: boolean;
-  onConfirmParking: () => Promise<void> | void;
+  onConfirmParking: () => Promise<unknown> | unknown;
 }
 
 export function LocationConfirmationOutcome({

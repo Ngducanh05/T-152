@@ -20,7 +20,6 @@ def _route() -> RouteResult:
 
 def test_ui_action_type_allowlist_is_stable():
     assert {action_type.value for action_type in ChatUIActionType} == {
-        "SCAN_LOCATION_QR",
         "SELECT_LOCATION",
         "SELECT_PARKING_PREFERENCE",
         "SELECT_SLOT",
@@ -33,7 +32,7 @@ def test_ui_action_type_allowlist_is_stable():
     }
 
 
-def test_missing_location_offers_qr_then_manual_location_picker():
+def test_missing_location_offers_manual_location_picker_only():
     actions = derive_chat_ui_actions(
         current_location=None,
         recommended_slot_ids=["F1-D01"],
@@ -42,16 +41,22 @@ def test_missing_location_offers_qr_then_manual_location_picker():
         successful_tool_names={"recommend_parking_slot"},
     )
 
-    assert [action.type for action in actions] == [
-        ChatUIActionType.SCAN_LOCATION_QR,
-        ChatUIActionType.SELECT_LOCATION,
-    ]
-    assert [action.style.value for action in actions] == ["primary", "secondary"]
-    assert [action.label for action in actions] == [
-        "Quét QR vị trí",
-        "Chọn vị trí thủ công",
-    ]
+    assert [action.type for action in actions] == [ChatUIActionType.SELECT_LOCATION]
+    assert [action.style.value for action in actions] == ["secondary"]
+    assert [action.label for action in actions] == ["Xác nhận vị trí"]
     assert all(action.payload == {} for action in actions)
+
+
+def test_preferences_hide_accessible_when_the_map_has_no_accessible_slots():
+    actions = derive_chat_ui_actions(
+        current_location="F1-ENTRANCE",
+        recommended_slot_ids=[],
+        selected_slot=None,
+        intent=None,
+        successful_tool_names=set(),
+        supports_accessible_parking=False,
+    )
+    assert [action.payload.get("preference") for action in actions] == ["EV", "NEAR_ELEVATOR"]
 
 
 def test_f2_and_f3_recommendations_are_canonical_ui_actions():

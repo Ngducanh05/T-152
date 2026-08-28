@@ -169,29 +169,11 @@ export interface Location {
   node_id: FloorScopedId;
   verified_node_id?: FloorScopedId | null;
   verified_at?: string | null;
-  verified_marker_id?: string | null;
 }
 
 export interface ConfirmLocationRequest {
   user_id: EntityId;
   node_id: FloorScopedId;
-}
-
-export interface ScanLocationRequest {
-  user_id: EntityId;
-  qr_payload: string;
-}
-
-export interface ScannedLocation {
-  user_id: EntityId;
-  marker_id: string;
-  node_id: FloorScopedId;
-  floor_id: FloorId;
-  zone_id: ZoneId;
-  label: string;
-  verified_node_id?: FloorScopedId | null;
-  verified_at?: string | null;
-  verified_marker_id?: string | null;
 }
 
 export interface RecommendationRequest {
@@ -313,7 +295,6 @@ interface ChatUiActionBase<TType extends string, TPayload> {
 }
 
 export type ChatUiAction =
-  | ChatUiActionBase<"SCAN_LOCATION_QR", Record<string, never>>
   | ChatUiActionBase<"SELECT_LOCATION", { node_id?: FloorScopedId }>
   | ChatUiActionBase<
       "SELECT_PARKING_PREFERENCE",

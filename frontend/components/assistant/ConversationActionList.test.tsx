@@ -49,7 +49,7 @@ describe("ConversationActionList", () => {
     expect(onAction).toHaveBeenCalledWith("agent-1", action);
   });
 
-  it("disables a consumed action with a textual status", () => {
+  it("removes a successfully consumed action", () => {
     render(
       <ConversationActionList
         message={message({ consumedActionIds: [action.id] })}
@@ -58,9 +58,7 @@ describe("ConversationActionList", () => {
       />,
     );
 
-    const button = screen.getByRole("button", { name: /đã sử dụng/ });
-    expect(button).toBeDisabled();
-    expect(button).toHaveTextContent("Đã dùng");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("renders at most five actions", () => {

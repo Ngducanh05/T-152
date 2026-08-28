@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { AgentComposer } from "@/components/assistant/AgentComposer";
 import { ConversationActionList } from "@/components/assistant/ConversationActionList";
+import { AgentMessageContent } from "@/components/assistant/AgentMessageContent";
 import {
   parkingIdentityFromProfile,
   useAuth,
@@ -11,7 +12,7 @@ import {
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { LocationPicker } from "@/components/location/LocationPicker";
-import { LocationQrScanner } from "@/components/location/LocationQrScanner";
+import { LocationConfirmationOutcome } from "@/components/location/LocationConfirmationOutcome";
 import { AdjacentSlotObservation } from "@/components/parking/AdjacentSlotObservation";
 import { RewardSummaryCard } from "@/components/rewards/RewardSummaryCard";
 import {
@@ -54,7 +55,6 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
 
   const showLocationPicker =
     manualLocationPicker || workflow.requestedPanel?.kind === "location";
-  const showQrScanner = workflow.requestedPanel?.kind === "qr-location";
   const showReportDialog =
     manualReportDialog ||
     workflow.requestedPanel?.kind === "wrong-parking-report";
@@ -73,22 +73,16 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
   const hasPriorityContent = Boolean(
     (data.error && !data.loading) ||
       workflow.notice ||
+      workflow.lastConfirmedLocationId ||
       data.activeReservation ||
       data.activeSession,
   );
+  const hasMatchingLocationOutcome =
+    workflow.lastConfirmedLocationId === data.activeReservation?.slot_id;
 
   function closeLocationPicker() {
     setManualLocationPicker(false);
     workflow.clearRequestedPanel();
-  }
-
-  function closeQrScanner() {
-    workflow.clearRequestedPanel();
-  }
-
-  function openManualLocationFromQr() {
-    workflow.clearRequestedPanel();
-    setManualLocationPicker(true);
   }
 
   function closeReportDialog() {
@@ -213,6 +207,14 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
                   {workflow.notice}
                 </p>
               )}
+              {workflow.lastConfirmedLocationId && (
+                <LocationConfirmationOutcome
+                  locationId={workflow.lastConfirmedLocationId}
+                  activeReservation={data.activeReservation}
+                  pending={workflow.pending === "confirm-parking"}
+                  onConfirmParking={workflow.confirmParking}
+                />
+              )}
 
               {data.activeReservation && (
                 <article className="conversation-state-card reservation-state-card" aria-label="Chỗ đỗ đã giữ">
@@ -221,19 +223,20 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
                 <small>CHỖ ĐỖ ĐÃ GIỮ</small>
                 <h2>{formatParkingLocation(data.activeReservation.slot_id)}</h2>
                 <p>
-                  Để hoàn tất phiên đỗ, ParkSmart cần một mã QR vị trí hợp lệ
-                  gần ô đã giữ.
+                  Đến đúng ô đã giữ, xác nhận vị trí hiện tại rồi hoàn tất đỗ xe.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => requireVehicle(() => void workflow.confirmParking())}
-                disabled={workflow.pending === "confirm-parking"}
-              >
-                {workflow.pending === "confirm-parking"
-                  ? "Đang xác nhận…"
-                  : "Xác nhận đã đỗ"}
-              </button>
+              {!hasMatchingLocationOutcome && (
+                <button
+                  type="button"
+                  onClick={() => requireVehicle(() => void workflow.confirmParking())}
+                  disabled={workflow.pending === "confirm-parking"}
+                >
+                  {workflow.pending === "confirm-parking"
+                    ? "Đang xác nhận…"
+                    : "Xác nhận đã đỗ"}
+                </button>
+              )}
                 </article>
               )}
 
@@ -292,7 +295,11 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
           {workflow.messages.map((message) => (
             <article key={message.id} className={`chat-message message-${message.role}`}>
               <div className="message-card">
-                <p>{message.text}</p>
+                {message.role === "agent" ? (
+                  <AgentMessageContent content={message.text} />
+                ) : (
+                  <p>{message.text}</p>
+                )}
                 <small>{message.role === "agent" ? "ParkSmart AI" : "Bạn"}</small>
               </div>
               {message.role === "agent" && (
@@ -376,15 +383,6 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
           errorMessage={workflow.notice}
           onClose={closeLocationPicker}
           onConfirm={workflow.confirmLocation}
-        />
-      )}
-      {showQrScanner && (
-        <LocationQrScanner
-          pending={workflow.pending === "qr-location"}
-          errorMessage={workflow.notice}
-          onClose={closeQrScanner}
-          onScan={workflow.scanLocationQr}
-          onManualFallback={openManualLocationFromQr}
         />
       )}
       {showReportDialog && (

@@ -91,7 +91,6 @@ class LocationStateResponse(BaseModel):
     node_id: str
     verified_node_id: str | None = None
     verified_at: AwareDatetime | None = None
-    verified_marker_id: str | None = None
 
 
 class UserParkingStateResponse(BaseModel):
@@ -267,7 +266,6 @@ async def user_parking_state(
                     node_id=user.current_node_id,
                     verified_node_id=user.verified_node_id,
                     verified_at=user.verified_at,
-                    verified_marker_id=user.verified_marker_id,
                 )
                 if user.current_node_id is not None
                 else None

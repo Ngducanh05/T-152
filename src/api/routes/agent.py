@@ -17,6 +17,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from sqlalchemy import select
 
 from src.agents.context import AgentRuntimeContext
 from src.agents.tools import PARKING_TOOLS
@@ -33,6 +34,7 @@ from src.core.agent_quota import (
     AgentQuotaService,
 )
 from src.core.database import get_session_factory
+from src.core.db_models import ParkingSlot
 from src.core.parking_session import (
     ParkedVehicle,
     ParkingSessionError,
@@ -481,6 +483,9 @@ async def chat(
         recommended_slot_ids=(recommendation_ids if "recommend_parking_slot" in successful_tools else []),
         route=(result.get("route") or None if "get_route" in successful_tools else None),
     )
+    supports_accessible_parking = await session.scalar(
+        select(ParkingSlot.id).where(ParkingSlot.is_accessible.is_(True)).limit(1)
+    ) is not None
     response.ui_actions.extend(
         derive_chat_ui_actions(
             current_location=response.current_location,
@@ -495,6 +500,7 @@ async def chat(
                 else (None if fresh_find_requested else result.get("active_session_id") or None)
             ),
             route=response.route,
+            supports_accessible_parking=supports_accessible_parking,
         )
     )
     logger.info(

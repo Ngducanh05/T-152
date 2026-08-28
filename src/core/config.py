@@ -20,8 +20,8 @@ class Settings(BaseSettings):
         default=600,
         gt=0,
         description=(
-            "Maximum age of a trusted location QR scan accepted for parking "
-            "confirmation; the conservative default is 10 minutes."
+            "Maximum age of a user-confirmed parking location accepted for "
+            "arrival and parking confirmation; the conservative default is 10 minutes."
         ),
     )
     adjacent_observation_reward_points: int = Field(default=10, ge=0)

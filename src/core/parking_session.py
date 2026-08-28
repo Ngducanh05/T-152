@@ -298,20 +298,20 @@ class ParkingSessionService:
         reason = None
         if user.verified_node_id is None or user.verified_at is None:
             reason = "missing"
-        elif user.verified_node_id != slot.node_id:
-            reason = "wrong_node"
+        elif user.verified_node_id != slot.id:
+            reason = "wrong_location"
         elif user.verified_at < expires_before:
             reason = "expired"
         if reason is None:
             return
         raise ParkingSessionError(
             ErrorCode.PARKING_ARRIVAL_NOT_VERIFIED,
-            "A fresh QR verification near the reserved slot is required.",
+            "A fresh confirmation at the reserved parking slot is required.",
             details={
                 "reason": reason,
                 "slot_id": slot.id,
-                "required_node_id": slot.node_id,
-                "verified_node_id": user.verified_node_id,
+                "required_location": slot.id,
+                "verified_location": user.verified_node_id,
                 "verified_at": user.verified_at.isoformat() if user.verified_at else None,
                 "verification_ttl_seconds": (self.settings.parking_arrival_verification_ttl_seconds),
             },

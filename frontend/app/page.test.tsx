@@ -22,20 +22,6 @@ vi.mock("@/hooks/use-parking-workflow", async (importOriginal) => {
 vi.mock("@/components/assistant/AgentComposer", () => ({
   AgentComposer: () => <div data-testid="agent-composer" />,
 }));
-vi.mock("@/components/location/LocationQrScanner", () => ({
-  LocationQrScanner: ({
-    onClose,
-    onManualFallback,
-  }: {
-    onClose: () => void;
-    onManualFallback: () => void;
-  }) => (
-    <div data-testid="location-qr-scanner">
-      <button type="button" onClick={onClose}>Đóng quét QR</button>
-      <button type="button" onClick={onManualFallback}>Chọn vị trí thủ công</button>
-    </div>
-  ),
-}));
 vi.mock("@/components/auth/AuthProvider", () => ({
   useAuth: () => ({
     profile: {
@@ -81,6 +67,7 @@ function workflowFixture(): ParkingWorkflow {
     selectedSlotId: null,
     activeRoute: null,
     currentLocationId: "F1-ENTRANCE",
+    lastConfirmedLocationId: null,
     lastToolNames: [],
     messages: [{
       id: "welcome",
@@ -98,15 +85,14 @@ function workflowFixture(): ParkingWorkflow {
     selectCandidate: vi.fn(),
     clearRoute: vi.fn(),
     confirmLocation: vi.fn(async () => true),
-    scanLocationQr: vi.fn(async () => true),
-    requestRecommendations: vi.fn(async () => undefined),
+    requestRecommendations: vi.fn(async () => true),
     reserveSelected: vi.fn(async () => undefined),
-    reserveSelectedAndRoute: vi.fn(async () => undefined),
-    cancelActiveReservation: vi.fn(async () => undefined),
+    reserveSelectedAndRoute: vi.fn(async () => true),
+    cancelActiveReservation: vi.fn(async () => true),
     requestRouteToSelected: vi.fn(async () => undefined),
-    confirmParking: vi.fn(async () => undefined),
+    confirmParking: vi.fn(async () => true),
     findVehicleAndRoute: vi.fn(async () => undefined),
-    completeSession: vi.fn(async () => undefined),
+    completeSession: vi.fn(async () => true),
     updateAdjacentSlotStatus: vi.fn(async () => null),
     resetDemo: vi.fn(async () => undefined),
     sendAgentMessage: vi.fn(async () => null),
@@ -168,6 +154,29 @@ describe("user chat page", () => {
     ).toBeVisible();
   });
 
+  it("shows the manual location confirmation outcome after a successful confirmation", () => {
+    const workflow = workflowFixture();
+    workflow.lastConfirmedLocationId = "F1-D01";
+    mocks.useParkSmartData.mockReturnValue({
+      map: canonicalMap,
+      slots: canonicalMap.slots,
+      status: parkingStatus,
+      currentLocation,
+      activeReservation: null,
+      activeSession: null,
+      lastUpdatedAt: null,
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+    mocks.useParkingWorkflow.mockReturnValue(workflow);
+    render(<Home />);
+    expect(screen.getByRole("status", { name: "Kết quả xác nhận vị trí" })).toHaveTextContent(
+      "Đã cập nhật vị trí hiện tại",
+    );
+  });
+
   it("does not render ParkingMap or operational summaries and shows welcome actions", async () => {
     const user = userEvent.setup();
     const workflow = workflowFixture();
@@ -201,39 +210,9 @@ describe("user chat page", () => {
     );
   });
 
-  it("renders and closes the QR scanner from a QR location panel request", async () => {
-    const user = userEvent.setup();
+  it("renders the manual LocationPicker without any QR scanner", () => {
     const workflow = workflowFixture();
-    workflow.requestedPanel = { kind: "qr-location" };
-    mocks.useParkSmartData.mockReturnValue({
-      map: canonicalMap,
-      slots: canonicalMap.slots,
-      status: parkingStatus,
-      currentLocation,
-      activeReservation: null,
-      activeSession: null,
-      lastUpdatedAt: null,
-      loading: false,
-      refreshing: false,
-      error: null,
-      refresh: vi.fn(),
-    });
-    mocks.useParkingWorkflow.mockReturnValue(workflow);
-    const view = render(<Home />);
-
-    expect(screen.getByTestId("location-qr-scanner")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Đóng quét QR" }));
-    expect(workflow.clearRequestedPanel).toHaveBeenCalledOnce();
-
-    workflow.requestedPanel = null;
-    view.rerender(<Home />);
-    expect(screen.queryByTestId("location-qr-scanner")).not.toBeInTheDocument();
-  });
-
-  it("opens the manual LocationPicker from QR fallback", async () => {
-    const user = userEvent.setup();
-    const workflow = workflowFixture();
-    workflow.requestedPanel = { kind: "qr-location" };
+    workflow.requestedPanel = { kind: "location" };
     mocks.useParkSmartData.mockReturnValue({
       map: canonicalMap,
       slots: canonicalMap.slots,
@@ -250,12 +229,10 @@ describe("user chat page", () => {
     mocks.useParkingWorkflow.mockReturnValue(workflow);
 
     render(<Home />);
-    await user.click(screen.getByRole("button", { name: "Chọn vị trí thủ công" }));
-
-    expect(workflow.clearRequestedPanel).toHaveBeenCalledOnce();
     expect(
       screen.getByRole("dialog", { name: "Xác nhận vị trí hiện tại" }),
     ).toBeVisible();
+    expect(screen.queryByTestId("location-qr-scanner")).not.toBeInTheDocument();
   });
 
   it("confirms arrival directly instead of opening the location picker", async () => {
