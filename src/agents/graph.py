@@ -14,7 +14,7 @@ from src.agents.nodes.assistant import build_assistant_node
 from src.agents.nodes.observe_tool import observe_tool_result
 from src.agents.nodes.prepare_context import prepare_context
 from src.agents.state import AgentState
-from src.agents.tools import PARKING_TOOLS
+from src.agents.tools import AGENT_TOOLS
 from src.services.llm import get_llm
 
 MAX_AGENT_STEPS = 8
@@ -73,7 +73,7 @@ def build_graph(
     if max_steps < 1:
         raise ValueError("max_steps must be at least 1")
 
-    graph_tools = tuple(PARKING_TOOLS if tools is None else tools)
+    graph_tools = tuple(AGENT_TOOLS if tools is None else tools)
     model_provider = _lazy_bound_model_provider(model, graph_tools)
     graph = StateGraph(AgentState, context_schema=AgentRuntimeContext)
     graph.add_node("prepare_context", prepare_context)
