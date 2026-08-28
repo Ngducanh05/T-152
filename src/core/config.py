@@ -81,6 +81,35 @@ class Settings(BaseSettings):
         description="Comma-separated frontend origins",
     )
     log_level: str = "INFO"
+    log_format: str = "text"
+    observability_enabled: bool = False
+    otel_service_name: str = "parksmart-backend"
+    otel_service_version: str = "0.1.0"
+    otel_exporter_otlp_protocol: str = "http/protobuf"
+    otel_exporter_otlp_endpoint: str | None = None
+    otel_exporter_otlp_headers: str | None = Field(default=None, repr=False)
+    otel_traces_exporter: str = "otlp"
+    otel_metrics_exporter: str = "otlp"
+    otel_logs_exporter: str = "none"
+    otel_traces_sampler: str = "parentbased_traceidratio"
+    otel_traces_sampler_arg: float = Field(default=1.0, ge=0.0, le=1.0)
+    otel_metric_export_interval: int = Field(default=60000, gt=0)
+    service_version: str | None = None
+    git_commit_sha: str | None = None
+
+    langsmith_api_key: str | None = Field(
+        default=None,
+        repr=False,
+        validation_alias=AliasChoices("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY"),
+    )
+    langsmith_project: str = Field(
+        default="P152-production",
+        validation_alias=AliasChoices("LANGSMITH_PROJECT", "LANGCHAIN_PROJECT"),
+    )
+    langsmith_tracing: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"),
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -96,6 +125,14 @@ class Settings(BaseSettings):
         if not value.startswith("postgresql+asyncpg://"):
             raise ValueError("DATABASE_URL must use postgresql+asyncpg://")
         return value
+
+    @field_validator("log_format")
+    @classmethod
+    def log_format_must_be_supported(cls, value: str) -> str:
+        normalized = value.lower()
+        if normalized not in {"text", "json"}:
+            raise ValueError("LOG_FORMAT must be text or json")
+        return normalized
 
     @model_validator(mode="after")
     def production_configuration_must_fail_fast(self) -> "Settings":
@@ -119,6 +156,15 @@ class Settings(BaseSettings):
             failures.append("SUPABASE_REPORT_EVIDENCE_BUCKET is required")
         if (self.agent_enabled or self.speech_enabled) and not (self.llm_api_key or "").strip():
             failures.append("LLM_API_KEY is required")
+        if self.observability_enabled:
+            if not (self.otel_exporter_otlp_endpoint or "").strip():
+                failures.append("OTEL_EXPORTER_OTLP_ENDPOINT is required")
+            if not (self.otel_exporter_otlp_headers or "").strip():
+                failures.append("OTEL_EXPORTER_OTLP_HEADERS is required")
+            if self.otel_traces_sampler.lower() != "parentbased_traceidratio":
+                failures.append("OTEL_TRACES_SAMPLER is unsupported")
+        if self.langsmith_tracing and not (self.langsmith_api_key or "").strip():
+            failures.append("LANGSMITH_API_KEY is required")
 
         if failures:
             raise ValueError(f"Unsafe production configuration: {'; '.join(failures)}")

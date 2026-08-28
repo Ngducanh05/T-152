@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from langgraph.checkpoint.memory import InMemorySaver
+from opentelemetry import trace
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
@@ -18,7 +19,8 @@ from starlette.responses import Response
 from src.agents.graph import build_graph
 from src.api.routes import api_router
 from src.core.config import Settings, get_settings
-from src.core.logging import configure_logging
+from src.core.logging import bind_request_id, configure_logging, reset_request_id
+from src.core.observability import ObservabilityRuntime, configure_langsmith
 from src.core.reservation_expiry import run_reservation_expiry_worker
 from src.services.auth_service import SupabaseTokenVerifier
 
@@ -73,7 +75,15 @@ def create_app(
     agent_override: Any | None = None,
 ) -> FastAPI:
     application_settings = settings or get_settings()
-    configure_logging(application_settings.log_level)
+    configure_logging(
+        application_settings.log_level,
+        application_settings.log_format,
+        service=application_settings.otel_service_name,
+        environment=application_settings.environment,
+        service_version=application_settings.service_version or application_settings.otel_service_version,
+    )
+    configure_langsmith(application_settings)
+    observability = ObservabilityRuntime(application_settings)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
@@ -118,6 +128,7 @@ def create_app(
             cleanup_tasks = list(application.state.agent_thread_cleanup_tasks)
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+            application.state.observability.shutdown()
 
     application = FastAPI(
         title=application_settings.app_name,
@@ -126,6 +137,7 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.settings = application_settings
+    application.state.observability = observability
 
     application.add_middleware(
         CORSMiddleware,
@@ -143,35 +155,51 @@ def create_app(
         request_id = _resolve_request_id(request.headers.get(REQUEST_ID_HEADER))
         request.state.request_id = request_id
         started_at = perf_counter()
-
+        request_id_token = bind_request_id(request_id)
         try:
-            response = await call_next(request)
-        except Exception as error:  # noqa: BLE001 - HTTP boundary returns safe envelope
-            logger.error(
-                "request_failed request_id=%s method=%s path=%s exception_type=%s",
-                request_id,
-                request.method,
-                request.url.path,
-                type(error).__name__,
-            )
-            response = _error_response(
-                request,
-                status_code=500,
-                code="INTERNAL_SERVER_ERROR",
-                message="An unexpected server error occurred.",
-            )
+            with observability.start_http_server_span(
+                method=request.method,
+                path=request.url.path,
+                headers=request.headers,
+            ) as span:
+                try:
+                    response = await call_next(request)
+                except Exception as error:  # noqa: BLE001 - HTTP boundary returns safe envelope
+                    logger.error(
+                        "request_failed request_id=%s method=%s path=%s exception_type=%s",
+                        request_id,
+                        request.method,
+                        request.url.path,
+                        type(error).__name__,
+                    )
+                    if span is not None:
+                        span.set_status(trace.Status(trace.StatusCode.ERROR))
+                        span.set_attribute("error.type", type(error).__name__)
+                    response = _error_response(
+                        request,
+                        status_code=500,
+                        code="INTERNAL_SERVER_ERROR",
+                        message="An unexpected server error occurred.",
+                    )
 
-        duration_ms = (perf_counter() - started_at) * 1000
-        response.headers[REQUEST_ID_HEADER] = request_id
-        logger.info(
-            "request_completed request_id=%s method=%s path=%s status=%s duration_ms=%.2f",
-            request_id,
-            request.method,
-            request.url.path,
-            response.status_code,
-            duration_ms,
-        )
-        return response
+                duration_ms = (perf_counter() - started_at) * 1000
+                if span is not None:
+                    span.set_attribute("http.response.status_code", response.status_code)
+                    span.set_attribute("parksmart.request_id", request_id)
+                response.headers[REQUEST_ID_HEADER] = request_id
+                if trace_id := observability.trace_id_for_span(span):
+                    response.headers["X-Trace-ID"] = trace_id
+                logger.info(
+                    "request_completed request_id=%s method=%s path=%s status=%s duration_ms=%.2f",
+                    request_id,
+                    request.method,
+                    request.url.path,
+                    response.status_code,
+                    duration_ms,
+                )
+                return response
+        finally:
+            reset_request_id(request_id_token)
 
     @application.exception_handler(StarletteHTTPException)
     async def http_exception_handler(
