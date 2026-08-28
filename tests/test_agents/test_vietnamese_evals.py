@@ -8,6 +8,7 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool, tool
+from langgraph.checkpoint.memory import InMemorySaver
 
 from eval.vietnamese_agent_cases import VIETNAMESE_AGENT_EVAL_CASES
 from src.agents.context import AgentRuntimeContext
@@ -146,6 +147,37 @@ async def cancel_reservation(reservation_id: str) -> dict[str, object]:
     )
 
 
+@tool
+async def get_reward_configuration() -> dict[str, object]:
+    """Return deterministic ParkSmart Points program rules."""
+    return _success(
+        "get_reward_configuration",
+        {},
+        {
+            "adjacent_observation_reward_points": 10,
+            "wrong_parking_report_reward_points": 20,
+            "contribution_daily_points_limit": 100,
+        },
+    )
+
+
+@tool
+async def get_my_reward_summary() -> dict[str, object]:
+    """Return a deterministic ParkSmart Points balance for the trusted user."""
+    return _success(
+        "get_my_reward_summary",
+        {},
+        {
+            "available_points": 30,
+            "pending_points": 10,
+            "verified_contributions": 3,
+            "daily_pending_points": 10,
+            "daily_earned_points": 20,
+            "daily_limit_points": 100,
+        },
+    )
+
+
 EVAL_TOOLS: tuple[BaseTool, ...] = (
     get_parking_status,
     get_parking_slot_status,
@@ -156,6 +188,8 @@ EVAL_TOOLS: tuple[BaseTool, ...] = (
     confirm_parking,
     find_parked_vehicle,
     cancel_reservation,
+    get_reward_configuration,
+    get_my_reward_summary,
 )
 
 
@@ -226,6 +260,16 @@ async def test_vietnamese_intent_eval_is_deterministic(case):
             "Khu D còn 5 ô AVAILABLE; tôi đã chỉ đường tới ô F1-D01 đang trống. "
             "Bạn có muốn đỗ xe ở ô F1-D01 không?"
         )
+    elif case.name == "reject_other_user_points_request":
+        final_text = (
+            "Tôi không thể tiết lộ điểm của người dùng khác; "
+            "tôi chỉ có thể cho bạn biết điểm của chính bạn."
+        )
+    elif case.name == "redemption_not_available_yet":
+        final_text = (
+            "ParkSmart Points hiện đang ở giai đoạn tích lũy; "
+            "bản beta này chưa mở tính năng đổi ưu đãi."
+        )
     else:
         final_text = "Đã xử lý yêu cầu bằng dữ liệu từ công cụ."
     responses.append(AIMessage(content=final_text))
@@ -262,6 +306,16 @@ async def test_vietnamese_intent_eval_is_deterministic(case):
     elif case.name == "reject_direct_database_bypass":
         assert EVAL_CALLS == []
         assert "không thể" in final_text
+    elif case.name == "reward_configuration_query":
+        assert result["tool_result"]["data"]["wrong_parking_report_reward_points"] == 20
+    elif case.name == "my_reward_summary_query":
+        assert result["tool_result"]["data"]["available_points"] == 30
+    elif case.name == "reject_other_user_points_request":
+        assert EVAL_CALLS == []
+        assert "không thể" in final_text
+    elif case.name == "redemption_not_available_yet":
+        assert EVAL_CALLS == []
+        assert "chưa mở" in final_text
 
 
 @pytest.mark.asyncio
@@ -358,6 +412,46 @@ async def test_tool_exception_does_not_create_fake_slot_or_route():
     assert "selected_slot" not in result
     assert result["recommended_slot_ids"] == []
     assert "path" not in result["tool_result"]
+
+
+@pytest.mark.asyncio
+async def test_intent_does_not_leak_into_a_later_turn_without_a_tool_call():
+    """Regression test: prepare_context() resets ``intent`` every turn, so a
+    turn that answers without calling a tool (e.g. a ParkSmart Points/refusal
+    reply) never inherits the previous turn's intent — which would otherwise
+    surface as a wrong UI action (see derive_chat_ui_actions)."""
+    checkpointer = InMemorySaver()
+    config = {"configurable": {"thread_id": "USER-001:THREAD-INTENT-001"}}
+
+    first_turn_graph = build_graph(
+        EvalScriptedModel(
+            responses=[
+                _tool_call("get_parking_status", {}, 1),
+                AIMessage(content="Còn 7 chỗ trống."),
+            ]
+        ),
+        tools=EVAL_TOOLS,
+        checkpointer=checkpointer,
+    )
+    first = await first_turn_graph.ainvoke(
+        {"messages": [HumanMessage(content="Còn bao nhiêu chỗ trống?")]},
+        config=config,
+        context=_runtime(),
+    )
+    assert first["intent"] == "GET_PARKING_STATUS"
+
+    second_turn_graph = build_graph(
+        EvalScriptedModel(responses=[AIMessage(content="Không có gì, chào bạn!")]),
+        tools=EVAL_TOOLS,
+        checkpointer=checkpointer,
+    )
+    second = await second_turn_graph.ainvoke(
+        {"messages": [HumanMessage(content="Cảm ơn nhé")]},
+        config=config,
+        context=_runtime(),
+    )
+
+    assert second["intent"] == ""
 
 
 _LIVE_LLM_ENABLED = os.getenv("RUN_LIVE_LLM_EVAL") == "1" and bool(
