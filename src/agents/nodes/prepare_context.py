@@ -34,9 +34,13 @@ def prepare_context(
         "current_location": context.current_location or state.get("current_location", ""),
         "missing_fields": list(dict.fromkeys(missing_fields)),
         # Structured tool output is scoped to this invocation. Conversation
-        # context such as the confirmed location remains durable.
+        # context such as the confirmed location remains durable. ``intent``
+        # is scoped too: without a fresh tool call this turn, a stale intent
+        # from an earlier turn would otherwise leak into this response and
+        # could trigger the wrong UI action.
         "recommended_slot_ids": [],
         "route": None,
         "agent_step_count": 0,
         "error": "",
+        "intent": "",
     }

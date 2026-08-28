@@ -74,6 +74,8 @@ def _intent_for_tool(
         "find_parked_vehicle": "FIND_MY_CAR",
         "cancel_reservation": "CANCEL_RESERVATION",
         "complete_parking_session": "COMPLETE_PARKING_SESSION",
+        "get_reward_configuration": "GET_REWARD_INFO",
+        "get_my_reward_summary": "GET_REWARD_SUMMARY",
     }.get(tool_name)
 
 

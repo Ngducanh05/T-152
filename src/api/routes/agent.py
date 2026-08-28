@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.agents.context import AgentRuntimeContext
-from src.agents.tools import PARKING_TOOLS
+from src.agents.tools import AGENT_TOOLS
 from src.api.dependencies import (
     ParkingUserDependency,
     SessionDependency,
@@ -40,7 +40,7 @@ router = APIRouter(prefix="/agent", tags=["Agent"])
 logger = logging.getLogger(__name__)
 
 _SAFE_TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-_REGISTERED_TOOL_NAMES = frozenset(agent_tool.name for agent_tool in PARKING_TOOLS)
+_REGISTERED_TOOL_NAMES = frozenset(agent_tool.name for agent_tool in AGENT_TOOLS)
 
 
 @dataclass(slots=True)

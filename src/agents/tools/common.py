@@ -15,6 +15,7 @@ from src.core.location import LocationError
 from src.core.parking_session import ParkingSessionError
 from src.core.parking_state import ParkingStateError
 from src.core.recommendation import RecommendationError
+from src.core.reward import RewardError
 from src.core.routing import RoutingError
 from src.models.schemas import ErrorCode
 
@@ -29,6 +30,7 @@ _DOMAIN_ERRORS = (
     ParkingSessionError,
     ParkingStateError,
     RecommendationError,
+    RewardError,
     RoutingError,
 )
 _LOGGER = logging.getLogger(__name__)
