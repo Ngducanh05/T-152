@@ -1,8 +1,5 @@
 """Validated, user-confirmed canonical parking locations."""
 
-from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,14 +25,8 @@ class LocationError(DomainError):
 class LocationService:
     """Validate and persist user-confirmed canonical map locations."""
 
-    def __init__(
-        self,
-        session: AsyncSession,
-        *,
-        clock: Callable[[], datetime] | None = None,
-    ) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self.session = session
-        self.clock = clock or (lambda: datetime.now(UTC))
 
     async def confirm_location(self, user_id: str, node_id: str) -> str:
         node = await self.session.get(MapNode, node_id)
@@ -60,7 +51,7 @@ class LocationService:
                     details={"slot_id": node_id},
                 )
 
-        await self._persist_verified_location(user_id, node_id)
+        await self._persist_current_location(user_id, node_id)
         return node_id
 
     async def get_current_location(self, user_id: str) -> str | None:
@@ -81,21 +72,13 @@ class LocationService:
             self._raise_user_not_found(user_id)
         return user
 
-    async def _persist_verified_location(
+    async def _persist_current_location(
         self,
         user_id: str,
         node_id: str,
     ) -> None:
-        verified_at = self.clock()
-        if verified_at.utcoffset() != timedelta(0):
-            raise LocationError(
-                ErrorCode.INVALID_TRANSITION,
-                "Location clock must return a timezone-aware UTC datetime",
-            )
         user = await self._lock_user(user_id)
         user.current_node_id = node_id
-        user.verified_node_id = node_id
-        user.verified_at = verified_at
         await self.session.flush()
 
     @staticmethod

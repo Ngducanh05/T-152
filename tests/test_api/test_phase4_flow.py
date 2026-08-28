@@ -198,13 +198,6 @@ async def test_phase4_end_to_end_flow(phase4_api: Phase4Api):
     assert route_to_slot.status_code == 200
     assert route_to_slot.json()["data"]["path"][-1] == slot_id
 
-    arrival = await client.post(
-        "/api/v1/locations/confirm",
-        json={"user_id": "USER-001", "node_id": slot_id},
-    )
-    assert arrival.status_code == 200
-    assert arrival.json()["data"]["verified_node_id"] == slot_id
-
     confirmed = await client.post(
         "/api/v1/sessions/confirm-parking",
         json={

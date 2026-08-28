@@ -167,8 +167,6 @@ export interface ParkingSnapshot {
 export interface Location {
   user_id: EntityId;
   node_id: FloorScopedId;
-  verified_node_id?: FloorScopedId | null;
-  verified_at?: string | null;
 }
 
 export interface ConfirmLocationRequest {

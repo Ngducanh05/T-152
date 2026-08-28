@@ -54,29 +54,6 @@ def derive_chat_ui_actions(
     actions: list[ChatUIAction] = []
     canonical_selected_slot = selected_slot if is_slot_id(selected_slot) else None
 
-    if not current_location:
-        return [
-            _action(
-                action_id="select-location",
-                action_type=ChatUIActionType.SELECT_LOCATION,
-                label="Xác nhận vị trí",
-                style=ChatUIActionStyle.PRIMARY,
-            ),
-        ]
-
-    if "recommend_parking_slot" in successful_tool_names and recommended_slot_ids:
-        for slot_id in _slot_ids(recommended_slot_ids)[:3]:
-            actions.append(
-                _action(
-                    action_id=f"select-slot:{slot_id.lower()}",
-                    action_type=ChatUIActionType.SELECT_SLOT,
-                    label=f"Chọn {slot_id}",
-                    payload={"slot_id": slot_id},
-                    style=ChatUIActionStyle.PRIMARY,
-                )
-            )
-        return actions[:_MAX_UI_ACTIONS]
-
     if active_reservation_id:
         actions.append(
             _action(
@@ -115,6 +92,27 @@ def derive_chat_ui_actions(
                 ),
             ]
         )
+    elif not current_location:
+        return [
+            _action(
+                action_id="select-location",
+                action_type=ChatUIActionType.SELECT_LOCATION,
+                label="Xác nhận vị trí",
+                style=ChatUIActionStyle.PRIMARY,
+            ),
+        ]
+    elif "recommend_parking_slot" in successful_tool_names and recommended_slot_ids:
+        for slot_id in _slot_ids(recommended_slot_ids)[:3]:
+            actions.append(
+                _action(
+                    action_id=f"select-slot:{slot_id.lower()}",
+                    action_type=ChatUIActionType.SELECT_SLOT,
+                    label=f"Chọn {slot_id}",
+                    payload={"slot_id": slot_id},
+                    style=ChatUIActionStyle.PRIMARY,
+                )
+            )
+        return actions[:_MAX_UI_ACTIONS]
     elif (
         canonical_selected_slot is not None
         and route is not None

@@ -22,6 +22,7 @@ interface LocationPickerProps {
   currentLocationId: FloorScopedId | null;
   pending: boolean;
   errorMessage?: string | null;
+  description?: string;
   onClose: () => void;
   onConfirm: (nodeId: FloorScopedId) => Promise<boolean>;
 }
@@ -31,6 +32,7 @@ export function LocationPicker({
   currentLocationId,
   pending,
   errorMessage,
+  description,
   onClose,
   onConfirm,
 }: LocationPickerProps) {
@@ -116,8 +118,7 @@ export function LocationPicker({
         <p className="eyebrow green">VỊ TRÍ TRONG BÃI</p>
         <h2 id="location-picker-title">Xác nhận vị trí hiện tại</h2>
         <p id="location-picker-description">
-          Chọn nơi bạn đang đứng. ParkSmart không dùng GPS và việc chọn vị trí
-          không tự giữ ô hay xác nhận đã đỗ.
+          {description ?? "Chọn nơi bạn đang đứng. ParkSmart không dùng GPS."}
         </p>
 
         <div className="location-tap-list" role="group" aria-label="Địa điểm đặc biệt">

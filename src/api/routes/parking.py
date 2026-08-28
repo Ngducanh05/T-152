@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from src.api.dependencies import (
@@ -89,8 +89,6 @@ class LocationStateResponse(BaseModel):
 
     user_id: str
     node_id: str
-    verified_node_id: str | None = None
-    verified_at: AwareDatetime | None = None
 
 
 class UserParkingStateResponse(BaseModel):
@@ -264,8 +262,6 @@ async def user_parking_state(
                 LocationStateResponse(
                     user_id=user_id,
                     node_id=user.current_node_id,
-                    verified_node_id=user.verified_node_id,
-                    verified_at=user.verified_at,
                 )
                 if user.current_node_id is not None
                 else None

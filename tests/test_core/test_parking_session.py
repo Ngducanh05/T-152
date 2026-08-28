@@ -23,7 +23,6 @@ from src.core.db_models import (
     ParkingUser,
     Vehicle,
 )
-from src.core.location import LocationService
 from src.core.parking_session import ParkingSessionError, ParkingSessionService
 from src.core.parking_state import ParkingStateError, ParkingStateService
 from src.core.reservation import ReservationService
@@ -97,11 +96,6 @@ async def _reserve(
     )
     slot = await session.get(ParkingSlot, slot_id)
     assert slot is not None
-    verification_time = now or datetime.now(UTC)
-    await LocationService(
-        session,
-        clock=lambda: verification_time,
-    ).confirm_location(user_id, slot.id)
     return reservation
 
 
@@ -183,21 +177,19 @@ async def test_confirm_rejects_expired_reservation_without_occupying_slot(
 
 
 @pytest.mark.asyncio
-async def test_missing_verified_location_does_not_confirm_parking(
+async def test_confirm_parking_does_not_require_current_location(
     session_db: SessionDatabase,
 ):
     factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
     async with factory() as session, session.begin():
         reservation = await ReservationService(session).create_reservation("USER-001", "VEHICLE-001", "F2-C09")
-        with pytest.raises(ParkingSessionError) as error:
-            await ParkingSessionService(session).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
+        parking_session = await ParkingSessionService(session).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
 
-    assert error.value.code is ErrorCode.PARKING_ARRIVAL_NOT_VERIFIED
-    assert error.value.details["reason"] == "missing"
+    assert parking_session.slot_id == "F2-C09"
 
 
 @pytest.mark.asyncio
-async def test_manual_confirmation_at_another_slot_does_not_confirm_parking(
+async def test_unrelated_current_location_does_not_prevent_parking_confirmation(
     session_db: SessionDatabase,
 ):
     factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
@@ -205,39 +197,14 @@ async def test_manual_confirmation_at_another_slot_does_not_confirm_parking(
         reservation = await ReservationService(session).create_reservation(
             "USER-001", "VEHICLE-001", "F2-C09"
         )
-        await LocationService(session).confirm_location("USER-001", "F2-C08")
-        with pytest.raises(ParkingSessionError) as error:
-            await ParkingSessionService(session).confirm_parking(
-                "USER-001", "VEHICLE-001", reservation.id
-            )
-
-    assert error.value.code is ErrorCode.PARKING_ARRIVAL_NOT_VERIFIED
-    assert error.value.details["reason"] == "wrong_location"
-    assert error.value.details["required_location"] == "F2-C09"
-    assert error.value.details["verified_location"] == "F2-C08"
-
-
-@pytest.mark.asyncio
-async def test_expired_manual_location_confirmation_does_not_confirm_parking(
-    session_db: SessionDatabase,
-):
-    factory = async_sessionmaker(session_db.engine, expire_on_commit=False)
-    verified_at = datetime(2026, 8, 12, 10, 0, tzinfo=UTC)
-    settings = Settings(parking_arrival_verification_ttl_seconds=60)
-    async with factory() as session, session.begin():
-        reservation = await ReservationService(session, settings=settings).create_reservation(
-            "USER-001", "VEHICLE-001", "F2-C09", now=verified_at
+        user = await session.get(ParkingUser, "USER-001")
+        assert user is not None
+        user.current_node_id = "F2-ELEVATOR"
+        parking_session = await ParkingSessionService(session).confirm_parking(
+            "USER-001", "VEHICLE-001", reservation.id
         )
-        await LocationService(session, clock=lambda: verified_at).confirm_location("USER-001", "F2-C09")
-        with pytest.raises(ParkingSessionError) as error:
-            await ParkingSessionService(
-                session,
-                clock=lambda: verified_at + timedelta(seconds=61),
-                settings=settings,
-            ).confirm_parking("USER-001", "VEHICLE-001", reservation.id)
 
-    assert error.value.code is ErrorCode.PARKING_ARRIVAL_NOT_VERIFIED
-    assert error.value.details["reason"] == "expired"
+    assert parking_session.slot_id == "F2-C09"
 
 
 @pytest.mark.asyncio

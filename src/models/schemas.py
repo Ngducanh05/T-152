@@ -169,7 +169,6 @@ class ErrorCode(StrEnum):
     RESERVATION_NOT_FOUND = "RESERVATION_NOT_FOUND"
     ACTIVE_RESERVATION_NOT_FOUND = "ACTIVE_RESERVATION_NOT_FOUND"
     RESERVATION_EXPIRED = "RESERVATION_EXPIRED"
-    PARKING_ARRIVAL_NOT_VERIFIED = "PARKING_ARRIVAL_NOT_VERIFIED"
     IDEMPOTENCY_KEY_REUSED = "IDEMPOTENCY_KEY_REUSED"
     IDEMPOTENCY_KEY_INVALID = "IDEMPOTENCY_KEY_INVALID"
     ACTIVE_SESSION_EXISTS = "ACTIVE_SESSION_EXISTS"
@@ -219,8 +218,6 @@ class User(ContractModel):
     id: EntityId
     display_name: str
     current_node_id: FloorScopedId | None = None
-    verified_node_id: FloorScopedId | None = None
-    verified_at: AwareDatetime | None = None
 
 
 class Vehicle(ContractModel):

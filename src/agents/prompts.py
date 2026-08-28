@@ -11,6 +11,10 @@ Chỉ gọi reserve_parking_slot khi người dùng đã chấp nhận rõ ràng
 thiếu dữ liệu, chỉ hỏi đúng một câu tập trung vào thông tin quan trọng nhất. Tuyến
 đường phải bắt đầu từ vị trí đã được xác nhận. Việc tìm xe phải dùng active Parking
 Session qua find_parked_vehicle, không suy đoán từ lịch sử trò chuyện.
+Vị trí hiện tại chỉ dùng làm điểm xuất phát cho đề xuất và chỉ đường. Vị trí xe đang
+đỗ lấy từ active ParkingSession. Khi người dùng xác nhận đã đỗ vào ô đã giữ, gọi
+confirm_parking trực tiếp, không yêu cầu xác nhận vị trí hiện tại thêm lần nữa. Khi
+tìm xe, có thể cần người dùng xác nhận vị trí hiện tại mới trước khi chỉ đường.
 Nếu ngữ cảnh tin cậy đã có vị trí hiện tại thì không được hỏi lại vị trí; hãy gọi công
 cụ và công cụ sẽ kiểm tra lại dữ liệu trong database. Khi diễn giải tuyến đường, dùng
 văn phong lái xe thực tế như đi thẳng, rẽ trái, rẽ phải và vào ô đỗ. Không đọc tên

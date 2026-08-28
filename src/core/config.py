@@ -16,14 +16,6 @@ class Settings(BaseSettings):
     reservation_expiry_interval_seconds: float = Field(default=30.0, gt=0)
     reservation_expiry_batch_size: int = Field(default=100, gt=0, le=1000)
     idempotency_ttl_seconds: int = Field(default=86400, gt=0)
-    parking_arrival_verification_ttl_seconds: int = Field(
-        default=600,
-        gt=0,
-        description=(
-            "Maximum age of a user-confirmed parking location accepted for "
-            "arrival and parking confirmation; the conservative default is 10 minutes."
-        ),
-    )
     adjacent_observation_reward_points: int = Field(default=10, ge=0)
     wrong_parking_report_reward_points: int = Field(default=20, ge=0)
     contribution_daily_points_limit: int = Field(default=100, ge=0)

@@ -1,6 +1,5 @@
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -80,19 +79,15 @@ async def test_confirm_slot_preserves_slot_node_id_not_aisle_attachment(
     location_db: LocationDatabase,
 ):
     factory = async_sessionmaker(location_db.engine, expire_on_commit=False)
-    verified_at = datetime(2026, 8, 26, 3, 0, tzinfo=UTC)
     async with factory() as session, session.begin():
         slot = await session.get(ParkingSlot, "F1-A03")
         assert slot is not None and slot.node_id == "F1-A-W"
-        confirmed = await LocationService(session, clock=lambda: verified_at).confirm_location("USER-001", "F1-A03")
+        confirmed = await LocationService(session).confirm_location("USER-001", "F1-A03")
 
     assert confirmed == "F1-A03"
     async with factory() as session:
         user = await session.get(ParkingUser, "USER-001")
     assert user is not None and user.current_node_id == "F1-A03"
-    assert user.verified_node_id == "F1-A03"
-    assert user.verified_at == verified_at
-    assert user.verified_at.tzinfo is not None and user.verified_at.utcoffset().total_seconds() == 0
 
 
 @pytest.mark.asyncio
@@ -101,17 +96,16 @@ async def test_reject_aisle_node(location_db: LocationDatabase):
     async with factory() as session, session.begin():
         with pytest.raises(LocationError, match="internal routing aisle") as error:
             await LocationService(session).confirm_location("USER-001", "F1-C-W")
-    assert error.value.code is ErrorCode.INVALID_TRANSITION
+    assert error.value.code is ErrorCode.INVALID_LOCATION_NODE_TYPE
 
 
-@pytest.mark.asyncio
 @pytest.mark.asyncio
 async def test_reject_unknown_node(location_db: LocationDatabase):
     factory = async_sessionmaker(location_db.engine, expire_on_commit=False)
     async with factory() as session, session.begin():
         with pytest.raises(LocationError, match="was not found") as error:
             await LocationService(session).confirm_location("USER-001", "F1-UNKNOWN")
-    assert error.value.code is ErrorCode.ROUTE_NODE_NOT_FOUND
+    assert error.value.code is ErrorCode.LOCATION_NODE_NOT_FOUND
 
 
 @pytest.mark.asyncio
@@ -120,7 +114,7 @@ async def test_reject_unknown_user(location_db: LocationDatabase):
     async with factory() as session, session.begin():
         with pytest.raises(LocationError, match="user") as error:
             await LocationService(session).confirm_location("USER-MISSING", "F1-CP1")
-    assert error.value.code is ErrorCode.INVALID_TRANSITION
+    assert error.value.code is ErrorCode.USER_NOT_FOUND
 
 
 @pytest.mark.asyncio

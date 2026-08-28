@@ -134,7 +134,7 @@ describe("useParkingWorkflow", () => {
     api.confirmLocation.mockResolvedValue({ user_id: "USER-001", node_id: "F1-D01" });
     await act(async () => { await result.current.confirmLocation("F1-D01"); });
     expect(applyCurrentLocation).toHaveBeenCalledWith({ user_id: "USER-001", node_id: "F1-D01" });
-    expect(result.current.lastConfirmedLocationId).toBe("F1-D01");
+    expect(result.current.notice).toContain("Đã cập nhật vị trí trong bãi");
     expect(api.recommend).toHaveBeenCalledWith({
       user_id: "USER-001",
       start_node_id: "F1-D01",
@@ -146,12 +146,12 @@ describe("useParkingWorkflow", () => {
     expect(api.chat).not.toHaveBeenCalled();
   });
 
-  it("does not set location success state when manual confirmation fails", async () => {
+  it("does not set a location success notice when manual confirmation fails", async () => {
     const { api, data } = fixture();
     api.confirmLocation.mockRejectedValue(new ApiError({ code: "LOCATION_NODE_NOT_FOUND", message: "missing", status: 404 }));
     const { result } = renderHook(() => useParkingWorkflow(data, api));
     await act(async () => { await result.current.confirmLocation("F1-D01"); });
-    expect(result.current.lastConfirmedLocationId).toBeNull();
+    expect(result.current.notice).toContain("LOCATION_NODE_NOT_FOUND");
   });
 
   it("confirms a slot location without reserving it or creating a parking session", async () => {
@@ -427,33 +427,7 @@ describe("useParkingWorkflow", () => {
       expect.any(String),
     );
     expect(refresh).toHaveBeenCalledOnce();
-    expect(result.current.notice).toContain("hoàn tất đỗ xe");
-  });
-
-  it("opens manual location confirmation when the backend rejects unverified arrival", async () => {
-    const { api, data, slot } = fixture();
-    data.activeReservation = { ...activeReservation, slot_id: slot.id };
-    api.confirmParking.mockRejectedValue(
-      new ApiError({
-        code: "PARKING_ARRIVAL_NOT_VERIFIED",
-        message: "Verified arrival is required.",
-        status: 409,
-        details: { reason: "missing" },
-      }),
-    );
-    const { result } = renderHook(() => useParkingWorkflow(data, api));
-
-    await act(async () => {
-      await result.current.confirmParking();
-    });
-
-    expect(api.confirmLocation).not.toHaveBeenCalled();
-    expect(result.current.requestedPanel).toEqual({
-      kind: "location",
-      purpose: "parking-arrival",
-      targetSlotId: slot.id,
-    });
-    expect(result.current.notice).toContain("xác nhận bạn đang ở đúng ô đã giữ");
+    expect(result.current.notice).toContain("Đã xác nhận đỗ xe tại");
   });
 
   it("updates an adjacent slot only after the backend succeeds and guards double-click", async () => {
@@ -952,6 +926,74 @@ describe("useParkingWorkflow", () => {
     expect(refresh).toHaveBeenCalledOnce();
     expect(result.current.selectedSlotId).toBeNull();
     expect(result.current.notice).toContain("chọn một ô đang trống khác");
+  });
+
+  it("keeps a successful reservation authoritative when route loading fails and retries route only", async () => {
+    const { api, data, refresh, slot } = fixture();
+    const reservation = { ...activeReservation, slot_id: slot.id };
+    api.createReservation.mockResolvedValue(reservation);
+    api.getRoute
+      .mockRejectedValueOnce(new TypeError("route unavailable"))
+      .mockResolvedValueOnce({
+        path: ["F1-ENTRANCE", "F1-D01"],
+        distance_m: 10,
+        polyline: [],
+      });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      await result.current.reserveSelectedAndRoute(slot.id);
+    });
+
+    expect(api.createReservation).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(result.current.notice).toContain("Đã giữ ô");
+    data.activeReservation = reservation;
+    await act(async () => {
+      await result.current.requestRouteToActiveReservation();
+    });
+
+    expect(api.createReservation).toHaveBeenCalledOnce();
+    expect(api.getRoute).toHaveBeenCalledTimes(2);
+    expect(api.getRoute).toHaveBeenLastCalledWith({
+      start_node_id: "F1-ENTRANCE",
+      destination_node_id: slot.id,
+      mode: "VEHICLE",
+    });
+  });
+
+  it("requests a fresh location before routing to the active parked vehicle", async () => {
+    const { api, data } = fixture();
+    data.activeSession = {
+      session_id: "SESSION-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: "F1-D01",
+      destination_node_id: "F1-D01",
+    };
+    api.confirmLocation.mockResolvedValue({ user_id: "USER-001", node_id: "F1-ELEVATOR" });
+    api.getActiveSession.mockResolvedValue(data.activeSession);
+    api.getRoute.mockResolvedValue({
+      path: ["F1-ELEVATOR", "F1-D01"],
+      distance_m: 12,
+      polyline: [],
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => {
+      await result.current.findVehicleAndRoute();
+    });
+    expect(result.current.requestedPanel).toEqual({ kind: "location", purpose: "find-vehicle" });
+
+    await act(async () => {
+      await result.current.confirmLocation("F1-ELEVATOR");
+    });
+
+    expect(api.getRoute).toHaveBeenCalledWith({
+      start_node_id: "F1-ELEVATOR",
+      destination_node_id: "F1-D01",
+      mode: "PEDESTRIAN",
+    });
+    expect(result.current.requestedPanel).toEqual({ kind: "location", purpose: "find-vehicle" });
   });
 
   it("ignores an unknown action type safely without calling an API", async () => {

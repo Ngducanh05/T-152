@@ -67,7 +67,6 @@ function workflowFixture(): ParkingWorkflow {
     selectedSlotId: null,
     activeRoute: null,
     currentLocationId: "F1-ENTRANCE",
-    lastConfirmedLocationId: null,
     lastToolNames: [],
     messages: [{
       id: "welcome",
@@ -90,6 +89,7 @@ function workflowFixture(): ParkingWorkflow {
     reserveSelectedAndRoute: vi.fn(async () => true),
     cancelActiveReservation: vi.fn(async () => true),
     requestRouteToSelected: vi.fn(async () => undefined),
+    requestRouteToActiveReservation: vi.fn(async () => true),
     confirmParking: vi.fn(async () => true),
     findVehicleAndRoute: vi.fn(async () => undefined),
     completeSession: vi.fn(async () => true),
@@ -154,29 +154,6 @@ describe("user chat page", () => {
     ).toBeVisible();
   });
 
-  it("shows the manual location confirmation outcome after a successful confirmation", () => {
-    const workflow = workflowFixture();
-    workflow.lastConfirmedLocationId = "F1-D01";
-    mocks.useParkSmartData.mockReturnValue({
-      map: canonicalMap,
-      slots: canonicalMap.slots,
-      status: parkingStatus,
-      currentLocation,
-      activeReservation: null,
-      activeSession: null,
-      lastUpdatedAt: null,
-      loading: false,
-      refreshing: false,
-      error: null,
-      refresh: vi.fn(),
-    });
-    mocks.useParkingWorkflow.mockReturnValue(workflow);
-    render(<Home />);
-    expect(screen.getByRole("status", { name: "Kết quả xác nhận vị trí" })).toHaveTextContent(
-      "Đã cập nhật vị trí hiện tại",
-    );
-  });
-
   it("does not render ParkingMap or operational summaries and shows welcome actions", async () => {
     const user = userEvent.setup();
     const workflow = workflowFixture();
@@ -229,13 +206,14 @@ describe("user chat page", () => {
     mocks.useParkingWorkflow.mockReturnValue(workflow);
 
     render(<Home />);
+    expect(screen.getByText("Vị trí trong bãi")).toBeVisible();
     expect(
       screen.getByRole("dialog", { name: "Xác nhận vị trí hiện tại" }),
     ).toBeVisible();
     expect(screen.queryByTestId("location-qr-scanner")).not.toBeInTheDocument();
   });
 
-  it("confirms arrival directly instead of opening the location picker", async () => {
+  it("confirms parking directly instead of opening the location picker", async () => {
     const user = userEvent.setup();
     const workflow = workflowFixture();
     mocks.useParkSmartData.mockReturnValue({
@@ -268,6 +246,7 @@ describe("user chat page", () => {
     expect(
       screen.queryByRole("dialog", { name: "Xác nhận vị trí hiện tại" }),
     ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Chỉ đường tới ô" })).toBeVisible();
   });
 
   it("keeps active-session controls in the priority dock and offers adjacent updates", async () => {
@@ -298,6 +277,11 @@ describe("user chat page", () => {
       name: "Thông tin và thao tác quan trọng",
     });
     expect(dock).toHaveClass("conversation-priority-dock");
+    expect(screen.getByText("Vị trí đỗ xe")).toBeVisible();
+    expect(screen.getAllByText("Ô D03 — Tầng 1 (F1-D03)")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /Vị trí trong bãi/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Chỉ đường tới xe" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Kết thúc phiên" })).toBeVisible();
     expect(dock).toContainElement(
       screen.getByRole("article", { name: "Xe đang đỗ trong bãi" }),
     );

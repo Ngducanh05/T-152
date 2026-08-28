@@ -3,7 +3,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import AwareDatetime, BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import ParkingUserDependency, resolve_parking_user_id
@@ -35,8 +35,6 @@ class LocationResponse(BaseModel):
 
     user_id: EntityId
     node_id: FloorScopedId
-    verified_node_id: FloorScopedId | None = None
-    verified_at: AwareDatetime | None = None
 
 
 def _error(status_code: int, code: ErrorCode, message: str) -> HTTPException:
@@ -66,13 +64,10 @@ async def confirm_location(
             node_id = await LocationService(session).confirm_location(user_id, request.node_id)
     except LocationError as error:
         raise _domain_error(error) from error
-    state = await LocationService(session).get_location_state(user_id)
     return SuccessResponse(
         data=LocationResponse(
             user_id=user_id,
             node_id=node_id,
-            verified_node_id=state.verified_node_id,
-            verified_at=state.verified_at,
         )
     )
 
@@ -103,8 +98,6 @@ async def current_location(
         data=LocationResponse(
             user_id=user_id,
             node_id=node_id,
-            verified_node_id=state.verified_node_id,
-            verified_at=state.verified_at,
         )
     )
 

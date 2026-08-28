@@ -109,10 +109,6 @@ class ParkingUser(Base):
     current_node_id: Mapped[str | None] = mapped_column(
         ForeignKey("map_nodes.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    verified_node_id: Mapped[str | None] = mapped_column(
-        ForeignKey("map_nodes.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AgentDailyUsage(Base):

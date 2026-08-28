@@ -8,7 +8,6 @@ from uuid import uuid4
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.config import Settings, get_settings
 from src.core.db_models import (
     ParkingReservation,
     ParkingSession,
@@ -46,12 +45,10 @@ class ParkingSessionService:
         session: AsyncSession,
         parking_state: ParkingStateService | None = None,
         clock: Callable[[], datetime] | None = None,
-        settings: Settings | None = None,
     ) -> None:
         self.session = session
         self.parking_state = parking_state or ParkingStateService(session)
         self.clock = clock or (lambda: datetime.now(UTC))
-        self.settings = settings or get_settings()
 
     async def confirm_parking(
         self,
@@ -74,7 +71,7 @@ class ParkingSessionService:
             now=current_time,
         )
 
-        user = await self._lock_user(user_id)
+        await self._lock_user(user_id)
         vehicle = await self._lock_vehicle(vehicle_id)
         if vehicle.user_id != user_id:
             raise ParkingSessionError(
@@ -87,14 +84,12 @@ class ParkingSessionService:
             user_id=user_id,
             vehicle_id=vehicle_id,
         )
-        slot = await self.session.get(ParkingSlot, reservation.slot_id)
-        if slot is None:
+        if await self.session.get(ParkingSlot, reservation.slot_id) is None:
             raise ParkingSessionError(
                 ErrorCode.SLOT_NOT_FOUND,
                 f"Parking slot {reservation.slot_id} was not found",
                 details={"slot_id": reservation.slot_id},
             )
-        self._validate_verified_arrival(user, slot, now=current_time)
         existing = await self.session.scalar(
             select(ParkingSession).where(
                 ParkingSession.status == ParkingSessionStatus.ACTIVE,
@@ -286,36 +281,6 @@ class ParkingSessionService:
                 "User or vehicle does not own this reservation",
                 details={"reservation_id": reservation.id},
             )
-
-    def _validate_verified_arrival(
-        self,
-        user: ParkingUser,
-        slot: ParkingSlot,
-        *,
-        now: datetime,
-    ) -> None:
-        expires_before = now - timedelta(seconds=self.settings.parking_arrival_verification_ttl_seconds)
-        reason = None
-        if user.verified_node_id is None or user.verified_at is None:
-            reason = "missing"
-        elif user.verified_node_id != slot.id:
-            reason = "wrong_location"
-        elif user.verified_at < expires_before:
-            reason = "expired"
-        if reason is None:
-            return
-        raise ParkingSessionError(
-            ErrorCode.PARKING_ARRIVAL_NOT_VERIFIED,
-            "A fresh confirmation at the reserved parking slot is required.",
-            details={
-                "reason": reason,
-                "slot_id": slot.id,
-                "required_location": slot.id,
-                "verified_location": user.verified_node_id,
-                "verified_at": user.verified_at.isoformat() if user.verified_at else None,
-                "verification_ttl_seconds": (self.settings.parking_arrival_verification_ttl_seconds),
-            },
-        )
 
     @staticmethod
     def _raise_user_not_found(user_id: str) -> None:

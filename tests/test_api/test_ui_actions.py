@@ -47,6 +47,38 @@ def test_missing_location_offers_manual_location_picker_only():
     assert all(action.payload == {} for action in actions)
 
 
+def test_active_reservation_is_not_hidden_when_current_location_is_missing():
+    actions = derive_chat_ui_actions(
+        current_location=None,
+        recommended_slot_ids=[],
+        selected_slot="F1-D01",
+        intent=None,
+        successful_tool_names=set(),
+        active_reservation_id="RESERVATION-001",
+    )
+
+    assert [action.type for action in actions[:2]] == [
+        ChatUIActionType.CONFIRM_PARKING,
+        ChatUIActionType.CANCEL,
+    ]
+
+
+def test_active_session_is_not_hidden_when_current_location_is_missing():
+    actions = derive_chat_ui_actions(
+        current_location=None,
+        recommended_slot_ids=[],
+        selected_slot="F1-D01",
+        intent=None,
+        successful_tool_names=set(),
+        active_session_id="SESSION-001",
+    )
+
+    assert [action.type for action in actions[:2]] == [
+        ChatUIActionType.FIND_VEHICLE,
+        ChatUIActionType.COMPLETE_SESSION,
+    ]
+
+
 def test_preferences_hide_accessible_when_the_map_has_no_accessible_slots():
     actions = derive_chat_ui_actions(
         current_location="F1-ENTRANCE",
