@@ -2,7 +2,7 @@
 
 Run the complete dataset (partial selections are archived but never promoted):
 
-    RUN_LIVE_LLM_EVAL=1 LLM_API_KEY=... uv run pytest \
+    RUN_LIVE_LLM_EVAL=1 GOLDEN_LIVE_REPETITIONS=3 LLM_API_KEY=... uv run pytest \
         tests/test_agents/test_golden_live.py -m live_llm -q
 """
 
@@ -16,7 +16,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from eval.artifacts import GoldenRunRecorder, golden_case_payload
+from eval.artifacts import GoldenRunRecorder, golden_case_payload, parse_live_repetitions
 from eval.golden_cases import GOLDEN_CASES, GoldenCase
 from eval.live_harness import (
     ToolCallLog,
@@ -32,14 +32,19 @@ from src.services.llm import EFFECTIVE_LLM_TEMPERATURE
 
 _EXPLICIT_LIVE_OPT_IN = os.getenv("RUN_LIVE_LLM_EVAL") == "1"
 _LIVE_LLM_ENABLED = _EXPLICIT_LIVE_OPT_IN and bool(get_settings().llm_api_key)
+_LIVE_REPETITIONS = (
+    parse_live_repetitions(os.getenv("GOLDEN_LIVE_REPETITIONS"))
+    if _EXPLICIT_LIVE_OPT_IN
+    else 1
+)
 _REASON = "Golden eval requires a key and explicit RUN_LIVE_LLM_EVAL=1 opt-in"
 
 
-def _runtime(case: GoldenCase) -> AgentRuntimeContext:
+def _runtime(case: GoldenCase, repetition: int) -> AgentRuntimeContext:
     return AgentRuntimeContext(
         user_id="USER-001",
         vehicle_id="VEHICLE-001",
-        request_id=f"GOLDEN-EVAL-{case.name}",
+        request_id=f"GOLDEN-EVAL-R{repetition + 1}-{case.name}",
         session_factory=None,  # type: ignore[arg-type]
         current_location="F1-ENTRANCE",
     )
@@ -53,6 +58,7 @@ def golden_recorder():
         temperature=EFFECTIVE_LLM_TEMPERATURE,
         max_steps=settings.agent_max_steps,
         timeout_seconds=settings.llm_timeout_seconds,
+        repetition_count=_LIVE_REPETITIONS,
     )
     yield recorder
     archive, canonical = recorder.persist()
@@ -63,8 +69,13 @@ def golden_recorder():
 @pytest.mark.live_llm
 @pytest.mark.skipif(not _LIVE_LLM_ENABLED, reason=_REASON)
 @pytest.mark.asyncio
+@pytest.mark.parametrize("repetition", range(_LIVE_REPETITIONS), ids=lambda value: f"r{value + 1}")
 @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda case: case.name)
-async def test_golden_case_live(case: GoldenCase, golden_recorder: GoldenRunRecorder):
+async def test_golden_case_live(
+    case: GoldenCase,
+    repetition: int,
+    golden_recorder: GoldenRunRecorder,
+):
     log = ToolCallLog()
     tools = build_golden_tools(log, scenario=case.scenario)
     settings = get_settings()
@@ -75,10 +86,12 @@ async def test_golden_case_live(case: GoldenCase, golden_recorder: GoldenRunReco
     )
     config = {
         "configurable": {
-            "thread_id": f"golden-{golden_recorder.run_id}-{case.name}",
+            "thread_id": (
+                f"golden-{golden_recorder.run_id}-r{repetition + 1}-{case.name}"
+            ),
         }
     }
-    context = _runtime(case)
+    context = _runtime(case, repetition)
 
     # Latency is reported per graded turn, not per conversation: prior turns
     # only exist to build checkpoint state, so folding them into one number
@@ -116,6 +129,7 @@ async def test_golden_case_live(case: GoldenCase, golden_recorder: GoldenRunReco
     golden_recorder.results.append(
         {
             "name": case.name,
+            "repetition": repetition,
             "category": case.category,
             "contract": golden_case_payload(case),
             "passed": score.passed,

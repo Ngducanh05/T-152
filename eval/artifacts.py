@@ -21,7 +21,8 @@ from eval.golden_cases import (
 )
 from eval.live_harness import ToolInvocation, score_case
 
-ARTIFACT_SCHEMA_VERSION = 2
+ARTIFACT_SCHEMA_VERSION = 3
+MAX_LIVE_REPETITIONS = 20
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CANONICAL_RESULTS_PATH = REPOSITORY_ROOT / "eval/results/golden_eval_raw.json"
 RUN_ARCHIVE_DIR = REPOSITORY_ROOT / "eval/results/runs"
@@ -41,6 +42,7 @@ _EXECUTION_SOURCE_PATHS = (
 REQUIRED_RESULT_FIELDS = frozenset(
     {
         "name",
+        "repetition",
         "category",
         "contract",
         "passed",
@@ -101,6 +103,7 @@ def golden_case_payload(case: GoldenCase) -> dict[str, Any]:
         "must_not_match": list(case.must_not_match),
         "expect_refusal": case.expect_refusal,
         "refusal_requires_no_tools": case.refusal_requires_no_tools,
+        "tags": sorted(case.tags),
         "notes": case.notes,
     }
 
@@ -109,6 +112,21 @@ def dataset_sha256() -> str:
     payload = [golden_case_payload(case) for case in GOLDEN_CASES]
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return _sha256_bytes(encoded)
+
+
+def parse_live_repetitions(value: str | None) -> int:
+    """Parse the opt-in live repetition count without allowing accidental runaway cost."""
+    if value is None or not value.strip():
+        return 1
+    try:
+        repetitions = int(value)
+    except ValueError as error:
+        raise ValueError("GOLDEN_LIVE_REPETITIONS must be an integer") from error
+    if not 1 <= repetitions <= MAX_LIVE_REPETITIONS:
+        raise ValueError(
+            f"GOLDEN_LIVE_REPETITIONS must be between 1 and {MAX_LIVE_REPETITIONS}"
+        )
+    return repetitions
 
 
 def _non_negative_number(value: object) -> bool:
@@ -129,6 +147,9 @@ def validate_result_record(result: dict[str, Any], case: GoldenCase) -> list[str
 
     if result.get("name") != case.name:
         failures.append("name does not match the golden case")
+    repetition = result.get("repetition")
+    if type(repetition) is not int or repetition < 0:
+        failures.append("repetition must be a non-negative integer")
     if result.get("category") != case.category:
         failures.append("category does not match the golden case")
     if result.get("contract") != golden_case_payload(case):
@@ -347,51 +368,81 @@ class GoldenRunRecorder:
     temperature: float
     max_steps: int = 8
     timeout_seconds: float = 30.0
+    repetition_count: int = 1
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     started_at: str = field(default_factory=_utc_now)
     results: list[dict[str, Any]] = field(default_factory=list)
     provenance: dict[str, Any] = field(default_factory=execution_provenance, init=False)
 
+    def __post_init__(self) -> None:
+        if not 1 <= self.repetition_count <= MAX_LIVE_REPETITIONS:
+            raise ValueError(
+                f"repetition_count must be between 1 and {MAX_LIVE_REPETITIONS}"
+            )
+
     def build_document(self) -> dict[str, Any]:
         expected_names = [case.name for case in GOLDEN_CASES]
         cases_by_name = {case.name: case for case in GOLDEN_CASES}
+        expected_executions = [
+            (case.name, repetition)
+            for repetition in range(self.repetition_count)
+            for case in GOLDEN_CASES
+        ]
         result_names = [str(result.get("name", "")) for result in self.results]
+        result_executions = [
+            (str(result.get("name", "")), result.get("repetition"))
+            for result in self.results
+        ]
         well_formed = all(
             isinstance(result, dict)
             and result.get("name") in cases_by_name
+            and type(result.get("repetition")) is int
+            and 0 <= result["repetition"] < self.repetition_count
             and not validate_result_record(result, cases_by_name[result["name"]])
             for result in self.results
         )
         complete = (
-            len(result_names) == len(expected_names)
-            and len(set(result_names)) == len(result_names)
-            and set(result_names) == set(expected_names)
+            len(result_executions) == len(expected_executions)
+            and len(set(result_executions)) == len(result_executions)
+            and set(result_executions) == set(expected_executions)
             and well_formed
         )
         order = {name: index for index, name in enumerate(expected_names)}
         ordered_results = sorted(
             self.results,
-            key=lambda result: order.get(str(result.get("name", "")), len(order)),
+            key=lambda result: (
+                result.get("repetition", self.repetition_count),
+                order.get(str(result.get("name", "")), len(order)),
+            ),
         )
         return {
             "schema_version": ARTIFACT_SCHEMA_VERSION,
             "scoring_valid": complete,
             "complete": complete,
+            "run_status": "complete" if complete else "partial",
             "run_id": self.run_id,
             "started_at": self.started_at,
             "finished_at": _utc_now(),
             "model": self.model,
             "temperature": self.temperature,
+            "evidence_level": "live_llm",
+            "model_mode": "live",
+            "tool_backend": "fake",
+            "system_boundary": ["provider", "agent_graph", "fake_tools", "scorer"],
+            "environment": "local",
             "dataset_version": GOLDEN_DATASET_VERSION,
             "dataset_sha256": dataset_sha256(),
             "max_steps": self.max_steps,
             "timeout_seconds": self.timeout_seconds,
+            "repetition_count": self.repetition_count,
             "code_sha256": self.provenance["code_sha256"],
             "execution_bundle_sha256": self.provenance["execution_bundle_sha256"],
             "git": self.provenance["git"],
             "expected_case_count": len(expected_names),
             "expected_case_names": expected_names,
-            "executed_case_count": len(result_names),
+            "executed_case_count": len(set(result_names) & set(expected_names)),
+            "expected_execution_count": len(expected_executions),
+            "executed_execution_count": len(result_executions),
             "results": ordered_results,
         }
 
@@ -412,9 +463,11 @@ __all__ = [
     "ARTIFACT_SCHEMA_VERSION",
     "CANONICAL_RESULTS_PATH",
     "GoldenRunRecorder",
+    "MAX_LIVE_REPETITIONS",
     "REQUIRED_RESULT_FIELDS",
     "dataset_sha256",
     "execution_provenance",
     "golden_case_payload",
+    "parse_live_repetitions",
     "validate_result_record",
 ]

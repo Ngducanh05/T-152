@@ -318,6 +318,56 @@ async def test_recommendation_never_reserves_without_explicit_acceptance():
 
 
 @pytest.mark.asyncio
+async def test_simple_recommendation_stops_before_model_requested_status_or_route():
+    result, _ = await _run(
+        [
+            _tool_call("recommend_parking_slot", {"floor_id": "F1"}),
+            _tool_call("get_parking_slot_status", {"slot_id": "F1-C03"}),
+        ],
+        message="Tìm chỗ gần đây ở tầng 1.",
+    )
+
+    assert [name for name, _ in TOOL_CALLS] == ["recommend_parking_slot"]
+    assert result["recommended_slot_ids"] == ["F1-C03"]
+    assert result["messages"][-1].tool_calls == []
+    assert "F1-C03" in result["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_explicit_route_request_may_continue_after_recommendation():
+    result, _ = await _run(
+        [
+            _tool_call("recommend_parking_slot", {"zone_id": "C"}),
+            _tool_call("get_route", {"destination_node_id": "F1-C03"}),
+            AIMessage(content="Đây là đường tới ô F1-C03."),
+        ],
+        message="Tìm và chỉ đường tới một ô ở khu C.",
+    )
+
+    assert [name for name, _ in TOOL_CALLS] == [
+        "recommend_parking_slot",
+        "get_route",
+    ]
+    assert result["messages"][-1].content == "Đây là đường tới ô F1-C03."
+
+
+@pytest.mark.asyncio
+async def test_route_to_car_skips_redundant_slot_status_requested_by_model():
+    result, _ = await _run(
+        [
+            _tool_call("find_parked_vehicle", {}),
+            _tool_call("get_parking_slot_status", {"slot_id": "F1-C03"}),
+            AIMessage(content="Đây là đường tới xe ở F1-C03."),
+        ],
+        message="Chỉ đường tới xe của tôi giúp tôi.",
+    )
+
+    assert [name for name, _ in TOOL_CALLS] == ["find_parked_vehicle", "get_route"]
+    assert result["route"].path == ["F1-CP3", "F1-C03"]
+    assert result["messages"][-1].content == "Đây là đường tới xe ở F1-C03."
+
+
+@pytest.mark.asyncio
 async def test_explicit_slot_acceptance_reserves_selected_slot():
     result, _ = await _run(
         [
@@ -407,6 +457,9 @@ def test_system_prompt_contains_required_safety_contract():
         "Không bịa",
         "không tự động reserve",
         "chỉ gọi recommend_parking_slot một lần",
+        "không gọi thêm bất kỳ tool nào",
+        "reserve_parking_slot tự kiểm tra",
+        "không gọi get_parking_slot_status ở giữa",
         "người dùng đã chấp nhận rõ ràng",
         "chỉ hỏi đúng một câu",
         "vị trí đã được xác nhận",

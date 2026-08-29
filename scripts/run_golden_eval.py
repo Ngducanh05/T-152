@@ -52,6 +52,21 @@ def _validate_run_metadata(document: dict[str, Any]) -> list[str]:
         failures.append("finished_at precedes started_at")
     if not isinstance(document.get("model"), str) or not document["model"].strip():
         failures.append("model must be a non-empty string")
+    if document.get("evidence_level") != "live_llm":
+        failures.append("evidence_level must identify a live_llm run")
+    if document.get("model_mode") != "live":
+        failures.append("model_mode must identify a live provider")
+    if document.get("tool_backend") != "fake":
+        failures.append("tool_backend must identify deterministic fake tools")
+    if document.get("system_boundary") != [
+        "provider",
+        "agent_graph",
+        "fake_tools",
+        "scorer",
+    ]:
+        failures.append("system_boundary is malformed")
+    if document.get("environment") != "local":
+        failures.append("environment must identify the local golden harness")
     temperature = document.get("temperature")
     if (
         not isinstance(temperature, (int, float))
@@ -71,6 +86,9 @@ def _validate_run_metadata(document: dict[str, Any]) -> list[str]:
         or float(timeout) <= 0
     ):
         failures.append("timeout_seconds must be a finite positive number")
+    repetition_count = document.get("repetition_count")
+    if type(repetition_count) is not int or repetition_count < 1:
+        failures.append("repetition_count must be a positive integer")
 
     code_hashes = document.get("code_sha256")
     required_paths = {
@@ -111,7 +129,7 @@ def _percentile(values: list[float], fraction: float) -> float:
     if not values:
         return 0.0
     ordered = sorted(values)
-    index = min(len(ordered) - 1, max(0, int(len(ordered) * fraction)))
+    index = min(len(ordered) - 1, max(0, math.ceil(len(ordered) * fraction) - 1))
     return ordered[index]
 
 
@@ -124,6 +142,8 @@ def validate_artifact(document: dict[str, Any]) -> list[dict[str, Any]]:
         failures.append(f"schema_version must be {ARTIFACT_SCHEMA_VERSION}")
     if document.get("complete") is not True:
         failures.append("run is partial")
+    if document.get("run_status") != "complete":
+        failures.append("run_status is not complete")
     if document.get("scoring_valid") is not True:
         failures.append("scoring_valid is not true")
     if document.get("dataset_version") != GOLDEN_DATASET_VERSION:
@@ -135,15 +155,37 @@ def validate_artifact(document: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(results, list):
         failures.append("results must be a list")
         results = []
+    repetition_count = document.get("repetition_count")
+    valid_repetition_count = type(repetition_count) is int and repetition_count > 0
+    expected_executions = (
+        [
+            (name, repetition)
+            for repetition in range(repetition_count)
+            for name in expected_names
+        ]
+        if valid_repetition_count
+        else []
+    )
     result_names = [str(item.get("name", "")) for item in results if isinstance(item, dict)]
+    result_executions = [
+        (str(item.get("name", "")), item.get("repetition"))
+        for item in results
+        if isinstance(item, dict)
+    ]
     if document.get("expected_case_count") != len(expected_names):
         failures.append("expected case count is wrong")
     if document.get("expected_case_names") != expected_names:
         failures.append("expected case names are stale or reordered")
     if document.get("executed_case_count") != len(expected_names):
         failures.append("executed case count is incomplete")
-    if len(result_names) != len(set(result_names)):
-        failures.append("result names are duplicated")
+    if document.get("expected_execution_count") != len(expected_executions):
+        failures.append("expected execution count is wrong")
+    if document.get("executed_execution_count") != len(expected_executions):
+        failures.append("executed execution count is incomplete")
+    if len(result_executions) != len(set(result_executions)):
+        failures.append("result case/repetition identities are duplicated")
+    if set(result_executions) != set(expected_executions):
+        failures.append("results do not exactly match every case/repetition execution")
     if set(result_names) != set(expected_names):
         failures.append("result names do not exactly match the golden dataset")
 
@@ -154,6 +196,13 @@ def validate_artifact(document: dict[str, Any]) -> list[dict[str, Any]]:
         case = cases_by_name.get(result.get("name"))
         if case is None:
             continue
+        repetition = result.get("repetition")
+        if (
+            valid_repetition_count
+            and type(repetition) is int
+            and not 0 <= repetition < repetition_count
+        ):
+            failures.append(f"result {case.name!r}: repetition is out of range")
         failures.extend(
             f"result {case.name!r}: {failure}"
             for failure in validate_result_record(result, case)
@@ -186,6 +235,7 @@ def build_report(document: dict[str, Any]) -> str:
     durations = [float(item["duration_s"]) for item in results]
     multi_turn = [item for item in results if int(item["graded_turn_index"]) > 0]
     conversation_durations = [float(item["conversation_duration_s"]) for item in multi_turn]
+    multi_turn_passed = sum(bool(item["passed"]) for item in multi_turn)
 
     by_category: dict[str, list[dict[str, Any]]] = {}
     for result in results:
@@ -204,8 +254,13 @@ def build_report(document: dict[str, Any]) -> str:
         f"| Started / finished (UTC) | `{document['started_at']}` / `{document['finished_at']}` |",
         f"| Model | `{document['model']}` |",
         f"| Temperature | `{document['temperature']}` |",
+        f"| Evidence / model / tools | `{document['evidence_level']}` / "
+        f"`{document['model_mode']}` / `{document['tool_backend']}` |",
         f"| Agent max steps / timeout | `{document['max_steps']}` / "
         f"`{document['timeout_seconds']}s` |",
+        f"| Live repetitions | `{document['repetition_count']}` |",
+        f"| Case executions | `{document['executed_execution_count']}` "
+        f"({document['expected_case_count']} cases × {document['repetition_count']}) |",
         f"| Git commit | `{git.get('commit', 'unknown')}` |",
         f"| Git branch | `{git.get('branch', 'unknown')}` |",
         f"| Working tree dirty | `{git.get('working_tree_dirty')}` |",
@@ -230,9 +285,12 @@ def build_report(document: dict[str, Any]) -> str:
         f"- P95 in-process golden-harness graded-turn latency: "
         f"{_percentile(durations, 0.95):.2f}s",
         f"- Multi-turn cases (excluded from the two figures above as whole "
-        f"conversations): {len(multi_turn)}/{total}"
+        f"conversations): {_rate(multi_turn_passed, len(multi_turn))} task success; "
+        f"{len(multi_turn)}/{total} executions"
         + (
-            f"; mean full-conversation time {statistics.mean(conversation_durations):.2f}s"
+            f"; mean / P95 full-conversation time "
+            f"{statistics.mean(conversation_durations):.2f}s / "
+            f"{_percentile(conversation_durations, 0.95):.2f}s"
             if conversation_durations
             else ""
         ),
@@ -249,12 +307,32 @@ def build_report(document: dict[str, Any]) -> str:
             f"{category_passed / len(items):.1%} |"
         )
 
+    lines.extend(
+        [
+            "",
+            "## By repetition",
+            "",
+            "| Repetition | Passed | Total | Rate |",
+            "|---:|---:|---:|---:|",
+        ]
+    )
+    for repetition in range(int(document["repetition_count"])):
+        items = [item for item in results if item["repetition"] == repetition]
+        repetition_passed = sum(bool(item["passed"]) for item in items)
+        lines.append(
+            f"| {repetition + 1} | {repetition_passed} | {len(items)} | "
+            f"{repetition_passed / len(items):.1%} |"
+        )
+
     failures = [item for item in results if not item["passed"]]
     lines.extend(["", "## Failures", ""])
     if failures:
         for failure in failures:
             reasons = "; ".join(failure.get("reasons", []))
-            lines.append(f"- **{failure['name']}** ({failure['category']}): {reasons}")
+            lines.append(
+                f"- **{failure['name']}** repetition {int(failure['repetition']) + 1} "
+                f"({failure['category']}): {reasons}"
+            )
     else:
         lines.append("None — all cases passed this run.")
 
@@ -273,6 +351,9 @@ def build_report(document: dict[str, Any]) -> str:
             "turns build checkpoint state and are reported separately.",
             "- **Response surface:** this evaluates the graph's final AI message. The REST "
             "endpoint's deterministic route/fallback projection requires separate API tests.",
+            "- **Critical mutations:** correctness is enforced by deterministic tool name, "
+            "arguments, count, turn and dependency-order contracts. No LLM-as-judge is used "
+            "to approve a reservation, cancellation, parking confirmation or other write.",
             "- **RAGAS:** not applicable to this repository because the agent has no retrieval "
             "or knowledge-base stage. Tool-grounded contracts measure the available context path.",
             "- A live model is not fully deterministic, even at temperature zero. Preserve each "
