@@ -116,17 +116,33 @@ class WrongParkingReportVerificationOutcome(StrEnum):
 class RewardSourceType(StrEnum):
     ADJACENT_SLOT_OBSERVATION = "ADJACENT_SLOT_OBSERVATION"
     WRONG_PARKING_REPORT = "WRONG_PARKING_REPORT"
+    VOUCHER_REDEMPTION = "VOUCHER_REDEMPTION"
 
 
 class RewardTransactionType(StrEnum):
     CONTRIBUTION_REWARD = "CONTRIBUTION_REWARD"
     REWARD_REVERSAL = "REWARD_REVERSAL"
     ADMIN_ADJUSTMENT = "ADMIN_ADJUSTMENT"
+    VOUCHER_REDEMPTION = "VOUCHER_REDEMPTION"
+    VOUCHER_REFUND = "VOUCHER_REFUND"
 
 
 class RewardTransactionStatus(StrEnum):
     PENDING = "PENDING"
     EARNED = "EARNED"
+    CANCELLED = "CANCELLED"
+    POSTED = "POSTED"
+
+
+class RewardRedemptionStatus(StrEnum):
+    COMPLETED = "COMPLETED"
+    REFUNDED = "REFUNDED"
+
+
+class ParkingVoucherStatus(StrEnum):
+    ISSUED = "ISSUED"
+    APPLIED = "APPLIED"
+    EXPIRED = "EXPIRED"
     CANCELLED = "CANCELLED"
 
 
@@ -190,6 +206,9 @@ class ErrorCode(StrEnum):
     REWARD_ALREADY_SETTLED = "REWARD_ALREADY_SETTLED"
     CONTRIBUTION_DAILY_LIMIT_REACHED = "CONTRIBUTION_DAILY_LIMIT_REACHED"
     REPORT_REWARD_DUPLICATE = "REPORT_REWARD_DUPLICATE"
+    REWARD_CATALOG_ITEM_NOT_FOUND = "REWARD_CATALOG_ITEM_NOT_FOUND"
+    REWARD_CATALOG_ITEM_INACTIVE = "REWARD_CATALOG_ITEM_INACTIVE"
+    INSUFFICIENT_REWARD_POINTS = "INSUFFICIENT_REWARD_POINTS"
     AGENT_DISABLED = "AGENT_DISABLED"
     AGENT_DAILY_LIMIT_REACHED = "AGENT_DAILY_LIMIT_REACHED"
     AGENT_TOOL_UNAVAILABLE = "AGENT_TOOL_UNAVAILABLE"
@@ -386,10 +405,17 @@ class RewardTransaction(ContractModel):
     source_reference: EntityId
     transaction_type: RewardTransactionType
     status: RewardTransactionStatus
-    points: int = Field(ge=0)
+    points_delta: int
     created_at: AwareDatetime
     settled_at: AwareDatetime | None = None
-    metadata: dict[str, object] = Field(default_factory=dict)
+    metadata: dict[str, object] = Field(default_factory=dict, validation_alias="transaction_metadata")
+
+    @field_validator("points_delta")
+    @classmethod
+    def points_delta_must_not_be_zero(cls, value: int) -> int:
+        if value == 0:
+            raise ValueError("points_delta must not be zero")
+        return value
 
 
 class RewardSummary(ContractModel):
@@ -405,6 +431,46 @@ class RewardConfiguration(ContractModel):
     adjacent_observation_reward_points: int = Field(ge=0)
     wrong_parking_report_reward_points: int = Field(ge=0)
     contribution_daily_points_limit: int = Field(ge=0)
+
+
+class RewardCatalogItem(ContractModel):
+    id: EntityId
+    code: str
+    name: str
+    points_cost: int = Field(gt=0)
+    free_minutes: int = Field(gt=0, le=60)
+    validity_days: int = Field(gt=0)
+    version: int = Field(ge=0)
+
+
+class RewardRedemption(ContractModel):
+    id: EntityId
+    catalog_item_id: EntityId
+    points_cost_snapshot: int = Field(gt=0)
+    free_minutes_snapshot: int = Field(gt=0, le=60)
+    validity_days_snapshot: int = Field(gt=0)
+    status: RewardRedemptionStatus
+    created_at: AwareDatetime
+
+
+class ParkingVoucher(ContractModel):
+    id: EntityId
+    redemption_id: EntityId
+    catalog_code_snapshot: str
+    points_cost_snapshot: int = Field(gt=0)
+    free_minutes_snapshot: int = Field(gt=0, le=60)
+    validity_days_snapshot: int = Field(gt=0)
+    status: ParkingVoucherStatus
+    issued_at: AwareDatetime
+    expires_at: AwareDatetime
+    applied_at: AwareDatetime | None = None
+    applied_session_id: EntityId | None = None
+
+
+class RewardRedemptionResult(ContractModel):
+    redemption: RewardRedemption
+    voucher: ParkingVoucher
+    available_points: int = Field(ge=0)
 
 
 class ContributionRecord(ContractModel):

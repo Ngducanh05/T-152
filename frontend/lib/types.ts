@@ -76,8 +76,10 @@ export interface AdjacentSlotObservationRequest {
 export type SlotObservationStatus = "PENDING" | "VERIFIED" | "REJECTED" | "EXPIRED";
 export type RewardSourceType =
   | "ADJACENT_SLOT_OBSERVATION"
-  | "WRONG_PARKING_REPORT";
-export type RewardTransactionStatus = "PENDING" | "EARNED" | "CANCELLED";
+  | "WRONG_PARKING_REPORT"
+  | "VOUCHER_REDEMPTION";
+export type RewardTransactionStatus = "PENDING" | "EARNED" | "CANCELLED" | "POSTED";
+export type ParkingVoucherStatus = "ISSUED" | "APPLIED" | "EXPIRED" | "CANCELLED";
 
 export interface SlotObservation {
   id: EntityId;
@@ -110,6 +112,44 @@ export interface RewardConfiguration {
   adjacent_observation_reward_points: number;
   wrong_parking_report_reward_points: number;
   contribution_daily_points_limit: number;
+}
+
+export interface RewardCatalogItem {
+  id: EntityId;
+  code: string;
+  name: string;
+  points_cost: number;
+  free_minutes: number;
+  validity_days: number;
+  version: number;
+}
+
+export interface ParkingVoucher {
+  id: EntityId;
+  redemption_id: EntityId;
+  catalog_code_snapshot: string;
+  points_cost_snapshot: number;
+  free_minutes_snapshot: number;
+  validity_days_snapshot: number;
+  status: ParkingVoucherStatus;
+  issued_at: string;
+  expires_at: string;
+  applied_at: string | null;
+  applied_session_id: EntityId | null;
+}
+
+export interface RewardRedemptionResult {
+  redemption: {
+    id: EntityId;
+    catalog_item_id: EntityId;
+    points_cost_snapshot: number;
+    free_minutes_snapshot: number;
+    validity_days_snapshot: number;
+    status: "COMPLETED" | "REFUNDED";
+    created_at: string;
+  };
+  voucher: ParkingVoucher;
+  available_points: number;
 }
 
 export interface ContributionRecord {

@@ -2,9 +2,9 @@
 
 Source of truth:
 - `src/core/db_models.py`
-- Alembic revisions `20260804_0001` through merge head `20260824_0010`
+- Alembic revisions through `20260830_0016`
 
-This document describes the schema after Alembic revision `20260824_0010` and
+This document describes the schema after Alembic revision `20260830_0016` and
 Supabase platform hardening.
 
 ## Identity boundary
@@ -45,7 +45,11 @@ erDiagram
     PARKING_SESSIONS ||--o{ SLOT_OBSERVATIONS : during_session
     PARKING_SLOTS ||--o{ SLOT_OBSERVATIONS : observed_slot
 
-    PARKING_USERS ||--o{ REWARD_TRANSACTIONS : earns
+    PARKING_USERS ||--o{ REWARD_TRANSACTIONS : ledger
+    PARKING_USERS ||--o{ REWARD_REDEMPTIONS : redeems
+    REWARD_CATALOG_ITEMS ||--o{ REWARD_REDEMPTIONS : selected
+    REWARD_REDEMPTIONS ||--|| PARKING_VOUCHERS : issues
+    PARKING_USERS ||--o{ PARKING_VOUCHERS : owns
 ```
 
 ## Table inventory
@@ -63,7 +67,10 @@ erDiagram
 | `parking_events` | Audit/event history | `id varchar(64)` | `slot_id -> parking_slots.id` |
 | `wrong_parking_reports` | Wrong-parking report lifecycle | `id varchar(64)` | reporter user, slot |
 | `slot_observations` | Pending/verified/rejected/expired adjacent observations | `id varchar(64)` | observer user, parking session, slot |
-| `reward_transactions` | Authoritative pending/earned/cancelled Points ledger | `id varchar(64)` | user; source stored as immutable type/reference |
+| `reward_transactions` | Authoritative signed Points ledger | `id varchar(64)` | user; source stored as immutable type/reference |
+| `reward_catalog_items` | Operator-managed active reward policy | `id varchar(64)` | â€” |
+| `reward_redemptions` | Snapshot of an atomic catalog redemption | `id varchar(64)` | user; catalog item |
+| `parking_vouchers` | User-owned issued voucher snapshot | `id varchar(64)` | user; redemption (unique); catalog item; optional parking session |
 
 `location_checkpoints` is historical only. It was created in `0002` and removed by `0003`.
 
@@ -76,7 +83,8 @@ erDiagram
 - Active parking-session uniqueness is enforced for user, vehicle and slot by partial unique indexes.
 - `parking_slots.version` and `wrong_parking_reports.version` are optimistic-concurrency counters.
 - `slot_observations(observer_session_id, slot_id)` is unique.
-- `reward_transactions(source_type, source_reference)` is unique and prevents double reward.
+- `reward_transactions(source_type, source_reference, transaction_type)` is unique and prevents duplicate ledger effects.
+- `parking_vouchers.redemption_id` is unique; the nullable `applied_session_id` has a partial unique index for future application work.
 - Evidence stores only the private Storage object path/type/size; image bytes are not stored in PostgreSQL.
 
 ## Supabase identity constraint

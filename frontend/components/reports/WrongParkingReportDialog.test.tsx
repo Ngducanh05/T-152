@@ -34,6 +34,27 @@ const createdReport: WrongParkingReport = {
 };
 
 describe("WrongParkingReportDialog", () => {
+  it("offers separate accessible camera and gallery actions that feed the same evidence field", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async () => createdReport);
+    const { container } = render(
+      <WrongParkingReportDialog slots={canonicalMap.slots} initialSlotId="F1-D01" rewardPoints={20} onClose={vi.fn()} onSubmit={onSubmit} />,
+    );
+    await user.click(screen.getByRole("button", { name: /Xe đỗ chéo vạch/ }));
+    await user.click(screen.getByRole("button", { name: /Chụp ảnh/ }));
+    await user.click(screen.getByRole("button", { name: /Thêm ảnh/ }));
+    const [camera, gallery] = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="file"]'));
+    expect(camera).toHaveAttribute("accept", "image/*");
+    expect(camera).toHaveAttribute("capture", "environment");
+    expect(gallery).toHaveAttribute("accept", "image/jpeg,image/png,image/webp,image/heic,image/heif");
+    expect(gallery).not.toHaveAttribute("capture");
+
+    const cameraFile = new File(["camera"], "camera.jpg", { type: "image/jpeg" });
+    await user.upload(camera, cameraFile);
+    expect(screen.getByText(/camera.jpg/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /Gửi báo cáo/ }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ evidence: cameraFile }), expect.any(String));
+  });
   it("selects a standard reason before submitting normalized optional fields", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn(async () => createdReport);

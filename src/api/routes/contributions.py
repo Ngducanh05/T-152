@@ -1,6 +1,6 @@
 """User contribution history and authoritative ParkSmart Points summaries."""
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 from sqlalchemy import select
 
 from src.api.dependencies import (
@@ -8,6 +8,7 @@ from src.api.dependencies import (
     SessionDependency,
     resolve_parking_user_id,
 )
+from src.api.errors import domain_http_error
 from src.core.config import get_settings
 from src.core.db_models import SlotObservation, WrongParkingReport
 from src.core.reward import RewardError, RewardService
@@ -21,13 +22,6 @@ from src.models.schemas import (
 )
 
 router = APIRouter(tags=["Contributions", "Rewards"])
-
-
-def _reward_error(error: RewardError) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"code": error.code.value, "message": error.message},
-    )
 
 
 @router.get(
@@ -46,7 +40,7 @@ async def user_contributions(
     try:
         transactions = list(await rewards.list_user_transactions(user_id))
     except RewardError as error:
-        raise _reward_error(error) from error
+        raise domain_http_error(error) from error
 
     records: dict[tuple[RewardSourceType, str], ContributionRecord] = {}
     for transaction in transactions:
@@ -61,7 +55,7 @@ async def user_contributions(
             observer_session_id=None,
             floor_id=floor_id,  # type: ignore[arg-type]
             slot_id=slot_id,
-            points=transaction.points,
+            points=transaction.points_delta,
             status=transaction.status,
             created_at=transaction.created_at,
             settled_at=transaction.settled_at,
@@ -115,7 +109,7 @@ async def user_reward_summary(
     try:
         summary = await RewardService(session).get_summary(user_id)
     except RewardError as error:
-        raise _reward_error(error) from error
+        raise domain_http_error(error) from error
     return SuccessResponse(data=summary)
 
 

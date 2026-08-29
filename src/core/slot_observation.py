@@ -174,7 +174,7 @@ class SlotObservationService:
             requested_points=self.settings.adjacent_observation_reward_points,
             metadata={"slot_id": slot.id, "floor_id": slot.floor_id},
         )
-        observation.reward_points = reward.points if reward is not None else 0
+        observation.reward_points = reward.points_delta if reward is not None else 0
         await self.session.flush()
         observation.reward_status = reward.status if reward is not None else None
         return observation

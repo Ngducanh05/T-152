@@ -180,7 +180,7 @@ class ParkingReportService:
             requested_points=(0 if duplicate is not None else self.settings.wrong_parking_report_reward_points),
             metadata={"slot_id": slot.id, "floor_id": slot.floor_id},
         )
-        report.reward_points = reward.points if reward is not None else 0
+        report.reward_points = reward.points_delta if reward is not None else 0
         report.reward_status = reward.status if reward is not None else None
         # The reward reservation can autoflush the initial INSERT. Reasserting
         # updated_at prevents SQLAlchemy's server-side onupdate from expiring it

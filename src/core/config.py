@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     adjacent_observation_reward_points: int = Field(default=10, ge=0)
     wrong_parking_report_reward_points: int = Field(default=20, ge=0)
     contribution_daily_points_limit: int = Field(default=100, ge=0)
+    reward_business_timezone: str = "Asia/Ho_Chi_Minh"
     observation_verification_ttl_seconds: int = Field(default=1800, gt=0)
     report_reward_cooldown_seconds: int = Field(default=3600, ge=0)
     simulator_enabled: bool = Field(

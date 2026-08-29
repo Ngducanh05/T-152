@@ -1,5 +1,15 @@
 # ParkSmart AI API contract
 
+## Rewards and vouchers
+
+`RewardTransaction.points_delta` is a non-zero signed ledger amount: verified contributions
+are positive `EARNED`; voucher redemption is negative `POSTED`. `PENDING` contributions are
+not spendable. `GET /rewards/catalog` returns active catalog items, `POST /rewards/redemptions`
+atomically creates a debit/redemption/voucher with `Idempotency-Key`, and
+`GET /rewards/users/{user_id}/vouchers` returns only the owner's wallet. Voucher statuses are
+`ISSUED`, `APPLIED`, `EXPIRED`, and `CANCELLED`; redemption statuses are `COMPLETED` and
+`REFUNDED`.
+
 ## Status and scope
 
 This document defines the shared Phase 0 identifiers, enums, Pydantic data contracts, and response envelopes. It does not define ORM models, database migrations, repositories, transactions, or parking business logic.
@@ -30,8 +40,11 @@ ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 | WrongParkingReason | WRONG_SLOT, CROSSED_LINE, BLOCKING_ACCESS, OCCUPYING_CHARGER, OTHER |
 | SlotObservationStatus | PENDING, VERIFIED, REJECTED, EXPIRED |
 | WrongParkingReportVerificationOutcome | PENDING, CONFIRMED, REJECTED, DUPLICATE, UNVERIFIABLE |
-| RewardSourceType | ADJACENT_SLOT_OBSERVATION, WRONG_PARKING_REPORT |
-| RewardTransactionStatus | PENDING, EARNED, CANCELLED |
+| RewardSourceType | ADJACENT_SLOT_OBSERVATION, WRONG_PARKING_REPORT, VOUCHER_REDEMPTION |
+| RewardTransactionType | CONTRIBUTION_REWARD, VOUCHER_REDEMPTION, VOUCHER_REFUND |
+| RewardTransactionStatus | PENDING, EARNED, CANCELLED, POSTED |
+| RewardRedemptionStatus | COMPLETED, REFUNDED |
+| ParkingVoucherStatus | ISSUED, APPLIED, EXPIRED, CANCELLED |
 | ErrorCode | Canonical values live in `src/models/schemas.py`; public feature availability codes include AGENT_DISABLED and SPEECH_DISABLED; contribution/report additions include OBSERVATION_NOT_FOUND, OBSERVATION_ALREADY_EXISTS, OBSERVATION_EXPIRED, INVALID_OBSERVATION_TRANSITION, OBSERVATION_VERSION_CONFLICT, REWARD_ALREADY_SETTLED, REPORT_REWARD_DUPLICATE and CONTRIBUTION_DAILY_LIMIT_REACHED |
 
 ## Data schemas
@@ -54,8 +67,11 @@ The canonical Pydantic definitions live in src/models/schemas.py.
 | ParkingEvent | id, event_type, slot_id, actor_type, actor_id, old_status, new_status, created_at, metadata |
 | SlotObservation | id, observer_user_id, observer_session_id, slot_id, observed_status, verification_status, reward_points, observed_slot_version, created_at, expires_at, verified_at, verified_by, rejection_reason, version, reward_status |
 | WrongParkingReport | id, reporter_user_id, slot_id, reason_code, status, observed_plate_number, description, evidence_storage_path, evidence_content_type, evidence_size_bytes, created_at, updated_at, resolved_at, resolved_by, resolution_note, verification_outcome, reward_points, reward_status, duplicate_candidate_of_id, version |
-| RewardTransaction | id, user_id, source_type, source_reference, transaction_type, status, points, created_at, settled_at, metadata |
+| RewardTransaction | id, user_id, source_type, source_reference, transaction_type, status, points_delta, created_at, settled_at, metadata |
 | RewardSummary | available_points, pending_points, verified_contributions, daily_pending_points, daily_earned_points, daily_limit_points |
+| RewardCatalogItem | id, code, name, points_cost, free_minutes, validity_days, version |
+| RewardRedemption | id, catalog_item_id, points_cost_snapshot, free_minutes_snapshot, validity_days_snapshot, status, created_at |
+| ParkingVoucher | id, redemption_id, catalog_code_snapshot, points_cost_snapshot, free_minutes_snapshot, validity_days_snapshot, status, issued_at, expires_at, applied_at, applied_session_id |
 
 Nullable fields include User.current_node_id, ParkingSlot.occupied_by_vehicle_id,
 ParkingSession.completed_at, RecommendationRequest.floor_id, RecommendationRequest.zone_id,

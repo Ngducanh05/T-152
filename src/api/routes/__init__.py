@@ -12,6 +12,7 @@ from src.api.routes.parking import router as parking_router
 from src.api.routes.recommendations import router as recommendations_router
 from src.api.routes.reports import router as reports_router
 from src.api.routes.reservations import router as reservations_router
+from src.api.routes.rewards import router as rewards_router
 from src.api.routes.routing import router as routing_router
 from src.api.routes.sessions import router as sessions_router
 from src.api.routes.simulator import router as simulator_router
@@ -28,6 +29,7 @@ api_router.include_router(parking_router)
 api_router.include_router(recommendations_router)
 api_router.include_router(reservations_router)
 api_router.include_router(reports_router)
+api_router.include_router(rewards_router)
 api_router.include_router(routing_router)
 api_router.include_router(sessions_router)
 api_router.include_router(speech_router)

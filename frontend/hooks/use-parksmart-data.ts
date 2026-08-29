@@ -12,7 +12,9 @@ import type {
   ParkingSlot,
   ParkingStatus,
   RewardConfiguration,
+  RewardCatalogItem,
   RewardSummary,
+  ParkingVoucher,
 } from "@/lib/types";
 
 export const PARKING_POLL_INTERVAL_MS = 10_000;
@@ -27,6 +29,8 @@ export interface ParkSmartSnapshot {
   rewardSummary: RewardSummary | null;
   rewardConfiguration: RewardConfiguration;
   contributions: ContributionRecord[];
+  rewardCatalog: RewardCatalogItem[];
+  vouchers: ParkingVoucher[];
 }
 
 export interface ParkSmartDataState {
@@ -39,6 +43,8 @@ export interface ParkSmartDataState {
   rewardSummary: RewardSummary | null;
   rewardConfiguration: RewardConfiguration | null;
   contributions: ContributionRecord[];
+  rewardCatalog: RewardCatalogItem[];
+  vouchers: ParkingVoucher[];
   lastUpdatedAt: string | null;
   loading: boolean;
   refreshing: boolean;
@@ -60,6 +66,8 @@ const initialState: ParkSmartDataState = {
   rewardSummary: null,
   rewardConfiguration: null,
   contributions: [],
+  rewardCatalog: [],
+  vouchers: [],
   lastUpdatedAt: null,
   loading: true,
   refreshing: false,
@@ -77,13 +85,17 @@ export async function loadAuthoritativeState(
   userId: string | null,
   signal?: AbortSignal,
 ): Promise<ParkSmartSnapshot> {
+  // Keep narrowly typed test doubles from older consumers compatible; the real
+  // client always implements these methods and production failures still surface.
+  const getCatalog = api.getRewardCatalog?.bind(api) ?? (async () => []);
+  const getVouchers = api.getUserVouchers?.bind(api) ?? (async () => []);
   const [map, parkingSnapshot] = await Promise.all([
     api.getMap(signal),
     api.getParkingSnapshot(signal),
   ]);
   const { slots, status } = parkingSnapshot;
   if (!userId) {
-    const rewardConfiguration = await api.getRewardConfiguration(signal);
+    const [rewardConfiguration, rewardCatalog] = await Promise.all([api.getRewardConfiguration(signal), getCatalog(signal)]);
     return {
       map,
       slots,
@@ -94,11 +106,15 @@ export async function loadAuthoritativeState(
       rewardSummary: null,
       rewardConfiguration,
       contributions: [],
+      rewardCatalog,
+      vouchers: [],
     };
   }
-  const [userState, contributions] = await Promise.all([
+  const [userState, contributions, rewardCatalog, vouchers] = await Promise.all([
     api.getUserParkingState(userId, signal),
     api.getUserContributions(userId, signal),
+    getCatalog(signal),
+    getVouchers(userId, signal),
   ]);
   return {
     map,
@@ -110,6 +126,8 @@ export async function loadAuthoritativeState(
     rewardSummary: userState.reward_summary,
     rewardConfiguration: userState.reward_configuration,
     contributions,
+    rewardCatalog,
+    vouchers,
   };
 }
 

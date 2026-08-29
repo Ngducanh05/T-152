@@ -17,8 +17,12 @@ from src.core.db_models import (
     MapNode,
     ParkingEvent,
     ParkingSlot,
+    ParkingVoucher,
     Profile,
     ReportDailyUsage,
+    RewardCatalogItem,
+    RewardRedemption,
+    RewardTransaction,
     Vehicle,
     WrongParkingReport,
 )
@@ -44,6 +48,9 @@ EXPECTED_TABLES = {
     "wrong_parking_reports",
     "slot_observations",
     "reward_transactions",
+    "reward_catalog_items",
+    "reward_redemptions",
+    "parking_vouchers",
 }
 
 
@@ -59,6 +66,31 @@ def test_single_metadata_contains_profile_and_parking_tables():
     assert set(Base.metadata.tables) == EXPECTED_TABLES
     assert Profile.metadata is Base.metadata
     assert ParkingSlot.metadata is Base.metadata
+
+
+def test_reward_redemption_models_keep_signed_ledger_and_voucher_guards():
+    ledger = RewardTransaction.__table__
+    catalog = RewardCatalogItem.__table__
+    redemption = RewardRedemption.__table__
+    voucher = ParkingVoucher.__table__
+
+    assert "points_delta" in ledger.c
+    assert "points" not in ledger.c
+    assert {constraint.name for constraint in ledger.constraints} >= {
+        "ck_reward_transactions_points_delta_nonzero",
+        "uq_reward_transactions_source_transaction_type",
+    }
+    assert {constraint.name for constraint in catalog.constraints} >= {
+        "ck_reward_catalog_items_free_minutes_range",
+    }
+    assert {constraint.name for constraint in redemption.constraints} >= {
+        "ck_reward_redemptions_free_minutes_range",
+    }
+    assert {constraint.name for constraint in voucher.constraints} >= {
+        "ck_parking_vouchers_free_minutes_range",
+        "ck_parking_vouchers_expiry_after_issue",
+    }
+    assert "uq_parking_vouchers_applied_session" in {index.name for index in voucher.indexes}
 
 
 def test_parking_migration_follows_profiles_revision():
@@ -77,8 +109,9 @@ def test_parking_migration_follows_profiles_revision():
     verified_location_revision = scripts.get_revision("20260826_0013")
     idempotency_revision = scripts.get_revision("20260826_0014")
     invariant_revision = scripts.get_revision("20260826_0015")
+    reward_revision = scripts.get_revision("20260830_0016")
 
-    assert scripts.get_current_head() == "20260826_0015"
+    assert scripts.get_current_head() == "20260830_0016"
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
     assert location_cleanup_revision is not None
@@ -105,6 +138,8 @@ def test_parking_migration_follows_profiles_revision():
     assert idempotency_revision.down_revision == "20260826_0013"
     assert invariant_revision is not None
     assert invariant_revision.down_revision == "20260826_0014"
+    assert reward_revision is not None
+    assert reward_revision.down_revision == "20260826_0015"
 
 
 def test_agent_daily_usage_model_and_migration_constraints_match():

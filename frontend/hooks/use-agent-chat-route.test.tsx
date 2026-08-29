@@ -42,6 +42,8 @@ describe("Agent structured UI effects", () => {
         contribution_daily_points_limit: 100,
       },
       contributions: [],
+      rewardCatalog: [],
+      vouchers: [],
     };
     const api = {
       confirmLocation: vi.fn(),

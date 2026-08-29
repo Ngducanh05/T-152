@@ -51,6 +51,10 @@ function responseFor(url: string) {
   if (url.endsWith("/rewards/configuration")) {
     return successResponse(rewardConfiguration);
   }
+  if (url.endsWith("/rewards/catalog")) return successResponse([]);
+  if (url.includes("/rewards/users/") && url.endsWith("/vouchers")) {
+    return successResponse([]);
+  }
   throw new Error(`Unexpected request: ${url}`);
 }
 
@@ -88,7 +92,7 @@ it("loads static map, dynamic snapshot, and aggregate user state", async () => {
   expect(result.current.activeReservation).toEqual(activeReservation);
   expect(result.current.activeSession).toEqual(activeSession);
   expect(result.current.rewardSummary).toEqual(rewardSummary);
-  expect(fetcher).toHaveBeenCalledTimes(4);
+  expect(fetcher).toHaveBeenCalledTimes(6);
 });
 
 it("finishes aggregate loading when Strict Mode remounts the effect", async () => {

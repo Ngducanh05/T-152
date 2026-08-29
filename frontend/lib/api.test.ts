@@ -184,6 +184,36 @@ describe("mutation idempotency headers", () => {
   });
 });
 
+describe("reward voucher client", () => {
+  it("reads the public catalog and an encoded owned voucher wallet", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope([])),
+    );
+    const api = new ParkSmartApiClient({ baseUrl: "http://api.test/api/v1", fetcher });
+
+    await api.getRewardCatalog();
+    await api.getUserVouchers("USER / 001");
+
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe("http://api.test/api/v1/rewards/catalog");
+    expect(String(fetcher.mock.calls[1]?.[0])).toBe("http://api.test/api/v1/rewards/users/USER%20%2F%20001/vouchers");
+  });
+
+  it("posts only the selected reward identifiers and forwards its idempotency key", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => jsonResponse(successEnvelope({})));
+    const api = new ParkSmartApiClient({ baseUrl: "http://api.test/api/v1", fetcher });
+
+    await api.redeemRewardVoucher({ user_id: "USER-001", catalog_item_id: "CATALOG-200" }, undefined, "reward-key");
+
+    const [, request] = fetcher.mock.calls[0] ?? [];
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe("http://api.test/api/v1/rewards/redemptions");
+    expect(request).toMatchObject({ method: "POST", body: JSON.stringify({ user_id: "USER-001", catalog_item_id: "CATALOG-200" }) });
+    expect(new Headers(request?.headers).get("Idempotency-Key")).toBe("reward-key");
+    expect(String(request?.body)).not.toContain("points_cost");
+    expect(String(request?.body)).not.toContain("free_minutes");
+    expect(String(request?.body)).not.toContain("validity_days");
+  });
+});
+
 describe("operator-safe errors", () => {
   it("shows the stable API code and request ID with understandable Vietnamese wording", () => {
     const error = new ApiError({

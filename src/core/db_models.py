@@ -25,7 +25,9 @@ from src.models.schemas import (
     MapNodeType,
     ParkingEventType,
     ParkingSessionStatus,
+    ParkingVoucherStatus,
     ReservationStatus,
+    RewardRedemptionStatus,
     RewardSourceType,
     RewardTransactionStatus,
     RewardTransactionType,
@@ -440,11 +442,12 @@ class SlotObservation(Base):
 class RewardTransaction(Base):
     __tablename__ = "reward_transactions"
     __table_args__ = (
-        CheckConstraint("points >= 0", name="ck_reward_transactions_points_nonnegative"),
+        CheckConstraint("points_delta <> 0", name="ck_reward_transactions_points_delta_nonzero"),
         UniqueConstraint(
             "source_type",
             "source_reference",
-            name="uq_reward_transactions_source",
+            "transaction_type",
+            name="uq_reward_transactions_source_transaction_type",
         ),
         Index(
             "ix_reward_transactions_user_status_created",
@@ -481,12 +484,114 @@ class RewardTransaction(Base):
         default=RewardTransactionStatus.PENDING,
         server_default=text("'PENDING'"),
     )
-    points: Mapped[int] = mapped_column(Integer, nullable=False)
+    points_delta: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     transaction_metadata: Mapped[dict[str, object]] = mapped_column(
         "metadata", JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
+
+
+class RewardCatalogItem(Base):
+    __tablename__ = "reward_catalog_items"
+    __table_args__ = (
+        CheckConstraint("points_cost > 0", name="ck_reward_catalog_items_points_cost_positive"),
+        CheckConstraint("free_minutes > 0 AND free_minutes <= 60", name="ck_reward_catalog_items_free_minutes_range"),
+        CheckConstraint("validity_days > 0", name="ck_reward_catalog_items_validity_days_positive"),
+        CheckConstraint("version >= 0", name="ck_reward_catalog_items_version_nonnegative"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    points_cost: Mapped[int] = mapped_column(Integer, nullable=False)
+    free_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    validity_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RewardRedemption(Base):
+    __tablename__ = "reward_redemptions"
+    __table_args__ = (
+        CheckConstraint("points_cost_snapshot > 0", name="ck_reward_redemptions_points_cost_positive"),
+        CheckConstraint(
+            "free_minutes_snapshot > 0 AND free_minutes_snapshot <= 60", name="ck_reward_redemptions_free_minutes_range"
+        ),
+        CheckConstraint("validity_days_snapshot > 0", name="ck_reward_redemptions_validity_days_positive"),
+        CheckConstraint("version >= 0", name="ck_reward_redemptions_version_nonnegative"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("parking_users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    catalog_item_id: Mapped[str] = mapped_column(
+        ForeignKey("reward_catalog_items.id", ondelete="RESTRICT"), nullable=False
+    )
+    points_cost_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    free_minutes_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    validity_days_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[RewardRedemptionStatus] = mapped_column(
+        Enum(RewardRedemptionStatus, name="reward_redemption_status_enum", values_callable=_enum_values),
+        nullable=False,
+        default=RewardRedemptionStatus.COMPLETED,
+        server_default=text("'COMPLETED'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+
+
+class ParkingVoucher(Base):
+    __tablename__ = "parking_vouchers"
+    __table_args__ = (
+        CheckConstraint("points_cost_snapshot > 0", name="ck_parking_vouchers_points_cost_positive"),
+        CheckConstraint(
+            "free_minutes_snapshot > 0 AND free_minutes_snapshot <= 60", name="ck_parking_vouchers_free_minutes_range"
+        ),
+        CheckConstraint("validity_days_snapshot > 0", name="ck_parking_vouchers_validity_days_positive"),
+        CheckConstraint("expires_at > issued_at", name="ck_parking_vouchers_expiry_after_issue"),
+        CheckConstraint("version >= 0", name="ck_parking_vouchers_version_nonnegative"),
+        Index(
+            "uq_parking_vouchers_applied_session",
+            "applied_session_id",
+            unique=True,
+            postgresql_where=text("applied_session_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("parking_users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    redemption_id: Mapped[str] = mapped_column(
+        ForeignKey("reward_redemptions.id", ondelete="RESTRICT"), nullable=False, unique=True
+    )
+    catalog_item_id: Mapped[str] = mapped_column(
+        ForeignKey("reward_catalog_items.id", ondelete="RESTRICT"), nullable=False
+    )
+    catalog_code_snapshot: Mapped[str] = mapped_column(String(64), nullable=False)
+    points_cost_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    free_minutes_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    validity_days_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[ParkingVoucherStatus] = mapped_column(
+        Enum(ParkingVoucherStatus, name="parking_voucher_status_enum", values_callable=_enum_values),
+        nullable=False,
+        default=ParkingVoucherStatus.ISSUED,
+        server_default=text("'ISSUED'"),
+    )
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    applied_session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("parking_sessions.id", ondelete="RESTRICT"), nullable=True
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
 
 
 class WrongParkingReport(Base):
@@ -588,9 +693,12 @@ __all__ = [
     "ReportDailyUsage",
     "ReservationStatus",
     "RewardSourceType",
+    "RewardCatalogItem",
+    "RewardRedemption",
     "RewardTransaction",
     "RewardTransactionStatus",
     "RewardTransactionType",
+    "ParkingVoucher",
     "RouteMode",
     "SlotObservation",
     "SlotObservationStatus",

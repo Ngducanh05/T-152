@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ApiError, formatApiErrorForOperator } from "@/lib/api";
 import {
@@ -68,6 +68,7 @@ export function WrongParkingReportDialog({
   const [observedPlateNumber, setObservedPlateNumber] = useState("");
   const [description, setDescription] = useState("");
   const [evidence, setEvidence] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedReason, setSelectedReason] =
     useState<WrongParkingReason | null>(null);
   const [pending, setPending] = useState(false);
@@ -76,6 +77,32 @@ export function WrongParkingReportDialog({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submittingRef = useRef(false);
   const reportIdempotencyRef = useRef<IdempotencyAttempt | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
+  }, [previewUrl]);
+
+  function selectEvidence(file: File | null) {
+    if (file && (!ALLOWED_IMAGE_TYPES.has(file.type.toLowerCase()) || file.size <= 0 || file.size > MAX_IMAGE_BYTES)) {
+      setEvidence(null);
+      setPreviewUrl(null);
+      setErrorMessage("Ảnh phải đúng định dạng hình ảnh và có dung lượng tối đa 5 MB.");
+      return;
+    }
+    setEvidence(file);
+    if (!file) {
+      setPreviewUrl(null);
+    } else {
+      try { setPreviewUrl(URL.createObjectURL(file)); } catch { setPreviewUrl(null); }
+    }
+    setErrorMessage(null);
+  }
+
+  function evidenceChange(event: React.ChangeEvent<HTMLInputElement>) {
+    selectEvidence(event.target.files?.[0] ?? null);
+  }
 
   async function submitReport() {
     const normalizedDescription = description.trim();
@@ -262,37 +289,20 @@ export function WrongParkingReportDialog({
                     />
                     <small>{description.length}/500 ký tự</small>
                   </label>
-                  <label>
-                    Ảnh hiện trường (không bắt buộc)
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-                      capture="environment"
-                      disabled={pending}
-                      onChange={(event) => {
-                        const file = event.target.files?.[0] ?? null;
-                        if (
-                          file &&
-                          (!ALLOWED_IMAGE_TYPES.has(file.type.toLowerCase()) ||
-                            file.size <= 0 ||
-                            file.size > MAX_IMAGE_BYTES)
-                        ) {
-                          setEvidence(null);
-                          setErrorMessage(
-                            "Ảnh phải đúng định dạng hình ảnh và có dung lượng tối đa 5 MB.",
-                          );
-                          return;
-                        }
-                        setEvidence(file);
-                        setErrorMessage(null);
-                      }}
-                    />
-                    <small>
-                      {evidence
-                        ? `Đã chọn: ${evidence.name}`
-                        : "Thêm ảnh giúp bộ phận vận hành xác minh nhanh hơn."}
-                    </small>
-                  </label>
+                  <section className="report-evidence">
+                    <label htmlFor="wrong-parking-gallery-input">Ảnh hiện trường (không bắt buộc)</label>
+                    <input ref={cameraInputRef} className="visually-hidden" type="file" accept="image/*" capture="environment" disabled={pending} onChange={evidenceChange} />
+                    <input id="wrong-parking-gallery-input" ref={galleryInputRef} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" disabled={pending} onChange={evidenceChange} />
+                    <div className="report-evidence-actions">
+                      <button type="button" disabled={pending} onClick={() => cameraInputRef.current?.click()}>{evidence ? "Chụp lại" : "Chụp ảnh"}</button>
+                      <button type="button" disabled={pending} onClick={() => galleryInputRef.current?.click()}>{evidence ? "Đổi ảnh" : "Thêm ảnh"}</button>
+                      {evidence && <button type="button" disabled={pending} onClick={() => selectEvidence(null)}>Xóa ảnh</button>}
+                    </div>
+                    {evidence ? <div className="report-evidence-selected">
+                      {previewUrl ? <img src={previewUrl} alt="Ảnh hiện trường đã chọn" /> : null}
+                      <small>Đã chọn: {evidence.name}</small><small> · {(evidence.size / 1_000_000).toFixed(1)} MB</small>
+                    </div> : <small>Thêm ảnh giúp bộ phận vận hành xác minh nhanh hơn.</small>}
+                  </section>
                   <p className="report-privacy-notice">
                     Ảnh chỉ được dùng để xác minh báo cáo. Không chụp khuôn mặt
                     hoặc thông tin cá nhân không cần thiết. Admin được ủy quyền

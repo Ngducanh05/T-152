@@ -17,6 +17,7 @@ from src.core.observability import get_active_observability
 from src.core.parking_session import ParkingSessionError
 from src.core.parking_state import ParkingStateError
 from src.core.recommendation import RecommendationError
+from src.core.reward import RewardError
 from src.core.routing import RoutingError
 from src.models.schemas import ErrorCode
 
@@ -32,6 +33,7 @@ _DOMAIN_ERRORS = (
     ParkingStateError,
     RecommendationError,
     RoutingError,
+    RewardError,
 )
 _LOGGER = logging.getLogger(__name__)
 

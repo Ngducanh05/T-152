@@ -80,6 +80,8 @@ function fixture() {
       contribution_daily_points_limit: 100,
     },
     contributions: [],
+    rewardCatalog: [],
+    vouchers: [],
   };
   const refresh = vi.fn(async () => snapshot);
   const data: WorkflowData = {

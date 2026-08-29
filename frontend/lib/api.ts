@@ -37,7 +37,10 @@ import type {
   RouteRequest,
   RouteResponse,
   RewardConfiguration,
+  RewardCatalogItem,
+  RewardRedemptionResult,
   RewardSummary,
+  ParkingVoucher,
   SimulatorStep,
   SimulatorMutationRequest,
   SlotFilters,
@@ -599,6 +602,30 @@ export class ParkSmartApiClient {
     return this.request<RewardConfiguration>("/rewards/configuration", {
       signal,
     });
+  }
+
+  getRewardCatalog(signal?: AbortSignal) {
+    return this.request<RewardCatalogItem[]>("/rewards/catalog", { signal });
+  }
+
+  redeemRewardVoucher(
+    payload: { user_id: string; catalog_item_id: string },
+    signal?: AbortSignal,
+    idempotencyKey?: string,
+  ) {
+    return this.request<RewardRedemptionResult>("/rewards/redemptions", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: idempotencyHeaders(idempotencyKey),
+      signal,
+    });
+  }
+
+  getUserVouchers(userId: string, signal?: AbortSignal) {
+    return this.request<ParkingVoucher[]>(
+      `/rewards/users/${encodeURIComponent(userId)}/vouchers`,
+      { signal },
+    );
   }
 
   getUserContributions(userId: string, signal?: AbortSignal) {

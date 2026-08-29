@@ -13,7 +13,7 @@ import { LogoutButton } from "@/components/auth/LogoutButton";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { LocationPicker } from "@/components/location/LocationPicker";
 import { AdjacentSlotObservation } from "@/components/parking/AdjacentSlotObservation";
-import { RewardSummaryCard } from "@/components/rewards/RewardSummaryCard";
+import { RewardCenter } from "@/components/rewards/RewardCenter";
 import {
   WrongParkingReportDialog,
   type WrongParkingReportDraft,
@@ -193,9 +193,14 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
             </section>
           )}
           {data.rewardSummary && (
-            <RewardSummaryCard
+            <RewardCenter
+              userId={identity.userId}
               summary={data.rewardSummary}
               contributions={data.contributions}
+              catalog={data.rewardCatalog}
+              vouchers={data.vouchers}
+              onRedeem={(catalogItemId, idempotencyKey) => parkSmartApi.redeemRewardVoucher({ user_id: identity.userId, catalog_item_id: catalogItemId }, undefined, idempotencyKey)}
+              onRefresh={data.refresh}
             />
           )}
           {hasPriorityContent && (
