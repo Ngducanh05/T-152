@@ -4,44 +4,54 @@
 
 | Field | Value |
 |---|---|
-| Run ID | `4be297b91895462c97b7f503b9f3d267` |
-| Started / finished (UTC) | `2026-08-28T13:58:50.728679+00:00` / `2026-08-28T14:00:43.191522+00:00` |
+| Run ID | `a9cf46e293b2474089585e614317031f` |
+| Started / finished (UTC) | `2026-08-29T04:35:02.815719+00:00` / `2026-08-29T04:36:16.852355+00:00` |
 | Model | `gpt-4o-mini` |
 | Temperature | `0.0` |
+| Evidence / model / tools | `live_llm` / `live` / `fake` |
 | Agent max steps / timeout | `8` / `30.0s` |
-| Git commit | `724cee886284f983559276bbe55041e82fe0429b` |
-| Git branch | `feat/agent-golden-eval` |
+| Live repetitions | `1` |
+| Case executions | `29` (29 cases × 1) |
+| Git commit | `e5f9514628360451e3bb0d67a6eddd9502a6dcc7` |
+| Git branch | `eval/benchmark-agent-quality` |
 | Working tree dirty | `True` |
-| Dataset | `3.2` / `c2e12b47b7b539984c9dc9b9aa40a109348c4ce737a4b39640f6c369c766c273` |
+| Dataset | `4.2` / `cfde559054246b96f21adcb29b5fb7f5ee5bd7d0c56a09592eb46da619a41821` |
 | Scope | LangGraph/model output with deterministic fake tools; not API/DB E2E |
-| Execution bundle hash | `a802d801796cfb8e8f1bcf75e51797f1445046d629db1cff07cd1f2739ccff26` |
-| Prompt hash | `d6e13bbc09129f09f36e8b35e4e83ce5e0783570934df8ea64e67bf97692b7fa` |
-| Scorer hash | `3ba4b2f4e377bf5204f1f6f98cdd967a1274270c0083a0c9a47a4bd575418f6f` |
-| Runner hash | `822cf561a10da0dffda775cd424fe4385724cd09ea820130d8d94acae3ebd748` |
+| Execution bundle hash | `ebc962a2dd7cc8a8e0448b24cb8bc89f9145cc07da3569c8ff75268ca9c98701` |
+| Prompt hash | `4a4bf6458135f334dc418ae5236abcbff2d5b36afa2520df21893a82aebf6470` |
+| Scorer hash | `afe088b0e5664b917546fa030884987ec261f2e5dd7fc76bc12ab8f04dbff693` |
+| Runner hash | `1b4101c52337584e8ade8fbd72cff70b883b11c066bfa1c077e1aa1165c99d6e` |
 
 ## Summary
 
-- Task success: 96.0% (24/25)
-- Tool-contract accuracy: 96.0% (24/25)
-- Response-contract accuracy: 100.0% (25/25)
-- Refusal compliance: 100.0% (5/5)
-- Unauthorized write-tool invocation: 0.0% (0/25)
-- Forbidden/premature read invocation: 4.0% (1/25)
-- Mean in-process golden-harness graded-turn latency: 3.81s
-- P95 in-process golden-harness graded-turn latency: 8.22s
-- Multi-turn cases (excluded from the two figures above as whole conversations): 2/25; mean full-conversation time 11.18s
+- Task success: 100.0% (29/29)
+- Tool-contract accuracy: 100.0% (29/29)
+- Response-contract accuracy: 100.0% (29/29)
+- Refusal compliance: 100.0% (6/6)
+- Unauthorized write-tool invocation: 0.0% (0/29)
+- Forbidden/premature read invocation: 0.0% (0/29)
+- Mean in-process golden-harness graded-turn latency: 2.17s
+- P95 in-process golden-harness graded-turn latency: 3.67s
+- Multi-turn cases (excluded from the two figures above as whole conversations): 100.0% (3/3) task success; 3/29 executions; mean / P95 full-conversation time 5.42s / 6.59s
 
 ## By category
 
 | Category | Passed | Total | Rate |
 |---|---:|---:|---:|
-| PARKING | 11 | 12 | 91.7% |
+| PARKING | 13 | 13 | 100.0% |
 | REWARDS | 6 | 6 | 100.0% |
-| SAFETY | 7 | 7 | 100.0% |
+| ROBUSTNESS | 2 | 2 | 100.0% |
+| SAFETY | 8 | 8 | 100.0% |
+
+## By repetition
+
+| Repetition | Passed | Total | Rate |
+|---:|---:|---:|---:|
+| 1 | 29 | 29 | 100.0% |
 
 ## Failures
 
-- **recommend_floor_1** (PARKING): called unexpected tool(s): ['get_parking_slot_status', 'get_route']; called forbidden tool(s): ['get_parking_slot_status', 'get_route']
+None — all cases passed this run.
 
 ## Metric interpretation
 
@@ -50,5 +60,6 @@
 - **Safety:** unauthorized write calls and forbidden/premature reads are separate because their operational impact differs.
 - **Latency:** in-process graph/model latency with deterministic fake tools, not FastAPI/DB production E2E latency. It is measured on the graded turn only; prior turns build checkpoint state and are reported separately.
 - **Response surface:** this evaluates the graph's final AI message. The REST endpoint's deterministic route/fallback projection requires separate API tests.
+- **Critical mutations:** correctness is enforced by deterministic tool name, arguments, count, turn and dependency-order contracts. No LLM-as-judge is used to approve a reservation, cancellation, parking confirmation or other write.
 - **RAGAS:** not applicable to this repository because the agent has no retrieval or knowledge-base stage. Tool-grounded contracts measure the available context path.
 - A live model is not fully deterministic, even at temperature zero. Preserve each complete run and compare repeated runs before claiming a stable improvement.

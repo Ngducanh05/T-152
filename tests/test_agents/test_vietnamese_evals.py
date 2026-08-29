@@ -13,7 +13,10 @@ from langgraph.checkpoint.memory import InMemorySaver
 from eval.vietnamese_agent_cases import VIETNAMESE_AGENT_EVAL_CASES
 from src.agents.context import AgentRuntimeContext
 from src.agents.graph import build_graph
-from src.agents.nodes.guard_input import CROSS_IDENTITY_REFUSAL_MESSAGE
+from src.agents.nodes.guard_input import (
+    CROSS_IDENTITY_REFUSAL_MESSAGE,
+    PROMPT_INJECTION_REFUSAL_MESSAGE,
+)
 
 EVAL_CALLS: list[tuple[str, dict[str, Any]]] = []
 
@@ -248,7 +251,7 @@ async def test_vietnamese_intent_eval_is_deterministic(case):
         )
     ]
     if case.name == "reject_direct_database_bypass":
-        final_text = "Tôi không thể bỏ qua quy tắc hoặc sửa cơ sở dữ liệu trực tiếp."
+        final_text = PROMPT_INJECTION_REFUSAL_MESSAGE
     elif case.name == "occupied_slot_is_rejected":
         final_text = "Ô đó không còn trống; tôi chưa giữ chỗ nào cho bạn."
     elif case.name == "route_to_exact_slot_with_status":

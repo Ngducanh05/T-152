@@ -88,16 +88,17 @@ Artifact canonical dùng UTF-8 JSON, timestamp RFC 3339 UTC, duration tính bằ
 SHA-256 lowercase hex. Schema logic là `parksmart-benchmark-artifact/1.0`; runner tương lai
 có thể biểu diễn bằng JSON Schema nhưng không được bỏ các field bắt buộc dưới đây.
 
-Phạm vi issue này không sửa runner. Artifact evaluator-specific v3.2 hiện có vẫn được giữ
-làm source evidence để audit, nhưng không được tự gắn nhãn conforming schema `1.0` chỉ từ
-Markdown report. Việc phát sinh canonical envelope mới là follow-up implementation riêng.
+Golden harness hiện thực contract bằng evaluator schema `3`. Các field được giữ phẳng để
+tương thích pipeline hiện có, nhưng bắt buộc có cùng thông tin: evidence/model/tool boundary,
+dataset version/hash, repetition manifest, provenance, actual calls/output và validation.
+Artifact schema cũ vẫn được giữ làm source evidence lịch sử nhưng không được promote lại.
 
 ```json
 {
   "schema_version": "parksmart-benchmark-artifact/1.0",
   "benchmark": {
     "name": "parksmart-agent-golden",
-    "version": "3.2",
+    "version": "4.2",
     "evidence_level": "live_llm",
     "model_mode": "live",
     "tool_backend": "fake",
@@ -108,9 +109,12 @@ Markdown report. Việc phát sinh canonical envelope mới là follow-up implem
     "status": "complete",
     "started_at": "2026-08-28T13:58:50.728679Z",
     "finished_at": "2026-08-28T14:00:43.191522Z",
-    "expected_case_count": 25,
+    "expected_case_count": 29,
     "expected_case_ids": ["parking_status_overview"],
-    "executed_case_count": 25,
+    "executed_case_count": 29,
+    "repetition_count": 3,
+    "expected_execution_count": 87,
+    "executed_execution_count": 87,
     "timeout_seconds": 30.0,
     "random_seed": null
   },
@@ -145,12 +149,13 @@ Markdown report. Việc phát sinh canonical envelope mới là follow-up implem
     "reasons": []
   },
   "metrics": {
-    "task_success_rate": {"numerator": 24, "denominator": 25, "value": 0.96},
-    "refusal_compliance": {"numerator": 5, "denominator": 5, "value": 1.0}
+    "task_success_rate": {"numerator": 84, "denominator": 87, "value": 0.9655},
+    "refusal_compliance": {"numerator": 18, "denominator": 18, "value": 1.0}
   },
   "results": [
     {
       "case_id": "parking_status_overview",
+      "repetition": 0,
       "category": "PARKING",
       "task_pass": true,
       "tool_compliant": true,
@@ -180,7 +185,9 @@ Các constraint bắt buộc:
 - `model_mode`: `none`, `scripted`, `replay` hoặc `live`; `tool_backend`: `none`, `fake`,
   `local_real`, `staging_real` hoặc `production_real`. Với `live_llm`, model phải là `live`.
 - `run.status`: `complete`, `partial` hoặc `failed`. `finished_at` phải sau `started_at`;
-  case ID duy nhất; count và danh sách phải tự nhất quán.
+  cặp `(case ID, repetition)` duy nhất; count và danh sách phải tự nhất quán.
+- `repetition_count` là số nguyên từ 1 đến 20. Complete run phải có đúng tích Descartes của
+  toàn bộ case manifest và `0..repetition_count-1`, không thiếu hoặc trùng execution.
 - Mọi metric là object `{numerator, denominator, value}`. `value = numerator/denominator`
   trong sai số `1e-9`; denominator 0 thì `value` phải là `null`.
 - Mỗi result phải chứa actual requested/executed calls, output, duration và lý do chấm.
@@ -216,7 +223,7 @@ thiếu result. `failed` là runner/scorer/provider/stack lỗi khiến artifact
 Chỉ run thỏa tất cả điều kiện sau mới có `validation.promotable=true`:
 
 1. Schema và scorer validation hợp lệ; run `complete` và scoring valid.
-2. Expected/executed case IDs khớp chính xác manifest, không thiếu/thừa/trùng.
+2. Expected/executed `(case ID, repetition)` khớp chính xác manifest, không thiếu/thừa/trùng.
 3. Dataset, prompt, scorer, runner, execution bundle và config hash đầy đủ.
 4. Không có metric tự tính lại khác payload; mọi output/call cần audit vẫn còn sau redaction.
 5. Evidence level và boundary đúng với component thực sự chạy.
@@ -248,9 +255,9 @@ observation window và hạn chế. Mẫu canonical:
 
 | Claim | Evidence | Result | Target | Status | Giới hạn |
 |---|---|---:|---:|---|---|
-| Agent contract task success | Live LLM + fake tools | `24/25 (96.0%)` | `>80%` | PASS | Model/graph only; không phải full-system accuracy |
-| Unauthorized write cases | Live LLM + fake tools | `0/25 (0%)` | `0%` | PASS | Fixture tools; staging gate báo riêng |
-| Forbidden/premature read cases | Live LLM + fake tools | `1/25 (4.0%)` | `0%` | FAIL | Known recommendation regression |
+| Agent contract task success | Live LLM + fake tools | `29/29 (100%)` | `>80%` | PASS | Một dirty-tree run; không phải release/full-system accuracy |
+| Unauthorized write cases | Live LLM + fake tools | `0/29 (0%)` | `0%` | PASS | Fixture tools; staging gate báo riêng |
+| Forbidden/premature read cases | Live LLM + fake tools | `0/29 (0%)` | `0%` | PASS | Một repetition; cần lặp lại để đo stability |
 | Critical parking journeys | Staging deployed | `N/A` | `100%` | NOT MEASURED | Không suy diễn từ local/fake-tool test |
 | Production field completion | Production field | `N/A` | Chưa thiết lập | NOT MEASURED | Public beta chưa có field-study/SLO |
 
@@ -270,3 +277,33 @@ Nếu sau này thêm retrieval, phải tạo benchmark contract riêng cho corpu
 retrieval recall/precision và grounded generation. Không được hồi tố gắn RAGAS vào các
 artifact tool-calling hiện tại. Các metric phù hợp hiện nay là task, tool, response, safety,
 state invariant và latency đã định nghĩa ở trên.
+
+## 9. Chạy lại Agent benchmark
+
+Scorer, artifact validation và report tests không gọi provider:
+
+```powershell
+$env:DATABASE_URL = "postgresql+asyncpg://parksmart:parksmart@localhost:5432/parksmart_test"
+uv run pytest tests/test_agents/test_golden_eval.py -q
+```
+
+Live benchmark luôn bị skip nếu chưa có cả API key và explicit opt-in. Chạy một repetition:
+
+```powershell
+$env:RUN_LIVE_LLM_EVAL = "1"
+$env:GOLDEN_LIVE_REPETITIONS = "1"
+$env:LLM_API_KEY = "<key>"
+uv run pytest tests/test_agents/test_golden_live.py -m live_llm -q
+uv run python scripts/run_golden_eval.py
+```
+
+Để đo biến thiên model, đặt `GOLDEN_LIVE_REPETITIONS` từ `1` đến `20`, ví dụ `3`. Mỗi lần
+gọi pytest tạo một JSON archive trong `eval/results/runs/`, kể cả run partial. Chỉ khi đủ
+đúng `29 × repetitions` execution hợp lệ thì recorder mới cập nhật
+`eval/results/golden_eval_raw.json`; report generator chỉ đọc canonical complete đó.
+
+Không dùng `-k`, `-x` hoặc skip rồi công bố như complete run. Assertion fail của case vẫn
+được lưu trong complete artifact nếu toàn manifest đã chạy; provider error/interruption làm
+run partial và không thay canonical. Golden harness dùng fake tools, không gọi FastAPI/DB và
+không phải E2E. Critical mutation được chấm bằng contract tất định về tool, arguments, count,
+turn và order; không dùng LLM-as-judge để phê duyệt mutation correctness.

@@ -141,68 +141,87 @@ ruff --version
 deactivate
 ```
 
+## Chạy frontend với Docker Compose
 
+1. Khởi động database và backend:
 
+   ```powershell
+   Set-Location D:\learn\2026\VinAI\Project\P-152
+   docker compose up -d --build
+   ```
 
-##chạy frontend
-```bash
-cd frontend
-npm.cmd run dev
-```
-1. Khởi động database và backend bằng Docker:
-bash
-```
-  cd D:\learn\2026\VinAI\Project\P-152
-  docker compose up -d --build
-```
-  2. Chạy migration database:
-bash
-```
-  docker compose exec backend alembic upgrade head
-```
-  3. Seed dữ liệu bản đồ:
-bash
-```
-  docker compose exec backend python -c "import asyncio; from src.core.database import get_session_factory; from src.core.seed import
-  seed_if_missing; print(asyncio.run(seed_if_missing(get_session_factory()())))"
-```
-  4. Kiểm tra backend:
-bash
-```
-  Invoke-RestMethod http://localhost:8000/health
-```
-  5. Khởi động frontend:
-bash
-```
-  cd frontend
-  npm install
-  npm run dev
-```
-  6. Mở giao diện:
+1. Chạy migration database:
 
-  http://localhost:3000 (http://localhost:3000)
+   ```powershell
+   docker compose exec backend alembic upgrade head
+   ```
 
-  Không cần chạy thêm uvicorn, vì docker compose up đã khởi động backend trên cổng 8000.
+1. Seed dữ liệu bản đồ:
 
-  Những lần chạy sau, thông thường chỉ cần:
-  bash
+   ```powershell
+   docker compose exec backend python -c "import asyncio; from src.core.database import get_session_factory; from src.core.seed import seed_if_missing; print(asyncio.run(seed_if_missing(get_session_factory()())))"
+   ```
+
+1. Kiểm tra backend:
+
+   ```powershell
+   Invoke-RestMethod http://localhost:8000/health
+   ```
+
+1. Khởi động frontend:
+
+   ```powershell
+   npm --prefix frontend install
+   npm --prefix frontend run dev
+   ```
+
+1. Mở [giao diện local](http://localhost:3000).
+
+Không cần chạy thêm Uvicorn vì Docker Compose đã khởi động backend trên cổng 8000. Những
+lần chạy sau thường chỉ cần:
+
+```powershell
+docker compose up -d
+npm --prefix frontend run dev
 ```
-  docker compose up -d
-  npm --prefix frontend run dev
+
+Khi muốn dừng hệ thống, chạy `docker compose down` và nhấn Ctrl+C trong terminal frontend.
+
+Các lệnh phát triển hữu ích khác:
+
+```powershell
+uv run python scripts/reset_demo.py
+uv run uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
+npx vercel deploy --prod --logs
 ```
-  Khi muốn dừng hệ thống:
-bash
+
+## Chạy lại Agent benchmark
+
+Contract và cách diễn giải evidence nằm tại
+[`docs/BENCHMARKING.md`](docs/BENCHMARKING.md). Trước tiên chạy scorer và artifact tests;
+lệnh này không gọi LLM provider:
+
+```powershell
+$env:DATABASE_URL = "postgresql+asyncpg://parksmart:parksmart@localhost:5432/parksmart_test"
+uv run pytest tests/test_agents/test_golden_eval.py -q
 ```
-  docker compose down
+
+Live LLM benchmark chỉ chạy khi có explicit opt-in. Nếu thiếu một trong hai biến
+`RUN_LIVE_LLM_EVAL=1` hoặc `LLM_API_KEY`, pytest sẽ skip và không gọi provider:
+
+```powershell
+$env:RUN_LIVE_LLM_EVAL = "1"
+$env:GOLDEN_LIVE_REPETITIONS = "3"
+$env:LLM_API_KEY = "<key>"
+uv run pytest tests/test_agents/test_golden_live.py -m live_llm -q
+uv run python scripts/run_golden_eval.py
 ```
-  Và nhấn Ctrl + C trong terminal đang chạy frontend.
 
+`GOLDEN_LIVE_REPETITIONS` nhận giá trị từ `1` đến `20`, mặc định `1`. Mọi lần chạy thật
+đều có archive JSON trong `eval/results/runs/`. Run thiếu case/repetition vẫn được archive
+với trạng thái partial nhưng không cập nhật `eval/results/golden_eval_raw.json`; chỉ canonical
+complete mới được dùng để sinh `eval/results/golden_eval_report.md`.
 
-
-
-
-  uv run python scripts/reset_demo.py
-   uv run uvicorn src.main:app --reload --host 127.0.0.1 --port 8000 
-
-   redeploy
-    npx vercel deploy --prod --logs
+Benchmark này chạy LangGraph/model với fake tools tất định. Nó không gọi FastAPI/database,
+không phải full-system E2E và không được công bố như full-system accuracy. Correctness của
+mutation được chấm bằng tool contract tất định, không dùng LLM-as-judge.

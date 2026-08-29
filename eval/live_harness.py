@@ -455,6 +455,7 @@ def score_case(
     if forbidden:
         tool_reasons.append(f"called forbidden tool(s): {sorted(forbidden)}")
 
+    order_violation_names: set[str] = set()
     if case.ordered_tools:
         round_by_name: dict[str, int] = {}
         for round_index, names in enumerate(call_rounds):
@@ -469,6 +470,7 @@ def score_case(
             tool_reasons.append(
                 f"dependent tools were not called in later rounds: {case.ordered_tools}"
             )
+            order_violation_names.update(case.ordered_tools[1:])
 
     lowered = final_text.casefold()
     if not final_text.strip():
@@ -523,6 +525,7 @@ def score_case(
             name not in case.allowed_tools
             or name in case.forbidden_tools
             or violates_expected_contract
+            or name in order_violation_names
         )
         if invalid_contract and name in ALL_WRITE_TOOLS:
             unauthorized_write = True
