@@ -394,6 +394,8 @@ active session, kiểm tra adjacency/version và không cho ghi đè trạng th�
 
 ## 13. Evaluation evidence
 
+- Benchmark contract, evidence levels, metrics, artifact schema và release gates:
+  [`docs/BENCHMARKING.md`](docs/BENCHMARKING.md).
 - Bộ case deterministic: [`eval/vietnamese_agent_cases.py`](eval/vietnamese_agent_cases.py).
 - Automated Agent tests: [`tests/test_agents/test_vietnamese_evals.py`](tests/test_agents/test_vietnamese_evals.py).
 - Manual outputs thực tế: [`eval/results/report.md`](eval/results/report.md).
