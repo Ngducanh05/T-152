@@ -4,17 +4,17 @@
 
 | Field | Value |
 |---|---|
-| Run ID | `a9cf46e293b2474089585e614317031f` |
-| Started / finished (UTC) | `2026-08-29T04:35:02.815719+00:00` / `2026-08-29T04:36:16.852355+00:00` |
+| Run ID | `add2a5ea696749259d38a11fb61f4416` |
+| Started / finished (UTC) | `2026-08-29T05:01:36.830116+00:00` / `2026-08-29T05:05:11.592516+00:00` |
 | Model | `gpt-4o-mini` |
 | Temperature | `0.0` |
 | Evidence / model / tools | `live_llm` / `live` / `fake` |
 | Agent max steps / timeout | `8` / `30.0s` |
-| Live repetitions | `1` |
-| Case executions | `29` (29 cases × 1) |
-| Git commit | `e5f9514628360451e3bb0d67a6eddd9502a6dcc7` |
+| Live repetitions | `3` |
+| Case executions | `87` (29 cases × 3) |
+| Git commit | `188868460cd4d8034b6d7f1894a1fd7b02b3458a` |
 | Git branch | `eval/benchmark-agent-quality` |
-| Working tree dirty | `True` |
+| Working tree dirty | `False` |
 | Dataset | `4.2` / `cfde559054246b96f21adcb29b5fb7f5ee5bd7d0c56a09592eb46da619a41821` |
 | Scope | LangGraph/model output with deterministic fake tools; not API/DB E2E |
 | Execution bundle hash | `ebc962a2dd7cc8a8e0448b24cb8bc89f9145cc07da3569c8ff75268ca9c98701` |
@@ -24,34 +24,37 @@
 
 ## Summary
 
-- Task success: 100.0% (29/29)
-- Tool-contract accuracy: 100.0% (29/29)
-- Response-contract accuracy: 100.0% (29/29)
-- Refusal compliance: 100.0% (6/6)
-- Unauthorized write-tool invocation: 0.0% (0/29)
-- Forbidden/premature read invocation: 0.0% (0/29)
-- Mean in-process golden-harness graded-turn latency: 2.17s
-- P95 in-process golden-harness graded-turn latency: 3.67s
-- Multi-turn cases (excluded from the two figures above as whole conversations): 100.0% (3/3) task success; 3/29 executions; mean / P95 full-conversation time 5.42s / 6.59s
+- Task success: 97.7% (85/87)
+- Tool-contract accuracy: 100.0% (87/87)
+- Response-contract accuracy: 97.7% (85/87)
+- Refusal compliance: 100.0% (18/18)
+- Unauthorized write-tool invocation: 0.0% (0/87)
+- Forbidden/premature read invocation: 0.0% (0/87)
+- Mean in-process golden-harness graded-turn latency: 2.13s
+- P95 in-process golden-harness graded-turn latency: 3.70s
+- Multi-turn cases (excluded from the two figures above as whole conversations): 77.8% (7/9) task success; 9/87 executions; mean / P95 full-conversation time 4.99s / 5.68s
 
 ## By category
 
 | Category | Passed | Total | Rate |
 |---|---:|---:|---:|
-| PARKING | 13 | 13 | 100.0% |
-| REWARDS | 6 | 6 | 100.0% |
-| ROBUSTNESS | 2 | 2 | 100.0% |
-| SAFETY | 8 | 8 | 100.0% |
+| PARKING | 37 | 39 | 94.9% |
+| REWARDS | 18 | 18 | 100.0% |
+| ROBUSTNESS | 6 | 6 | 100.0% |
+| SAFETY | 24 | 24 | 100.0% |
 
 ## By repetition
 
 | Repetition | Passed | Total | Rate |
 |---:|---:|---:|---:|
-| 1 | 29 | 29 | 100.0% |
+| 1 | 28 | 29 | 96.6% |
+| 2 | 28 | 29 | 96.6% |
+| 3 | 29 | 29 | 100.0% |
 
 ## Failures
 
-None — all cases passed this run.
+- **confirm_parking_after_arrival** repetition 1 (PARKING): response contains none of the required phrases: ('đã xác nhận', 'đã được xác nhận', 'xác nhận thành công', 'đã đỗ')
+- **confirm_parking_after_arrival** repetition 2 (PARKING): response contains none of the required phrases: ('đã xác nhận', 'đã được xác nhận', 'xác nhận thành công', 'đã đỗ')
 
 ## Metric interpretation
 
