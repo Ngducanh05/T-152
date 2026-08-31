@@ -26,6 +26,10 @@ const mocks = vi.hoisted(() => ({
   leaveSimulatedVehicle: vi.fn(),
   updateAdminSlotStatus: vi.fn(),
   getAdminReportEvidenceUrl: vi.fn(async () => ({ signed_url: "https://example.test/evidence.jpg" })),
+  getAdminObservationEvidenceUrl: vi.fn(async () => ({
+    signed_url: "https://example.test/observation.jpg",
+    expires_in: 300,
+  })),
 }));
 
 vi.mock("@/hooks/use-parksmart-data", () => ({
@@ -51,6 +55,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       leaveSimulatedVehicle: mocks.leaveSimulatedVehicle,
       updateAdminSlotStatus: mocks.updateAdminSlotStatus,
       getAdminReportEvidenceUrl: mocks.getAdminReportEvidenceUrl,
+      getAdminObservationEvidenceUrl: mocks.getAdminObservationEvidenceUrl,
     },
   };
 });
@@ -196,6 +201,9 @@ describe("AdminDashboard report warnings", () => {
       verification_status: "PENDING",
       reward_points: 10,
       reward_status: "PENDING",
+      evidence_storage_path: null,
+      evidence_content_type: null,
+      evidence_size_bytes: null,
       observed_slot_version: 1,
       created_at: "2026-08-23T08:00:00Z",
       expires_at: "2026-08-23T08:30:00Z",
@@ -208,12 +216,54 @@ describe("AdminDashboard report warnings", () => {
 
     const warnedSlot = await screen.findByRole("button", {
       name: /F1-A02.*1 quan sát chờ xác minh/,
-    });
+    }, { timeout: 5_000 });
     await user.click(warnedSlot);
 
     expect((await screen.findAllByRole("heading", { name: /Ô A02 — Tầng 1/ })).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /^Ô đỗ F1-A02/ })).toHaveClass("is-selected");
     expect(screen.getByText("Người gửi")).toBeVisible();
+  });
+
+  it("loads observation evidence lazily and keeps verification controls usable on failure", async () => {
+    const user = userEvent.setup();
+    mocks.getAdminObservationEvidenceUrl.mockRejectedValueOnce(
+      new Error("signing unavailable"),
+    );
+    mocks.observations = [{
+      id: "OBS-EVIDENCE",
+      observer_user_id: "USER-001",
+      observer_session_id: "SESSION-001",
+      slot_id: "F1-A02",
+      observed_status: "OCCUPIED",
+      verification_status: "PENDING",
+      reward_points: 10,
+      reward_status: "PENDING",
+      evidence_storage_path: "slot-observations/OBS-EVIDENCE/image.jpg",
+      evidence_content_type: "image/jpeg",
+      evidence_size_bytes: 100,
+      observed_slot_version: 1,
+      created_at: "2026-08-23T08:00:00Z",
+      expires_at: "2026-08-23T08:30:00Z",
+      verified_at: null,
+      verified_by: null,
+      rejection_reason: null,
+      version: 0,
+    }];
+    render(<AdminDashboard />);
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: /F1-A02.*1 quan sát chờ xác minh/,
+      }, { timeout: 5_000 }),
+    );
+    expect(mocks.getAdminObservationEvidenceUrl).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Xem ảnh" }));
+    expect(mocks.getAdminObservationEvidenceUrl).toHaveBeenCalledOnce();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Không thể tải ảnh bằng chứng.",
+    );
+    expect(screen.getByRole("button", { name: "Xác minh" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Từ chối" })).toBeEnabled();
   });
 
   it("lets admin select a slot and save an authoritative status change", async () => {

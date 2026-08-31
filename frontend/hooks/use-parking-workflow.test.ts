@@ -78,10 +78,13 @@ function fixture() {
       adjacent_observation_reward_points: 10,
       wrong_parking_report_reward_points: 20,
       contribution_daily_points_limit: 100,
+      redemption_enabled: false,
     },
     contributions: [],
     rewardCatalog: [],
     vouchers: [],
+    rewardLedger: [],
+    rewardLedgerAvailable: true,
   };
   const refresh = vi.fn(async () => snapshot);
   const data: WorkflowData = {
@@ -446,10 +449,15 @@ describe("useParkingWorkflow", () => {
     );
     const { result } = renderHook(() => useParkingWorkflow(data, api));
 
+    const evidence = new File(["image"], "slot.jpg", { type: "image/jpeg" });
     let firstRequest!: Promise<SlotObservation | null>;
     act(() => {
-      firstRequest = result.current.updateAdjacentSlotStatus(slot.id, "OCCUPIED");
-      void result.current.updateAdjacentSlotStatus(slot.id, "OCCUPIED");
+      firstRequest = result.current.updateAdjacentSlotStatus(
+        slot.id,
+        "OCCUPIED",
+        evidence,
+      );
+      void result.current.updateAdjacentSlotStatus(slot.id, "OCCUPIED", evidence);
     });
 
     expect(api.observeAdjacentSlot).toHaveBeenCalledOnce();
@@ -457,6 +465,7 @@ describe("useParkingWorkflow", () => {
       user_id: "USER-001",
       observed_status: "OCCUPIED",
       expected_slot_version: slot.version,
+      evidence,
     });
     expect(refresh).not.toHaveBeenCalled();
     expect(slot.status).toBe("AVAILABLE");
@@ -472,6 +481,9 @@ describe("useParkingWorkflow", () => {
         verification_status: "PENDING",
         reward_points: 10,
         reward_status: "PENDING",
+        evidence_storage_path: null,
+        evidence_content_type: null,
+        evidence_size_bytes: null,
         observed_slot_version: slot.version,
         created_at: "2026-08-23T10:00:00Z",
         expires_at: "2026-08-23T10:30:00Z",
@@ -485,6 +497,82 @@ describe("useParkingWorkflow", () => {
     expect(refresh).toHaveBeenCalledOnce();
     expect(result.current.pendingAdjacentSlotId).toBeNull();
     expect(result.current.notice).toBeNull();
+  });
+
+  it("shows the authoritative voucher time benefit after completion", async () => {
+    const { api, data, slot } = fixture();
+    data.activeSession = {
+      session_id: "SESSION-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: slot.id,
+      destination_node_id: slot.id,
+    };
+    api.completeSession.mockResolvedValue({
+      id: "SESSION-001",
+      user_id: "USER-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: slot.id,
+      status: "COMPLETED",
+      parked_at: "2026-08-23T10:00:00Z",
+      completed_at: "2026-08-23T11:17:30Z",
+      time_benefit: {
+        voucher_id: "VOUCHER-001",
+        total_minutes: 77.5,
+        free_minutes: 47,
+        billable_minutes: 30.5,
+      },
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    let succeeded = false;
+    await act(async () => {
+      succeeded = await result.current.completeSession();
+    });
+
+    expect(succeeded).toBe(true);
+    expect(result.current.notice).toBe(
+      "Voucher đã áp dụng 47 phút. Thời gian còn lại sau ưu đãi: 30.5 phút.",
+    );
+    expect(api.completeSession).toHaveBeenCalledOnce();
+  });
+
+  it("returns success without retrying when completion refresh fails", async () => {
+    const { api, data, refresh, slot } = fixture();
+    data.activeSession = {
+      session_id: "SESSION-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: slot.id,
+      destination_node_id: slot.id,
+    };
+    api.completeSession.mockResolvedValue({
+      id: "SESSION-001",
+      user_id: "USER-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: slot.id,
+      status: "COMPLETED",
+      parked_at: "2026-08-23T10:00:00Z",
+      completed_at: "2026-08-23T11:00:00Z",
+      time_benefit: {
+        voucher_id: null,
+        total_minutes: 60,
+        free_minutes: 0,
+        billable_minutes: 60,
+      },
+    });
+    refresh.mockRejectedValueOnce(new TypeError("refresh failed"));
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    let succeeded = false;
+    await act(async () => {
+      succeeded = await result.current.completeSession();
+    });
+
+    expect(succeeded).toBe(true);
+    expect(result.current.notice).toBe(
+      "Phiên đỗ xe đã kết thúc nhưng dữ liệu mới nhất chưa tải lại được.",
+    );
+    expect(api.completeSession).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledOnce();
   });
 
   it("waits for reservation success before refreshing authoritative UI state", async () => {

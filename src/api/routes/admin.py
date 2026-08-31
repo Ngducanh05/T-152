@@ -112,6 +112,13 @@ class ReportEvidenceUrlResponse(BaseModel):
     expires_in: int
 
 
+class ObservationEvidenceUrlResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signed_url: str
+    expires_in: int
+
+
 def _event_response(event: ParkingEventRecord) -> ParkingEvent:
     return ParkingEvent(
         id=event.id,
@@ -287,6 +294,37 @@ async def get_slot_observation(
     except SlotObservationError as error:
         raise _observation_http_error(error) from error
     return SuccessResponse(data=SlotObservation.model_validate(observation, from_attributes=True))
+
+
+@router.get(
+    "/slot-observations/{observation_id}/evidence-url",
+    response_model=SuccessResponse[ObservationEvidenceUrlResponse],
+    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+)
+async def get_slot_observation_evidence_url(
+    observation_id: str,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> SuccessResponse[ObservationEvidenceUrlResponse]:
+    try:
+        observation = await SlotObservationService(session).get_observation(observation_id)
+    except SlotObservationError as error:
+        raise _observation_http_error(error) from error
+    if not observation.evidence_storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": ErrorCode.OBSERVATION_EVIDENCE_NOT_FOUND.value,
+                "message": "Observation evidence was not found.",
+            },
+        )
+    expires_in = 300
+    signed_url = await ReportEvidenceStorage(settings).create_signed_url(
+        observation.evidence_storage_path, expires_in=expires_in
+    )
+    return SuccessResponse(
+        data=ObservationEvidenceUrlResponse(signed_url=signed_url, expires_in=expires_in)
+    )
 
 
 @router.post(

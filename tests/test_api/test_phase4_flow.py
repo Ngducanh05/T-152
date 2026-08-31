@@ -2,12 +2,14 @@ import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -23,6 +25,7 @@ from src.core.config import get_settings
 from src.core.database import get_db_session
 from src.core.db_models import (
     Base,
+    IdempotencyRecord,
     ParkingEvent,
     ParkingReservation,
     ParkingSession,
@@ -31,14 +34,18 @@ from src.core.db_models import (
     SlotObservation,
     Vehicle,
 )
+from src.core.idempotency import request_fingerprint
 from src.core.seed import seed_if_missing
+from src.core.slot_observation import SlotObservationError
 from src.models.auth import AppRole, CurrentUser
 from src.models.schemas import (
+    ErrorCode,
     ParkingEventType,
     ParkingSessionStatus,
     ReservationStatus,
     SlotStatus,
 )
+from src.services.report_evidence import StoredReportEvidence
 
 
 @dataclass(slots=True)
@@ -252,6 +259,167 @@ async def test_phase4_end_to_end_flow(phase4_api: Phase4Api):
 
 
 @pytest.mark.asyncio
+async def test_completion_replays_new_time_benefit_response_without_recomputation(
+    phase4_api: Phase4Api,
+):
+    parked_at = datetime(2026, 8, 23, 10, 0, tzinfo=UTC)
+    completed_at = parked_at + timedelta(minutes=75)
+    response_body = {
+        "id": "SESSION-NEW-REPLAY",
+        "user_id": "USER-001",
+        "vehicle_id": "VEHICLE-001",
+        "slot_id": "F1-D01",
+        "status": "COMPLETED",
+        "parked_at": parked_at.isoformat(),
+        "completed_at": completed_at.isoformat(),
+        "time_benefit": {
+            "voucher_id": None,
+            "total_minutes": 75.0,
+            "free_minutes": 0.0,
+            "billable_minutes": 75.0,
+        },
+    }
+    async with phase4_api.session_factory() as session, session.begin():
+        session.add(
+            IdempotencyRecord(
+                user_id="USER-001",
+                operation="complete_parking_session",
+                key="new-completion-replay",
+                request_hash=request_fingerprint(
+                    {
+                        "session_id": "SESSION-NEW-REPLAY",
+                        "expected_version": 0,
+                    }
+                ),
+                state="COMPLETED",
+                response_body=response_body,
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+        )
+
+    with patch(
+        "src.api.routes.sessions.ParkingSessionService.complete_session",
+        AsyncMock(side_effect=AssertionError("must not execute")),
+    ):
+        replay = await phase4_api.client.post(
+            "/api/v1/sessions/SESSION-NEW-REPLAY/complete",
+            json={"user_id": "USER-001", "expected_version": 0},
+            headers={"Idempotency-Key": "new-completion-replay"},
+        )
+
+    assert replay.status_code == 200
+    assert replay.json()["data"] == response_body
+
+
+@pytest.mark.asyncio
+async def test_legacy_completion_replay_is_converted_and_backfilled_without_lifecycle_call(
+    phase4_api: Phase4Api,
+):
+    parked_at = datetime(2026, 8, 23, 10, 0, tzinfo=UTC)
+    completed_at = parked_at + timedelta(seconds=4_650)
+    legacy_body = {
+        "id": "SESSION-LEGACY-REPLAY",
+        "user_id": "USER-001",
+        "vehicle_id": "VEHICLE-001",
+        "slot_id": "F1-D01",
+        "status": "COMPLETED",
+        "parked_at": parked_at.isoformat(),
+        "completed_at": completed_at.isoformat(),
+    }
+    async with phase4_api.session_factory() as session, session.begin():
+        session.add_all(
+            (
+                ParkingSession(
+                    id="SESSION-LEGACY-REPLAY",
+                    user_id="USER-001",
+                    vehicle_id="VEHICLE-001",
+                    slot_id="F1-D01",
+                    status=ParkingSessionStatus.COMPLETED,
+                    parked_at=parked_at,
+                    completed_at=completed_at,
+                ),
+                IdempotencyRecord(
+                    user_id="USER-001",
+                    operation="complete_parking_session",
+                    key="legacy-completion-replay",
+                    request_hash=request_fingerprint(
+                        {
+                            "session_id": "SESSION-LEGACY-REPLAY",
+                            "expected_version": 0,
+                        }
+                    ),
+                    state="COMPLETED",
+                    response_body=legacy_body,
+                    expires_at=datetime.now(UTC) + timedelta(hours=1),
+                ),
+            )
+        )
+
+    with patch(
+        "src.api.routes.sessions.ParkingSessionService.complete_session",
+        AsyncMock(side_effect=AssertionError("must not execute")),
+    ) as complete:
+        replay = await phase4_api.client.post(
+            "/api/v1/sessions/SESSION-LEGACY-REPLAY/complete",
+            json={"user_id": "USER-001", "expected_version": 0},
+            headers={"Idempotency-Key": "legacy-completion-replay"},
+        )
+
+    assert replay.status_code == 200
+    assert replay.json()["data"]["time_benefit"] == {
+        "voucher_id": None,
+        "total_minutes": 77.5,
+        "free_minutes": 0.0,
+        "billable_minutes": 77.5,
+    }
+    complete.assert_not_awaited()
+    async with phase4_api.session_factory() as session:
+        record = await session.get(
+            IdempotencyRecord,
+            ("USER-001", "complete_parking_session", "legacy-completion-replay"),
+        )
+    assert record is not None
+    assert record.response_body is not None
+    assert record.response_body["time_benefit"]["total_minutes"] == 77.5
+
+
+@pytest.mark.asyncio
+async def test_invalid_legacy_completion_replay_is_not_silently_accepted(
+    phase4_api: Phase4Api,
+):
+    parked_at = datetime(2026, 8, 23, 10, 0, tzinfo=UTC)
+    async with phase4_api.session_factory() as session, session.begin():
+        session.add(
+            IdempotencyRecord(
+                user_id="USER-001",
+                operation="complete_parking_session",
+                key="invalid-legacy-replay",
+                request_hash=request_fingerprint(
+                    {"session_id": "SESSION-EXPECTED", "expected_version": 0}
+                ),
+                state="COMPLETED",
+                response_body={
+                    "id": "SESSION-DIFFERENT",
+                    "user_id": "USER-001",
+                    "vehicle_id": "VEHICLE-001",
+                    "slot_id": "F1-D01",
+                    "status": "COMPLETED",
+                    "parked_at": parked_at.isoformat(),
+                    "completed_at": (parked_at + timedelta(minutes=1)).isoformat(),
+                },
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+        )
+
+    with pytest.raises(ValidationError):
+        await phase4_api.client.post(
+            "/api/v1/sessions/SESSION-EXPECTED/complete",
+            json={"user_id": "USER-001", "expected_version": 0},
+            headers={"Idempotency-Key": "invalid-legacy-replay"},
+        )
+
+
+@pytest.mark.asyncio
 async def test_parked_user_can_observe_only_adjacent_slots(phase4_api: Phase4Api):
     timestamp = datetime.now(UTC)
     async with phase4_api.session_factory() as session, session.begin():
@@ -317,6 +485,115 @@ async def test_adjacent_observation_requires_active_session(phase4_api: Phase4Ap
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "ACTIVE_SESSION_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_adjacent_observation_multipart_persists_only_private_evidence_metadata(
+    phase4_api: Phase4Api,
+):
+    timestamp = datetime.now(UTC)
+    async with phase4_api.session_factory() as session, session.begin():
+        own_slot = await session.get(ParkingSlot, "F1-D03")
+        assert own_slot is not None
+        own_slot.status = SlotStatus.OCCUPIED
+        own_slot.occupied_by_vehicle_id = "VEHICLE-001"
+        session.add(
+            ParkingSession(
+                id="SESSION-EVIDENCE",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F1-D03",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=timestamp,
+                completed_at=None,
+            )
+        )
+    jpeg = b"\xff\xd8\xffobservation"
+    stored = StoredReportEvidence(
+        storage_path="slot-observations/OBSERVATION-TEST/evidence.jpg",
+        content_type="image/jpeg",
+        size_bytes=len(jpeg),
+    )
+    with patch(
+        "src.api.routes.parking.ObservationEvidenceStorage.upload",
+        AsyncMock(return_value=stored),
+    ) as upload:
+        response = await phase4_api.client.post(
+            "/api/v1/parking/slots/F1-D02/observation",
+            data={
+                "user_id": "USER-001",
+                "observed_status": "OCCUPIED",
+                "expected_slot_version": "0",
+            },
+            files={"evidence": ("space.jpg", jpeg, "image/jpeg")},
+        )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["evidence_storage_path"].startswith("slot-observations/")
+    assert data["evidence_content_type"] == "image/jpeg"
+    assert data["evidence_size_bytes"] == len(jpeg)
+    assert "signed_url" not in data
+    assert "evidence" not in data
+    assert data["reward_points"] == 10
+    upload.assert_awaited_once()
+    async with phase4_api.session_factory() as session:
+        observation = await session.get(SlotObservation, data["id"])
+        observed_slot = await session.get(ParkingSlot, "F1-D02")
+    assert observation is not None
+    assert observation.evidence_storage_path == data["evidence_storage_path"]
+    assert not hasattr(observation, "evidence_bytes")
+    assert observed_slot is not None
+    assert observed_slot.status is SlotStatus.AVAILABLE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_raises", [False, True])
+async def test_observation_cleanup_failure_preserves_original_domain_error(
+    phase4_api: Phase4Api,
+    cleanup_raises: bool,
+):
+    jpeg = b"\xff\xd8\xffobservation"
+    stored = StoredReportEvidence(
+        storage_path="slot-observations/OBSERVATION-FAILED/evidence.jpg",
+        content_type="image/jpeg",
+        size_bytes=len(jpeg),
+    )
+    cleanup = AsyncMock(
+        side_effect=(RuntimeError("cleanup failed") if cleanup_raises else None),
+        return_value=False,
+    )
+    original = SlotObservationError(
+        ErrorCode.INVALID_OBSERVATION_TRANSITION,
+        "Original observation failure.",
+    )
+    with (
+        patch(
+            "src.api.routes.parking.ObservationEvidenceStorage.upload",
+            AsyncMock(return_value=stored),
+        ),
+        patch(
+            "src.api.routes.parking.ObservationEvidenceStorage.delete",
+            cleanup,
+        ),
+        patch(
+            "src.api.routes.parking.SlotObservationService.create_observation",
+            AsyncMock(side_effect=original),
+        ),
+    ):
+        response = await phase4_api.client.post(
+            "/api/v1/parking/slots/F1-D02/observation",
+            data={
+                "user_id": "USER-001",
+                "observed_status": "OCCUPIED",
+                "expected_slot_version": "0",
+            },
+            files={"evidence": ("space.jpg", jpeg, "image/jpeg")},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "INVALID_OBSERVATION_TRANSITION"
+    cleanup.assert_awaited_once_with(stored.storage_path)
 
 
 @pytest.mark.asyncio

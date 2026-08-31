@@ -2,11 +2,14 @@
 
 import logging
 from datetime import UTC, datetime
+from json import JSONDecodeError
 from typing import Annotated, Literal
+from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
+from starlette.datastructures import UploadFile
 
 from src.api.dependencies import (
     ParkingUserDependency,
@@ -52,6 +55,7 @@ from src.models.schemas import (
     SlotStatus,
     ZoneId,
 )
+from src.services.report_evidence import ObservationEvidenceStorage, validate_observation_image
 
 router = APIRouter(prefix="/parking", tags=["Parking"])
 logger = logging.getLogger(__name__)
@@ -105,6 +109,20 @@ class AdjacentSlotObservationRequest(BaseModel):
     user_id: str = Field(min_length=1)
     observed_status: Literal[SlotStatus.AVAILABLE, SlotStatus.OCCUPIED]
     expected_slot_version: int = Field(ge=0)
+
+
+async def _read_observation_evidence(evidence: UploadFile, max_bytes: int) -> bytes:
+    content = bytearray()
+    while True:
+        chunk = await evidence.read(64 * 1024)
+        if not chunk:
+            return bytes(content)
+        content.extend(chunk)
+        if len(content) > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail={"code": ErrorCode.OBSERVATION_EVIDENCE_TOO_LARGE.value, "message": "Observation evidence is too large."},
+            )
 
 
 def _slot_response(slot: object) -> ParkingSlot:
@@ -165,24 +183,118 @@ async def parking_slot(
 @router.post(
     "/slots/{slot_id}/observation",
     response_model=SuccessResponse[SlotObservation],
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/AdjacentSlotObservationRequest"}
+                },
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": [
+                            "user_id",
+                            "observed_status",
+                            "expected_slot_version",
+                        ],
+                        "properties": {
+                            "user_id": {"type": "string"},
+                            "observed_status": {
+                                "type": "string",
+                                "enum": ["AVAILABLE", "OCCUPIED"],
+                            },
+                            "expected_slot_version": {
+                                "type": "integer",
+                                "minimum": 0,
+                            },
+                            "evidence": {"type": "string", "format": "binary"},
+                        },
+                    }
+                },
+            },
+        }
+    },
 )
 async def observe_adjacent_parking_slot(
     slot_id: SlotId,
-    request: AdjacentSlotObservationRequest,
+    http_request: Request,
     session: SessionDependency,
     current_user: ParkingUserDependency,
 ) -> SuccessResponse[SlotObservation]:
-    user_id = resolve_parking_user_id(request.user_id, current_user)
+    upload: UploadFile | None = None
     try:
-        async with session.begin():
-            observation = await SlotObservationService(session).create_observation(
-                user_id=user_id,
-                slot_id=slot_id,
-                observed_status=request.observed_status,
-                expected_slot_version=request.expected_slot_version,
+        if http_request.headers.get("content-type", "").startswith("multipart/form-data"):
+            form = await http_request.form(max_files=1, max_fields=4, max_part_size=2048)
+            candidate = form.get("evidence")
+            if candidate is not None and not isinstance(candidate, UploadFile):
+                raise ValueError("evidence must be an uploaded file")
+            upload = candidate
+            request = AdjacentSlotObservationRequest(
+                user_id=str(form.get("user_id") or ""),
+                observed_status=form.get("observed_status"),
+                expected_slot_version=form.get("expected_slot_version"),
             )
+        else:
+            request = AdjacentSlotObservationRequest.model_validate(await http_request.json())
+    except (JSONDecodeError, ValidationError, ValueError) as error:
+        if upload is not None:
+            await upload.close()
+        raise HTTPException(status_code=422, detail={"code": "VALIDATION_ERROR", "message": "Request validation failed."}) from error
+
+    user_id = resolve_parking_user_id(request.user_id, current_user)
+    stored = None
+    storage = ObservationEvidenceStorage(get_settings())
+    try:
+        evidence_bytes = None
+        normalized_content_type = None
+        if upload is not None:
+            evidence_bytes = await _read_observation_evidence(upload, get_settings().report_evidence_max_bytes)
+            normalized_content_type = validate_observation_image(
+                content_type=upload.content_type,
+                data=evidence_bytes,
+                max_bytes=get_settings().report_evidence_max_bytes,
+            )
+        observation_id = f"OBSERVATION-{uuid4()}"
+        try:
+            async with session.begin():
+                if evidence_bytes is not None and normalized_content_type is not None:
+                    stored = await storage.upload(
+                        observation_id=observation_id,
+                        data=evidence_bytes,
+                        content_type=normalized_content_type,
+                        allow_demo_fallback=current_user is None,
+                    )
+                observation = await SlotObservationService(session).create_observation(
+                    user_id=user_id,
+                    slot_id=slot_id,
+                    observed_status=request.observed_status,
+                    expected_slot_version=request.expected_slot_version,
+                    observation_id=observation_id,
+                    evidence_storage_path=stored.storage_path if stored else None,
+                    evidence_content_type=stored.content_type if stored else None,
+                    evidence_size_bytes=stored.size_bytes if stored else None,
+                )
+        except Exception:
+            if stored is not None:
+                try:
+                    deleted = await storage.delete(stored.storage_path)
+                    if not deleted:
+                        logger.warning(
+                            "slot_observation_evidence_cleanup_failed observation_id=%s",
+                            observation_id,
+                        )
+                except Exception:
+                    logger.exception(
+                        "slot_observation_evidence_cleanup_raised observation_id=%s",
+                        observation_id,
+                    )
+            raise
     except SlotObservationError as error:
         raise _observation_error(error) from error
+    finally:
+        if upload is not None:
+            await upload.close()
     logger.info(
         "adjacent_slot_observation slot_id=%s actor_id=%s observed_status=%s outcome=success",
         slot_id,
@@ -286,6 +398,7 @@ async def user_parking_state(
                 adjacent_observation_reward_points=(settings.adjacent_observation_reward_points),
                 wrong_parking_report_reward_points=(settings.wrong_parking_report_reward_points),
                 contribution_daily_points_limit=(settings.contribution_daily_points_limit),
+                redemption_enabled=settings.rewards_redemption_enabled,
             ),
         )
     )

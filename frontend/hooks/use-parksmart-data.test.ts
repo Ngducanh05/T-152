@@ -19,7 +19,22 @@ const rewardConfiguration = {
   adjacent_observation_reward_points: 10,
   wrong_parking_report_reward_points: 20,
   contribution_daily_points_limit: 100,
+  redemption_enabled: false,
 };
+const rewardLedger = [
+  {
+    id: "TX-001",
+    user_id: "USER-001",
+    source_type: "ADJACENT_SLOT_OBSERVATION" as const,
+    source_reference: "OBS-001",
+    transaction_type: "CONTRIBUTION_REWARD" as const,
+    status: "EARNED" as const,
+    points_delta: 10,
+    created_at: "2026-08-23T10:00:00Z",
+    settled_at: "2026-08-23T10:00:00Z",
+    metadata: {},
+  },
+];
 const rewardSummary = {
   available_points: 20,
   pending_points: 10,
@@ -54,6 +69,9 @@ function responseFor(url: string) {
   if (url.endsWith("/rewards/catalog")) return successResponse([]);
   if (url.includes("/rewards/users/") && url.endsWith("/vouchers")) {
     return successResponse([]);
+  }
+  if (url.includes("/rewards/users/") && url.endsWith("/ledger")) {
+    return successResponse(rewardLedger);
   }
   throw new Error(`Unexpected request: ${url}`);
 }
@@ -92,7 +110,47 @@ it("loads static map, dynamic snapshot, and aggregate user state", async () => {
   expect(result.current.activeReservation).toEqual(activeReservation);
   expect(result.current.activeSession).toEqual(activeSession);
   expect(result.current.rewardSummary).toEqual(rewardSummary);
-  expect(fetcher).toHaveBeenCalledTimes(6);
+  expect(result.current.rewardLedger).toEqual(rewardLedger);
+  expect(result.current.rewardLedgerAvailable).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(7);
+});
+
+it("degrades only ledger history when the supplemental request fails", async () => {
+  const fetcher = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.endsWith("/ledger")) throw new TypeError("ledger unavailable");
+    return responseFor(url);
+  });
+  const api = new ParkSmartApiClient({ baseUrl: "http://api.test/api/v1", fetcher });
+  const { result } = renderHook(() => useParkSmartData(api, "USER-001"));
+  await act(async () => {
+    for (let index = 0; index < 12; index += 1) await Promise.resolve();
+  });
+
+  expect(result.current.loading).toBe(false);
+  expect(result.current.map).toEqual(canonicalMap);
+  expect(result.current.activeSession).toEqual(activeSession);
+  expect(result.current.rewardLedger).toEqual([]);
+  expect(result.current.rewardLedgerAvailable).toBe(false);
+  expect(result.current.error).toBeNull();
+});
+
+it("still fails aggregate refresh when an existing required API fails", async () => {
+  const fetcher = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    if (url.includes("/contributions/users/")) {
+      throw new TypeError("required contributions unavailable");
+    }
+    return responseFor(url);
+  });
+  const api = new ParkSmartApiClient({ baseUrl: "http://api.test/api/v1", fetcher });
+  const { result } = renderHook(() => useParkSmartData(api, "USER-001"));
+  await act(async () => {
+    for (let index = 0; index < 12; index += 1) await Promise.resolve();
+  });
+
+  expect(result.current.loading).toBe(false);
+  expect(result.current.error?.code).toBe("NETWORK_ERROR");
 });
 
 it("finishes aggregate loading when Strict Mode remounts the effect", async () => {

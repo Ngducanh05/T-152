@@ -16,6 +16,13 @@ export function isSpeechEnabled(): boolean {
   return parsePublicBoolean(process.env.NEXT_PUBLIC_SPEECH_ENABLED, true);
 }
 
+export function isRewardsRedemptionEnabled(): boolean {
+  return parsePublicBoolean(
+    process.env.NEXT_PUBLIC_REWARDS_REDEMPTION_ENABLED,
+    false,
+  );
+}
+
 const MAX_PUBLIC_EMAIL_LENGTH = 254;
 const EMAIL_LOCAL_PART_PATTERN = /^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+$/i;
 const EMAIL_DOMAIN_LABEL_PATTERN = /^[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?$/i;

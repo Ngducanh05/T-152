@@ -22,6 +22,7 @@ import type {
   ParkingEvent,
   ParkingReservation,
   ParkingSession,
+  CompletedParkingSession,
   ParkingSlot,
   ParkingSnapshot,
   ParkingStatus,
@@ -40,6 +41,7 @@ import type {
   RewardCatalogItem,
   RewardRedemptionResult,
   RewardSummary,
+  RewardTransaction,
   ParkingVoucher,
   SimulatorStep,
   SimulatorMutationRequest,
@@ -50,6 +52,7 @@ import type {
   UpdateParkingSlotStatusRequest,
   WrongParkingReport,
   UserParkingState,
+  ObservationEvidenceUrlResponse,
 } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
@@ -405,7 +408,7 @@ export class ParkSmartApiClient {
     signal?: AbortSignal,
     idempotencyKey?: string,
   ) {
-    return this.request<ParkingSession>(
+    return this.request<CompletedParkingSession>(
       `/sessions/${encodeURIComponent(sessionId)}/complete`,
       {
         method: "POST",
@@ -429,11 +432,25 @@ export class ParkSmartApiClient {
     payload: AdjacentSlotObservationRequest,
     signal?: AbortSignal,
   ) {
+    const body = payload.evidence
+      ? (() => {
+          const form = new FormData();
+          form.set("user_id", payload.user_id);
+          form.set("observed_status", payload.observed_status);
+          form.set("expected_slot_version", String(payload.expected_slot_version));
+          form.set("evidence", payload.evidence);
+          return form;
+        })()
+      : JSON.stringify({
+          user_id: payload.user_id,
+          observed_status: payload.observed_status,
+          expected_slot_version: payload.expected_slot_version,
+        });
     return this.request<SlotObservation>(
       `/parking/slots/${encodeURIComponent(slotId)}/observation`,
       {
         method: "POST",
-        body: JSON.stringify(payload),
+        body,
         signal,
       },
     );
@@ -628,6 +645,25 @@ export class ParkSmartApiClient {
     );
   }
 
+  getRewardLedger(userId: string, signal?: AbortSignal) {
+    return this.request<RewardTransaction[]>(
+      `/rewards/users/${encodeURIComponent(userId)}/ledger`,
+      { signal },
+    );
+  }
+
+  applyRewardVoucher(
+    voucherId: string,
+    payload: { user_id: string; session_id: string },
+    signal?: AbortSignal,
+    idempotencyKey?: string,
+  ) {
+    return this.request<ParkingVoucher>(
+      `/rewards/vouchers/${encodeURIComponent(voucherId)}/apply`,
+      { method: "POST", body: JSON.stringify(payload), headers: idempotencyHeaders(idempotencyKey), signal },
+    );
+  }
+
   getUserContributions(userId: string, signal?: AbortSignal) {
     return this.request<ContributionRecord[]>(
       `/contributions/users/${encodeURIComponent(userId)}`,
@@ -667,6 +703,13 @@ export class ParkSmartApiClient {
   getAdminReportEvidenceUrl(reportId: string, signal?: AbortSignal) {
     return this.request<ReportEvidenceUrlResponse>(
       `/admin/reports/${encodeURIComponent(reportId)}/evidence-url`,
+      { signal },
+    );
+  }
+
+  getAdminObservationEvidenceUrl(observationId: string, signal?: AbortSignal) {
+    return this.request<ObservationEvidenceUrlResponse>(
+      `/admin/slot-observations/${encodeURIComponent(observationId)}/evidence-url`,
       { signal },
     );
   }

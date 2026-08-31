@@ -20,3 +20,6 @@ Admin evidence access remains tied to report authorization and uses a short-live
 URL. Hard-delete removes the Storage object together with the report row; any retained
 reward-ledger source reference must not copy the image path, plate number or description
 into reward metadata.
+## Slot-observation evidence
+
+Adjacent slot observations may include optional private image evidence. Database rows hold only path, MIME type, and byte count; objects use the `slot-observations/{observation_id}/` prefix in the established private evidence bucket. Administrators obtain a short-lived signed URL only after requesting it. JPEG, PNG, WebP, HEIC, and HEIF are supported up to 5,000,000 file bytes. Evidence never verifies an observation or changes reward settlement.

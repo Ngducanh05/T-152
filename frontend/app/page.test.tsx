@@ -287,9 +287,65 @@ describe("user chat page", () => {
     );
     await user.click(screen.getByRole("button", { name: "Giúp kiểm tra ngay" }));
     await user.click(screen.getByRole("button", { name: "Ô đang trống" }));
+    expect(workflow.updateAdjacentSlotStatus).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Gửi đóng góp" }));
     expect(workflow.updateAdjacentSlotStatus).toHaveBeenCalledWith(
       "F1-D02",
       "AVAILABLE",
+      undefined,
     );
+  });
+
+  it("opens the mounted Points dialog from the header and caps the badge", async () => {
+    const user = userEvent.setup();
+    const workflow = workflowFixture();
+    mocks.useParkSmartData.mockReturnValue({
+      map: canonicalMap,
+      slots: canonicalMap.slots,
+      status: parkingStatus,
+      currentLocation,
+      activeReservation: null,
+      activeSession: null,
+      rewardSummary: {
+        available_points: 1200,
+        pending_points: 0,
+        verified_contributions: 0,
+        daily_pending_points: 0,
+        daily_earned_points: 0,
+        daily_limit_points: 100,
+      },
+      rewardConfiguration: {
+        adjacent_observation_reward_points: 10,
+        wrong_parking_report_reward_points: 20,
+        contribution_daily_points_limit: 100,
+        redemption_enabled: false,
+      },
+      contributions: [],
+      rewardCatalog: [],
+      vouchers: [],
+      rewardLedger: [],
+      rewardLedgerAvailable: true,
+      lastUpdatedAt: null,
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: vi.fn(async () => undefined),
+    });
+    mocks.useParkingWorkflow.mockReturnValue(workflow);
+
+    render(<Home />);
+    const trigger = screen.getByRole("button", {
+      name: "ParkSmart Points: 1200 điểm",
+    });
+    expect(trigger).toHaveTextContent("999+");
+    expect(trigger.closest("header")).toHaveClass("chat-app-header");
+    expect(screen.queryByRole("dialog", { name: "Điểm và voucher của bạn" })).not.toBeInTheDocument();
+
+    await user.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Điểm và voucher của bạn" });
+    expect(dialog).toBeVisible();
+    expect(document.querySelector(".chat-conversation")).not.toContainElement(dialog);
+    await user.click(screen.getByRole("button", { name: "Đóng ParkSmart Points" }));
+    expect(screen.queryByRole("dialog", { name: "Điểm và voucher của bạn" })).not.toBeInTheDocument();
   });
 });

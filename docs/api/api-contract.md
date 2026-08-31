@@ -8,7 +8,12 @@ not spendable. `GET /rewards/catalog` returns active catalog items, `POST /rewar
 atomically creates a debit/redemption/voucher with `Idempotency-Key`, and
 `GET /rewards/users/{user_id}/vouchers` returns only the owner's wallet. Voucher statuses are
 `ISSUED`, `APPLIED`, `EXPIRED`, and `CANCELLED`; redemption statuses are `COMPLETED` and
-`REFUNDED`.
+`REFUNDED`. `GET /rewards/users/{user_id}/ledger` returns the complete signed owner ledger.
+`POST /rewards/vouchers/{voucher_id}/apply` idempotently applies an issued voucher to an owned
+active parking session; the database permits at most one applied voucher per session. New
+redemptions return `503 REDEMPTION_DISABLED` unless backend redemption is enabled, while reward
+reads and applying an already-issued voucher remain available. Session completion returns
+`time_benefit` with total, free and billable minutes and contains no pricing fields.
 
 ## Status and scope
 
@@ -335,6 +340,11 @@ An actively parked user may optionally report one physically adjacent slot as
 }
 ```
 
+The same endpoint also accepts `multipart/form-data` with those unchanged business fields and an
+optional `evidence` image. JPEG, PNG, WebP, HEIC and HEIF are accepted up to the configured
+bounded file limit. The response always includes nullable `evidence_storage_path`,
+`evidence_content_type` and `evidence_size_bytes`; it never returns image bytes or a public URL.
+
 The backend requires an active parking session and independently derives the left/right
 neighbours within the same floor, zone and five-slot row on F1/F2/F3. Non-adjacent targets,
 `RESERVED` slots and stale versions are rejected. Submission creates a `PENDING`
@@ -357,6 +367,8 @@ Mọi response tiếp tục dùng `SuccessResponse`/`ErrorResponse` chuẩn.
 - `GET /api/v1/rewards/configuration` cung cấp copy/UI reward values, tránh hard-code.
 - `GET /api/v1/admin/slot-observations` hỗ trợ `status`, `floor_id`, `slot_id`,
   `user_id`, `limit`; detail dùng `GET /api/v1/admin/slot-observations/{id}`.
+- `GET /api/v1/admin/slot-observations/{id}/evidence-url` trả signed URL năm phút
+  khi observation có evidence; URL không được lưu vào database hay browser storage.
 - `POST /api/v1/admin/slot-observations/{id}/verify` và `/reject` yêu cầu
   `expected_version`; reject nhận thêm `reason` tùy chọn.
 - Report response thêm `verification_outcome`, `reward_points`, `reward_status`,

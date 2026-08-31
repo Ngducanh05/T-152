@@ -71,6 +71,7 @@ export interface AdjacentSlotObservationRequest {
   user_id: EntityId;
   observed_status: AdjacentSlotObservedStatus;
   expected_slot_version: number;
+  evidence?: File;
 }
 
 export type SlotObservationStatus = "PENDING" | "VERIFIED" | "REJECTED" | "EXPIRED";
@@ -90,6 +91,9 @@ export interface SlotObservation {
   verification_status: SlotObservationStatus;
   reward_points: number;
   reward_status: RewardTransactionStatus | null;
+  evidence_storage_path: string | null;
+  evidence_content_type: string | null;
+  evidence_size_bytes: number | null;
   observed_slot_version: number;
   created_at: string;
   expires_at: string;
@@ -112,6 +116,25 @@ export interface RewardConfiguration {
   adjacent_observation_reward_points: number;
   wrong_parking_report_reward_points: number;
   contribution_daily_points_limit: number;
+  redemption_enabled: boolean;
+}
+
+export type RewardTransactionType =
+  | "CONTRIBUTION_REWARD"
+  | "VOUCHER_REDEMPTION"
+  | "VOUCHER_REFUND";
+
+export interface RewardTransaction {
+  id: EntityId;
+  user_id: EntityId;
+  source_type: RewardSourceType;
+  source_reference: EntityId;
+  transaction_type: RewardTransactionType;
+  status: RewardTransactionStatus;
+  points_delta: number;
+  created_at: string;
+  settled_at: string | null;
+  metadata: Record<string, unknown>;
 }
 
 export interface RewardCatalogItem {
@@ -136,6 +159,17 @@ export interface ParkingVoucher {
   expires_at: string;
   applied_at: string | null;
   applied_session_id: EntityId | null;
+}
+
+export interface ParkingTimeBenefit {
+  voucher_id: EntityId | null;
+  total_minutes: number;
+  free_minutes: number;
+  billable_minutes: number;
+}
+
+export interface CompletedParkingSession extends ParkingSession {
+  time_benefit: ParkingTimeBenefit;
 }
 
 export interface RewardRedemptionResult {
@@ -487,6 +521,11 @@ export interface ReopenWrongParkingReportRequest {
 export type ReopenWrongParkingReportResponse = WrongParkingReport;
 
 export interface ReportEvidenceUrlResponse {
+  signed_url: string;
+  expires_in: number;
+}
+
+export interface ObservationEvidenceUrlResponse {
   signed_url: string;
   expires_in: number;
 }

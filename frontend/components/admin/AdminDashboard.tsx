@@ -8,6 +8,7 @@ import {
   type PendingReportMutation,
   type ReportMutationAction,
 } from "@/components/admin/ReportDetailDrawer";
+import { ObservationEvidencePanel } from "@/components/admin/ObservationEvidencePanel";
 import { ParkingMap } from "@/components/parking/ParkingMap";
 import { useParkSmartData } from "@/hooks/use-parksmart-data";
 import { ApiError, formatApiErrorForOperator, parkSmartApi } from "@/lib/api";
@@ -774,6 +775,7 @@ export function AdminDashboard() {
                     <div><dt>Hết hạn</dt><dd>{formatUpdatedAt(selectedObservation.expires_at)}</dd></div>
                     <div><dt>Điểm chờ</dt><dd>{selectedObservation.reward_points}</dd></div>
                   </dl>
+                  <ObservationEvidencePanel observation={selectedObservation} />
                   <label>
                     Lý do từ chối (không bắt buộc)
                     <textarea

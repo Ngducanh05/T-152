@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
@@ -14,13 +14,22 @@ from src.api.dependencies import (
 )
 from src.api.errors import domain_http_error
 from src.core.database import get_db_session
+from src.core.db_models import ParkingSession as ParkingSessionRecord
 from src.core.errors import DomainError
 from src.core.idempotency import IdempotencyService
 from src.core.parking_session import ParkingSessionError, ParkingSessionService
 from src.core.parking_state import ParkingStateError, ParkingStateService
 from src.core.reservation import ReservationService
+from src.core.voucher import VoucherService
 from src.models.common import ErrorResponse, SuccessResponse
-from src.models.schemas import EntityId, ErrorCode, ReservationStatus
+from src.models.schemas import (
+    CompletedParkingSession,
+    EntityId,
+    ErrorCode,
+    ParkingSessionStatus,
+    ParkingTimeBenefit,
+    ReservationStatus,
+)
 from src.models.schemas import ParkingSession as ParkingSessionResponse
 
 router = APIRouter(prefix="/sessions", tags=["Parking Sessions"])
@@ -87,6 +96,22 @@ def _state_error(error: ParkingStateError) -> HTTPException:
 
 def _response(parking_session: object) -> ParkingSessionResponse:
     return ParkingSessionResponse.model_validate(parking_session, from_attributes=True)
+
+
+def _completed_response(parking_session: object, voucher: object | None) -> CompletedParkingSession:
+    session_response = ParkingSessionResponse.model_validate(parking_session, from_attributes=True)
+    assert session_response.completed_at is not None
+    total_minutes = max(0.0, (session_response.completed_at - session_response.parked_at).total_seconds()) / 60
+    free_minutes = min(total_minutes, float(voucher.free_minutes_snapshot)) if voucher is not None else 0.0
+    return CompletedParkingSession(
+        **session_response.model_dump(),
+        time_benefit=ParkingTimeBenefit(
+            voucher_id=voucher.id if voucher is not None else None,
+            total_minutes=total_minutes,
+            free_minutes=free_minutes,
+            billable_minutes=max(0.0, total_minutes - free_minutes),
+        ),
+    )
 
 
 @router.post(
@@ -191,7 +216,7 @@ async def active_vehicle(
 
 @router.post(
     "/{session_id}/complete",
-    response_model=SuccessResponse[ParkingSessionResponse],
+    response_model=SuccessResponse[CompletedParkingSession],
     responses=ERROR_RESPONSES,
 )
 async def complete_session(
@@ -203,7 +228,7 @@ async def complete_session(
         str | None,
         Header(alias="Idempotency-Key", min_length=1, max_length=128),
     ] = None,
-) -> SuccessResponse[ParkingSessionResponse]:
+) -> SuccessResponse[CompletedParkingSession]:
     user_id = resolve_parking_user_id(request.user_id, current_user)
     try:
         async with session.begin():
@@ -219,14 +244,42 @@ async def complete_session(
             )
             replay = idempotency.replay(claim)
             if replay is not None:
-                response_data = ParkingSessionResponse.model_validate(replay)
+                try:
+                    response_data = CompletedParkingSession.model_validate(replay)
+                except ValidationError:
+                    legacy = ParkingSessionResponse.model_validate(replay)
+                    if (
+                        legacy.id != session_id
+                        or legacy.user_id != user_id
+                        or legacy.status is not ParkingSessionStatus.COMPLETED
+                        or legacy.completed_at is None
+                    ):
+                        raise
+                    parking_session = await session.get(ParkingSessionRecord, session_id)
+                    if (
+                        parking_session is None
+                        or parking_session.id != session_id
+                        or parking_session.user_id != user_id
+                        or parking_session.status is not ParkingSessionStatus.COMPLETED
+                        or parking_session.completed_at is None
+                    ):
+                        raise
+                    applied_voucher = await VoucherService(session).get_applied_to_session(
+                        session_id
+                    )
+                    response_data = _completed_response(parking_session, applied_voucher)
+                    await idempotency.complete(
+                        claim,
+                        response_data.model_dump(mode="json"),
+                    )
             else:
                 parking_session = await ParkingSessionService(session, ParkingStateService(session)).complete_session(
                     session_id,
                     user_id=user_id,
                     expected_version=request.expected_version,
                 )
-                response_data = _response(parking_session)
+                applied_voucher = await VoucherService(session).get_applied_to_session(session_id)
+                response_data = _completed_response(parking_session, applied_voucher)
                 await idempotency.complete(
                     claim,
                     response_data.model_dump(mode="json"),

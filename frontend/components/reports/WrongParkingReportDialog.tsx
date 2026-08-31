@@ -27,7 +27,6 @@ export interface WrongParkingReportDraft {
 interface WrongParkingReportDialogProps {
   slots: ParkingSlot[];
   initialSlotId?: string | null;
-  rewardPoints: number;
   onClose: () => void;
   onSubmit: (
     draft: WrongParkingReportDraft,
@@ -57,7 +56,6 @@ const ALLOWED_IMAGE_TYPES = new Set([
 export function WrongParkingReportDialog({
   slots,
   initialSlotId = null,
-  rewardPoints,
   onClose,
   onSubmit,
 }: WrongParkingReportDialogProps) {
@@ -202,7 +200,7 @@ export function WrongParkingReportDialog({
           <div className="report-success" role="status" aria-live="polite">
             <b>Đã gửi báo cáo.</b>
             {submittedReport.reward_points > 0 ? (
-              <p>+{submittedReport.reward_points} điểm đang chờ xác minh.</p>
+              <p>Đóng góp hợp lệ có thể nhận ParkSmart Points sau khi được xác minh.</p>
             ) : submittedReport.duplicate_candidate_of_id ? (
               <p>Một report tương tự đang được xử lý nên report này không có điểm chờ.</p>
             ) : (
@@ -219,7 +217,7 @@ export function WrongParkingReportDialog({
               Bạn luôn được xem lại thông tin trước khi gửi.
             </p>
             <p className="reward-condition">
-              Report hợp lệ sau khi được bộ phận vận hành kiểm tra sẽ nhận +{rewardPoints} điểm ParkSmart.
+              Đóng góp hợp lệ có thể nhận ParkSmart Points sau khi được xác minh. Bạn có thể xem chi tiết trong ParkSmart Points.
             </p>
             <label>
               Ô cần phản ánh

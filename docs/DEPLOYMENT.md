@@ -334,3 +334,6 @@ cold start as an authentication failure.
 
 Do not mark the real smoke flow as passed unless it was executed against the
 deployed backend and real Supabase project.
+# Current schema head
+
+This feature requires Alembic revision `20260831_0017`. Coordinate the schema migration and application release; this documentation does not indicate that a production migration has run.

@@ -10,15 +10,18 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from src.api.dependencies import require_parking_user_or_demo
 from src.api.main import create_app
+from src.api.routes.rewards import _integrity_constraint_name
 from src.core.config import get_settings
 from src.core.database import get_db_session
 from src.core.db_models import (
     Base,
+    ParkingSession,
     ParkingUser,
     ParkingVoucher,
     RewardCatalogItem,
@@ -30,6 +33,7 @@ from src.core.reward_redemption import RewardRedemptionService
 from src.core.seed import seed_if_missing
 from src.models.auth import AppRole, CurrentUser
 from src.models.schemas import (
+    ParkingSessionStatus,
     RewardSourceType,
     RewardTransactionStatus,
     RewardTransactionType,
@@ -41,6 +45,29 @@ class RewardsApi:
     client: AsyncClient
     session_factory: async_sessionmaker[AsyncSession]
     application: FastAPI
+
+
+class ConstraintFailureError(Exception):
+    def __init__(self, constraint_name: str | None):
+        super().__init__(constraint_name)
+        self.constraint_name = constraint_name
+
+
+def test_voucher_apply_integrity_mapping_is_constraint_specific():
+    known = IntegrityError(
+        "insert",
+        {},
+        ConstraintFailureError("uq_parking_vouchers_applied_session"),
+    )
+    unrelated = IntegrityError(
+        "insert", {}, ConstraintFailureError("some_other_constraint")
+    )
+
+    assert (
+        _integrity_constraint_name(known)
+        == "uq_parking_vouchers_applied_session"
+    )
+    assert _integrity_constraint_name(unrelated) == "some_other_constraint"
 
 
 @pytest_asyncio.fixture
@@ -62,10 +89,14 @@ async def rewards_api() -> AsyncGenerator[RewardsApi, None]:
 
     application = create_app()
     application.dependency_overrides[get_db_session] = override_db_session
+    settings = get_settings()
+    original_redemption_enabled = settings.rewards_redemption_enabled
+    settings.rewards_redemption_enabled = True
     try:
         async with AsyncClient(transport=ASGITransport(app=application), base_url="http://test") as client:
             yield RewardsApi(client, factory, application)
     finally:
+        settings.rewards_redemption_enabled = original_redemption_enabled
         application.dependency_overrides.clear()
         await engine.dispose()
         async with admin_engine.connect() as connection:
@@ -186,3 +217,119 @@ async def test_insufficient_redemption_conflict_leaves_no_mutations(rewards_api:
         assert await session.scalar(select(func.count()).select_from(RewardRedemption)) == 0
         assert await session.scalar(select(func.count()).select_from(ParkingVoucher)) == 0
         assert await session.scalar(select(func.count()).select_from(RewardTransaction).where(RewardTransaction.points_delta < 0)) == 0
+
+
+@pytest.mark.asyncio
+async def test_redemption_flag_fails_closed_without_blocking_reward_reads(
+    rewards_api: RewardsApi,
+):
+    item = await _catalog_and_credit(rewards_api, cost=100)
+    async with rewards_api.session_factory() as session, session.begin():
+        _, voucher, _ = await RewardRedemptionService(session).redeem(
+            user_id="USER-001",
+            catalog_item_id=item.id,
+        )
+    await _authenticate(rewards_api)
+    settings = get_settings()
+    settings.rewards_redemption_enabled = False
+    try:
+        disabled = await rewards_api.client.post(
+            "/api/v1/rewards/redemptions",
+            json={"user_id": "USER-001", "catalog_item_id": item.id},
+        )
+        catalog = await rewards_api.client.get("/api/v1/rewards/catalog")
+        wallet = await rewards_api.client.get(
+            "/api/v1/rewards/users/USER-001/vouchers"
+        )
+        ledger = await rewards_api.client.get(
+            "/api/v1/rewards/users/USER-001/ledger"
+        )
+    finally:
+        settings.rewards_redemption_enabled = True
+
+    assert disabled.status_code == 503
+    assert disabled.json()["error"]["code"] == "REDEMPTION_DISABLED"
+    assert catalog.status_code == wallet.status_code == ledger.status_code == 200
+    assert wallet.json()["data"][0]["id"] == voucher.id
+    assert any(item["points_delta"] < 0 for item in ledger.json()["data"])
+    async with rewards_api.session_factory() as session:
+        assert await session.scalar(select(func.count()).select_from(RewardRedemption)) == 1
+        assert await session.scalar(select(func.count()).select_from(ParkingVoucher)) == 1
+
+
+@pytest.mark.asyncio
+async def test_signed_ledger_is_owned_and_keeps_redemption_debits(
+    rewards_api: RewardsApi,
+):
+    item = await _catalog_and_credit(rewards_api, cost=100, finalized_points=150)
+    async with rewards_api.session_factory() as session, session.begin():
+        await RewardRedemptionService(session).redeem(
+            user_id="USER-001",
+            catalog_item_id=item.id,
+        )
+    await _authenticate(rewards_api)
+
+    owned = await rewards_api.client.get(
+        "/api/v1/rewards/users/USER-001/ledger"
+    )
+    other = await rewards_api.client.get(
+        "/api/v1/rewards/users/USER-002/ledger"
+    )
+
+    assert owned.status_code == 200
+    signed = [entry["points_delta"] for entry in owned.json()["data"]]
+    assert 150 in signed
+    assert -100 in signed
+    assert other.status_code == 403
+    assert other.json()["error"]["code"] == "PARKING_OWNERSHIP_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_apply_issued_voucher_is_idempotent_and_not_redemption_gated(
+    rewards_api: RewardsApi,
+):
+    item = await _catalog_and_credit(rewards_api, cost=100)
+    async with rewards_api.session_factory() as session, session.begin():
+        _, voucher, _ = await RewardRedemptionService(session).redeem(
+            user_id="USER-001",
+            catalog_item_id=item.id,
+        )
+        session.add(
+            ParkingSession(
+                id="SESSION-APPLY",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F1-D01",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=datetime.now(UTC),
+            )
+        )
+    await _authenticate(rewards_api)
+    settings = get_settings()
+    settings.rewards_redemption_enabled = False
+    payload = {"user_id": "USER-001", "session_id": "SESSION-APPLY"}
+    try:
+        first = await rewards_api.client.post(
+            f"/api/v1/rewards/vouchers/{voucher.id}/apply",
+            json=payload,
+            headers={"Idempotency-Key": "apply-key"},
+        )
+        replay = await rewards_api.client.post(
+            f"/api/v1/rewards/vouchers/{voucher.id}/apply",
+            json=payload,
+            headers={"Idempotency-Key": "apply-key"},
+        )
+        reused = await rewards_api.client.post(
+            f"/api/v1/rewards/vouchers/{voucher.id}/apply",
+            json={**payload, "session_id": "SESSION-DIFFERENT"},
+            headers={"Idempotency-Key": "apply-key"},
+        )
+    finally:
+        settings.rewards_redemption_enabled = True
+
+    assert first.status_code == replay.status_code == 200
+    assert first.json()["data"] == replay.json()["data"]
+    assert first.json()["data"]["status"] == "APPLIED"
+    assert first.json()["data"]["applied_session_id"] == "SESSION-APPLY"
+    assert reused.status_code == 409
+    assert reused.json()["error"]["code"] == "IDEMPOTENCY_KEY_REUSED"

@@ -80,6 +80,10 @@ class SlotObservationService:
         slot_id: str,
         observed_status: SlotStatus,
         expected_slot_version: int,
+        observation_id: str | None = None,
+        evidence_storage_path: str | None = None,
+        evidence_content_type: str | None = None,
+        evidence_size_bytes: int | None = None,
     ) -> SlotObservation:
         if observed_status not in {SlotStatus.AVAILABLE, SlotStatus.OCCUPIED}:
             raise SlotObservationError(
@@ -151,7 +155,7 @@ class SlotObservationService:
 
         now = self._now()
         observation = SlotObservation(
-            id=f"OBSERVATION-{uuid4()}",
+            id=observation_id or f"OBSERVATION-{uuid4()}",
             observer_user_id=user_id,
             observer_session_id=active_session.id,
             slot_id=slot_id,
@@ -164,6 +168,9 @@ class SlotObservationService:
             verified_at=None,
             verified_by=None,
             rejection_reason=None,
+            evidence_storage_path=evidence_storage_path,
+            evidence_content_type=evidence_content_type,
+            evidence_size_bytes=evidence_size_bytes,
             version=0,
         )
         self.session.add(observation)

@@ -699,3 +699,113 @@ body .admin-operations button { min-height: 40px; font-size: 12px; }
   transform: scale(0.65);
   pointer-events: none;
 }
+/* Scoped ParkSmart Points and optional observation-evidence surfaces. */
+.points-trigger {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  border-radius: 999px;
+}
+
+.points-badge {
+  font-weight: 700;
+}
+
+.points-modal {
+  width: min(620px, calc(100vw - 2rem));
+  max-height: min(82vh, 720px);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.points-tabs {
+  margin: 1rem 0;
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+}
+
+.points-tabs button {
+  flex: 0 0 auto;
+}
+
+.points-tabs button[aria-selected="true"] {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.points-history article {
+  padding: 0.5rem 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border, #ddd);
+}
+
+.points-history article > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.points-positive {
+  color: #177245;
+}
+
+.points-negative {
+  color: #a12b2b;
+}
+
+.points-confirmation {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+}
+
+.points-confirmation-actions,
+.observation-evidence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.observation-evidence-preview {
+  width: auto;
+  max-width: 100%;
+  max-height: 220px;
+  margin: 0.5rem 0;
+  display: block;
+  object-fit: contain;
+}
+
+.points-trigger:focus-visible,
+.points-modal button:focus-visible,
+.observation-review button:focus-visible {
+  outline: 3px solid #2679ff;
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .points-modal-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .points-modal {
+    width: 100%;
+    max-height: 90vh;
+    margin: auto 0 0;
+    border-radius: 1rem 1rem 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .points-modal,
+  .points-modal-backdrop {
+    transition: none !important;
+    animation: none !important;
+  }
+}

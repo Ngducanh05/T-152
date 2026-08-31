@@ -54,6 +54,21 @@ def validate_report_image(
     return normalized_type
 
 
+def validate_observation_image(
+    *, content_type: str | None, data: bytes, max_bytes: int
+) -> str:
+    """Use the report signature rules with observation-specific public codes."""
+    try:
+        return validate_report_image(content_type=content_type, data=data, max_bytes=max_bytes)
+    except HTTPException as error:
+        code = (
+            "OBSERVATION_EVIDENCE_TOO_LARGE"
+            if error.detail.get("code") == "REPORT_EVIDENCE_TOO_LARGE"
+            else "OBSERVATION_EVIDENCE_INVALID"
+        )
+        raise _storage_error(code, error.detail["message"], error.status_code) from error
+
+
 def _signature_matches(content_type: str, data: bytes) -> bool:
     if content_type == "image/jpeg":
         return data.startswith(b"\xff\xd8\xff")
@@ -121,8 +136,10 @@ class ReportEvidenceStorage:
         data: bytes,
         content_type: str,
         allow_demo_fallback: bool = False,
+        path_prefix: str = "reports",
+        validator=validate_report_image,
     ) -> StoredReportEvidence:
-        content_type = validate_report_image(
+        content_type = validator(
             content_type=content_type,
             data=data,
             max_bytes=self.settings.report_evidence_max_bytes,
@@ -134,7 +151,7 @@ class ReportEvidenceStorage:
             "image/heic": "heic",
             "image/heif": "heif",
         }[content_type]
-        storage_path = f"reports/{report_id}/{uuid4()}.{extension}"
+        storage_path = f"{path_prefix}/{report_id}/{uuid4()}.{extension}"
 
         if not self._require_configured(allow_demo_fallback=allow_demo_fallback):
             return StoredReportEvidence(
@@ -289,3 +306,24 @@ class ReportEvidenceStorage:
         if provider_error is not None:
             return False
         return status.HTTP_200_OK <= response.status_code < status.HTTP_300_MULTIPLE_CHOICES
+
+
+class ObservationEvidenceStorage(ReportEvidenceStorage):
+    """Private evidence storage for observations using the established bucket."""
+
+    async def upload(
+        self,
+        *,
+        observation_id: str,
+        data: bytes,
+        content_type: str,
+        allow_demo_fallback: bool = False,
+    ) -> StoredReportEvidence:
+        return await super().upload(
+            report_id=observation_id,
+            data=data,
+            content_type=content_type,
+            allow_demo_fallback=allow_demo_fallback,
+            path_prefix="slot-observations",
+            validator=validate_observation_image,
+        )

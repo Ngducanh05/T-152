@@ -23,6 +23,7 @@ from src.core.db_models import (
     RewardCatalogItem,
     RewardRedemption,
     RewardTransaction,
+    SlotObservation,
     Vehicle,
     WrongParkingReport,
 )
@@ -110,8 +111,9 @@ def test_parking_migration_follows_profiles_revision():
     idempotency_revision = scripts.get_revision("20260826_0014")
     invariant_revision = scripts.get_revision("20260826_0015")
     reward_revision = scripts.get_revision("20260830_0016")
+    observation_evidence_revision = scripts.get_revision("20260831_0017")
 
-    assert scripts.get_current_head() == "20260830_0016"
+    assert scripts.get_current_head() == "20260831_0017"
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
     assert location_cleanup_revision is not None
@@ -140,6 +142,21 @@ def test_parking_migration_follows_profiles_revision():
     assert invariant_revision.down_revision == "20260826_0014"
     assert reward_revision is not None
     assert reward_revision.down_revision == "20260826_0015"
+    assert observation_evidence_revision is not None
+    assert observation_evidence_revision.down_revision == "20260830_0016"
+
+
+def test_slot_observation_evidence_metadata_is_nullable_and_bounded():
+    table = SlotObservation.__table__
+
+    assert table.c.evidence_storage_path.nullable is True
+    assert table.c.evidence_storage_path.type.length == 512
+    assert table.c.evidence_content_type.nullable is True
+    assert table.c.evidence_content_type.type.length == 100
+    assert table.c.evidence_size_bytes.nullable is True
+    assert {constraint.name for constraint in table.constraints} >= {
+        "ck_slot_observations_evidence_size_nonnegative"
+    }
 
 
 def test_agent_daily_usage_model_and_migration_constraints_match():

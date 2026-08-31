@@ -395,6 +395,10 @@ class SlotObservation(Base):
             "expires_at > created_at",
             name="ck_slot_observations_expiry_after_creation",
         ),
+        CheckConstraint(
+            "evidence_size_bytes IS NULL OR evidence_size_bytes >= 0",
+            name="ck_slot_observations_evidence_size_nonnegative",
+        ),
         UniqueConstraint(
             "observer_session_id",
             "slot_id",
@@ -436,6 +440,9 @@ class SlotObservation(Base):
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     verified_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    evidence_storage_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    evidence_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    evidence_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
 
 

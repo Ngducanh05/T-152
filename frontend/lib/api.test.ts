@@ -212,6 +212,38 @@ describe("reward voucher client", () => {
     expect(String(request?.body)).not.toContain("free_minutes");
     expect(String(request?.body)).not.toContain("validity_days");
   });
+
+  it("reads signed ledger history and applies a voucher with idempotency", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope([])),
+    );
+    const api = new ParkSmartApiClient({ baseUrl: "http://api.test/api/v1", fetcher });
+
+    await api.getRewardLedger("USER / 001");
+    await api.applyRewardVoucher(
+      "VOUCHER / 001",
+      { user_id: "USER-001", session_id: "SESSION-001" },
+      undefined,
+      "apply-key",
+    );
+
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      "http://api.test/api/v1/rewards/users/USER%20%2F%20001/ledger",
+    );
+    expect(String(fetcher.mock.calls[1]?.[0])).toBe(
+      "http://api.test/api/v1/rewards/vouchers/VOUCHER%20%2F%20001/apply",
+    );
+    expect(fetcher.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        user_id: "USER-001",
+        session_id: "SESSION-001",
+      }),
+    });
+    expect(
+      new Headers(fetcher.mock.calls[1]?.[1]?.headers).get("Idempotency-Key"),
+    ).toBe("apply-key");
+  });
 });
 
 describe("operator-safe errors", () => {
@@ -263,9 +295,51 @@ describe("adjacent slot observations", () => {
       }),
     });
   });
+
+  it("uses browser-managed multipart when evidence is present", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope({ id: "OBSERVATION-001" })),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+    });
+    const evidence = new File(["image"], "space.jpg", { type: "image/jpeg" });
+
+    await api.observeAdjacentSlot("F1-D02", {
+      user_id: "USER-001",
+      observed_status: "AVAILABLE",
+      expected_slot_version: 9,
+      evidence,
+    });
+
+    const request = fetcher.mock.calls[0]?.[1];
+    expect(request?.body).toBeInstanceOf(FormData);
+    const body = request?.body as FormData;
+    expect(body.get("user_id")).toBe("USER-001");
+    expect(body.get("observed_status")).toBe("AVAILABLE");
+    expect(body.get("expected_slot_version")).toBe("9");
+    expect(body.get("evidence")).toBe(evidence);
+    expect(new Headers(request?.headers).has("Content-Type")).toBe(false);
+  });
 });
 
 describe("admin operations client", () => {
+  it("requests a lazy signed URL for observation evidence", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope({ signed_url: "https://signed.test/x", expires_in: 300 })),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+    });
+
+    await api.getAdminObservationEvidenceUrl("OBS / 001");
+
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      "http://api.test/api/v1/admin/slot-observations/OBS%20%2F%20001/evidence-url",
+    );
+  });
   it("uses typed simulator paths and payloads", async () => {
     const fetcher = vi.fn<typeof fetch>(async () =>
       jsonResponse(successEnvelope([])),

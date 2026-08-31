@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { adjacentParkingSlotIds } from "@/lib/adjacent-parking-slots";
 import type {
@@ -14,13 +14,23 @@ interface AdjacentSlotObservationProps {
   parkedSlotId: string;
   slots: ParkingSlot[];
   observedSlotIds: string[];
-  rewardPoints: number;
   pendingSlotId: string | null;
   onObserve: (
     slotId: string,
     status: AdjacentSlotObservedStatus,
+    evidence?: File,
   ) => Promise<SlotObservation | null>;
 }
+
+const MAX_IMAGE_BYTES = 5_000_000;
+const ACCEPTED_IMAGE_TYPES =
+  "image/jpeg,image/png,image/webp,image/heic,image/heif";
+const ALLOWED_IMAGE_TYPES = new Set(ACCEPTED_IMAGE_TYPES.split(","));
+const PREVIEW_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 
 function shortSlotName(slotId: string) {
   return slotId.split("-").at(-1) ?? slotId;
@@ -32,28 +42,35 @@ function slotPosition(slotId: string, parkedSlotId: string) {
   return target < parked ? "bên trái" : "bên phải";
 }
 
+function selectedStatusLabel(status: AdjacentSlotObservedStatus) {
+  return status === "AVAILABLE" ? "Ô đang trống" : "Đã có xe";
+}
+
+function readableFileSize(size: number) {
+  return size >= 1_000_000
+    ? `${(size / 1_000_000).toFixed(1)} MB`
+    : `${Math.ceil(size / 1_000)} KB`;
+}
+
 export function AdjacentSlotObservation({
   parkingSessionId,
   parkedSlotId,
   slots,
   observedSlotIds,
-  rewardPoints,
   pendingSlotId,
   onObserve,
 }: AdjacentSlotObservationProps) {
   const dismissalKey = `parksmart:adjacent-observation:dismissed:${parkingSessionId}`;
   const [adjacentSlots] = useState(() => {
     const observedSlots = new Set(observedSlotIds);
-    return (
-      adjacentParkingSlotIds(parkedSlotId)
-        .map((slotId) => slots.find((slot) => slot.id === slotId))
-        .filter(
-          (slot): slot is ParkingSlot =>
-            slot !== undefined &&
-            slot.status !== "RESERVED" &&
-            !observedSlots.has(slot.id),
-        )
-    );
+    return adjacentParkingSlotIds(parkedSlotId)
+      .map((slotId) => slots.find((slot) => slot.id === slotId))
+      .filter(
+        (slot): slot is ParkingSlot =>
+          slot !== undefined &&
+          slot.status !== "RESERVED" &&
+          !observedSlots.has(slot.id),
+      );
   });
   const [expanded, setExpanded] = useState(false);
   const [dismissed, setDismissed] = useState(
@@ -64,32 +81,126 @@ export function AdjacentSlotObservation({
   const [step, setStep] = useState(0);
   const [result, setResult] = useState<SlotObservation | null>(null);
   const [error, setError] = useState(false);
+  const [selectedStatus, setSelectedStatus] =
+    useState<AdjacentSlotObservedStatus | null>(null);
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const submittingRef = useRef(false);
+  const previewUrlRef = useRef<string | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
 
   if (dismissed || adjacentSlots.length === 0) return null;
 
   const current = adjacentSlots[step];
   const finished = step >= adjacentSlots.length;
 
+  function revokePreview() {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+    setPreviewUrl(null);
+  }
+
+  function clearEvidence() {
+    revokePreview();
+    setEvidenceFile(null);
+    setEvidenceError(null);
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
+    if (galleryInputRef.current) galleryInputRef.current.value = "";
+  }
+
+  function clearReview() {
+    clearEvidence();
+    setSelectedStatus(null);
+  }
+
   function dismiss() {
+    clearReview();
     window.sessionStorage.setItem(dismissalKey, "true");
     setDismissed(true);
   }
 
   function next() {
+    clearReview();
     setResult(null);
     setError(false);
     setStep((currentStep) => currentStep + 1);
   }
 
-  async function answer(status: AdjacentSlotObservedStatus) {
-    if (!current || submittingRef.current || pendingSlotId !== null) return;
+  function selectEvidence(file: File | null) {
+    if (!file) {
+      clearEvidence();
+      return;
+    }
+
+    const contentType = file.type.toLowerCase();
+    if (
+      !ALLOWED_IMAGE_TYPES.has(contentType) ||
+      file.size <= 0 ||
+      file.size > MAX_IMAGE_BYTES
+    ) {
+      setEvidenceError(
+        "Ảnh phải là JPEG, PNG, WebP, HEIC hoặc HEIF và không vượt quá 5 MB.",
+      );
+      return;
+    }
+
+    revokePreview();
+    setEvidenceFile(file);
+    setEvidenceError(null);
+    if (PREVIEW_IMAGE_TYPES.has(contentType)) {
+      try {
+        const nextPreview = URL.createObjectURL(file);
+        previewUrlRef.current = nextPreview;
+        setPreviewUrl(nextPreview);
+      } catch {
+        setPreviewUrl(null);
+      }
+    }
+  }
+
+  function evidenceChange(event: React.ChangeEvent<HTMLInputElement>) {
+    selectEvidence(event.target.files?.[0] ?? null);
+  }
+
+  async function submitObservation() {
+    if (
+      !current ||
+      !selectedStatus ||
+      submittingRef.current ||
+      pendingSlotId !== null
+    ) {
+      return;
+    }
+
     submittingRef.current = true;
     setError(false);
-    const observation = await onObserve(current.id, status);
-    if (observation) setResult(observation);
-    else setError(true);
-    submittingRef.current = false;
+    try {
+      const observation = await onObserve(
+        current.id,
+        selectedStatus,
+        evidenceFile ?? undefined,
+      );
+      if (!observation) {
+        setError(true);
+        return;
+      }
+      clearReview();
+      setResult(observation);
+    } catch {
+      setError(true);
+    } finally {
+      submittingRef.current = false;
+    }
   }
 
   return (
@@ -99,26 +210,35 @@ export function AdjacentSlotObservation({
     >
       {!expanded ? (
         <div className="contribution-invitation">
-          <span className="contribution-icon" aria-hidden="true">♥</span>
+          <span className="contribution-icon" aria-hidden="true">
+            ♥
+          </span>
           <div>
             <h2 id="adjacent-observation-title">
               Cùng giúp bãi xe chính xác hơn nhé!
             </h2>
             <p>
-              Bạn giúp ParkSmart kiểm tra {adjacentSlots.length === 1 ? "ô bên cạnh xe" : "hai ô cạnh xe"} một chút nhé? Chỉ mất
-              khoảng 5 giây và thông tin chính xác sẽ nhận điểm sau khi xác minh.
+              Bạn giúp ParkSmart kiểm tra{" "}
+              {adjacentSlots.length === 1
+                ? "ô bên cạnh xe"
+                : "hai ô cạnh xe"}{" "}
+              một chút nhé? Chỉ mất khoảng 5 giây.
             </p>
             <div className="contribution-meta" aria-label="Thông tin đóng góp">
               <span>Khoảng 5 giây</span>
               <span className="reward-pill">
-                Tối đa +{rewardPoints * adjacentSlots.length} điểm chờ xác minh
+                Đóng góp hợp lệ có thể nhận ParkSmart Points sau khi được xác minh.
               </span>
             </div>
             <div className="contribution-actions">
               <button type="button" onClick={() => setExpanded(true)}>
                 Giúp kiểm tra ngay
               </button>
-              <button type="button" className="secondary-button" onClick={dismiss}>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={dismiss}
+              >
                 Để lúc khác
               </button>
             </div>
@@ -137,14 +257,18 @@ export function AdjacentSlotObservation({
           <header>
             <div>
               <small>
-                Tầng {current.floor_id.slice(1)} · Khu {current.zone_id} · {slotPosition(current.id, parkedSlotId)}
+                Tầng {current.floor_id.slice(1)} · Khu {current.zone_id} ·{" "}
+                {slotPosition(current.id, parkedSlotId)}
               </small>
               <h2 id="adjacent-observation-title">
                 Bạn nhìn giúp ô {shortSlotName(current.id)} một chút nhé — ô này
                 đang trống hay đã có xe?
               </h2>
             </div>
-            <span className="contribution-progress" aria-label={`Bước ${step + 1} trên ${adjacentSlots.length}`}>
+            <span
+              className="contribution-progress"
+              aria-label={`Bước ${step + 1} trên ${adjacentSlots.length}`}
+            >
               {step + 1}/{adjacentSlots.length}
             </span>
           </header>
@@ -153,31 +277,127 @@ export function AdjacentSlotObservation({
             <div className="contribution-result" role="status" aria-live="polite">
               {result.reward_points > 0 ? (
                 <p>
-                  Cảm ơn bạn đã giúp cộng đồng ParkSmart! Thông tin về ô {shortSlotName(current.id)} đang chờ xác minh. +{result.reward_points} điểm sẽ được cộng nếu thông tin chính xác.
+                  Cảm ơn bạn đã giúp cộng đồng ParkSmart! Thông tin đang chờ xác
+                  minh. Bạn có thể theo dõi trong ParkSmart Points.
                 </p>
               ) : (
                 <p>
-                  Cảm ơn bạn. Thông tin đang chờ xác minh. Bạn đã đạt giới hạn điểm hôm nay, nhưng đóng góp vẫn giúp cộng đồng.
+                  Cảm ơn bạn. Thông tin đang chờ xác minh. Bạn đã đạt giới hạn
+                  điểm hôm nay, nhưng đóng góp vẫn giúp cộng đồng.
                 </p>
               )}
               <button type="button" onClick={next}>
-                {step + 1 < adjacentSlots.length ? "Kiểm tra ô tiếp theo" : "Hoàn tất"}
+                {step + 1 < adjacentSlots.length
+                  ? "Kiểm tra ô tiếp theo"
+                  : "Hoàn tất"}
               </button>
             </div>
+          ) : selectedStatus ? (
+            <section className="observation-review" aria-labelledby="observation-review-title">
+              <h3 id="observation-review-title">Xem lại đóng góp</h3>
+              <p>
+                Trạng thái đã chọn: <b>{selectedStatusLabel(selectedStatus)}</b>
+              </p>
+              <section className="observation-evidence">
+                <h4>Ảnh xác minh (không bắt buộc)</h4>
+                <input
+                  ref={cameraInputRef}
+                  className="visually-hidden"
+                  type="file"
+                  aria-label="Chụp ảnh quan sát"
+                  accept={ACCEPTED_IMAGE_TYPES}
+                  capture="environment"
+                  onChange={evidenceChange}
+                />
+                <input
+                  ref={galleryInputRef}
+                  className="visually-hidden"
+                  type="file"
+                  aria-label="Chọn ảnh quan sát từ thư viện"
+                  accept={ACCEPTED_IMAGE_TYPES}
+                  onChange={evidenceChange}
+                />
+                <div className="observation-evidence-actions">
+                  <button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                  >
+                    Chụp ảnh
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => galleryInputRef.current?.click()}
+                  >
+                    {evidenceFile ? "Đổi ảnh" : "Chọn từ thư viện"}
+                  </button>
+                  {evidenceFile && (
+                    <button type="button" onClick={clearEvidence}>
+                      Xóa ảnh
+                    </button>
+                  )}
+                </div>
+                {evidenceFile && (
+                  <div className="observation-evidence-selected">
+                    {previewUrl && (
+                      <img
+                        className="observation-evidence-preview"
+                        src={previewUrl}
+                        alt="Ảnh quan sát đã chọn"
+                      />
+                    )}
+                    <p>{evidenceFile.name}</p>
+                    <small>
+                      {evidenceFile.type} · {readableFileSize(evidenceFile.size)}
+                    </small>
+                  </div>
+                )}
+                {evidenceError && (
+                  <p className="report-error" role="alert">
+                    {evidenceError}
+                  </p>
+                )}
+              </section>
+              <div className="contribution-answer-grid">
+                <button
+                  type="button"
+                  disabled={pendingSlotId !== null}
+                  onClick={() => void submitObservation()}
+                >
+                  {pendingSlotId === current.id ? "Đang gửi…" : "Gửi đóng góp"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={pendingSlotId !== null}
+                  onClick={() => {
+                    clearReview();
+                    setError(false);
+                  }}
+                >
+                  Chọn lại
+                </button>
+              </div>
+              {error && (
+                <p className="report-error" role="alert">
+                  Không thể gửi thông tin. Không có điểm nào được ghi nhận; vui
+                  lòng thử lại.
+                </p>
+              )}
+            </section>
           ) : (
             <>
               <div className="contribution-answer-grid">
                 <button
                   type="button"
                   disabled={pendingSlotId !== null}
-                  onClick={() => void answer("AVAILABLE")}
+                  onClick={() => setSelectedStatus("AVAILABLE")}
                 >
                   Ô đang trống
                 </button>
                 <button
                   type="button"
                   disabled={pendingSlotId !== null}
-                  onClick={() => void answer("OCCUPIED")}
+                  onClick={() => setSelectedStatus("OCCUPIED")}
                 >
                   Đã có xe
                 </button>
@@ -193,11 +413,6 @@ export function AdjacentSlotObservation({
               <p role="status" aria-live="polite">
                 {pendingSlotId === current.id ? "Đang gửi để chờ xác minh…" : ""}
               </p>
-              {error && (
-                <p className="report-error" role="alert">
-                  Không thể gửi thông tin. Không có điểm nào được ghi nhận; vui lòng thử lại.
-                </p>
-              )}
             </>
           )}
         </div>

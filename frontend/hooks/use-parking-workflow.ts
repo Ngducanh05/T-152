@@ -115,6 +115,7 @@ export interface ParkingWorkflow {
   updateAdjacentSlotStatus: (
     slotId: FloorScopedId,
     status: AdjacentSlotObservedStatus,
+    evidence?: File,
   ) => Promise<SlotObservation | null>;
   resetDemo: () => Promise<void>;
   sendAgentMessage: (message: string) => Promise<string | null>;
@@ -762,23 +763,41 @@ export function useParkingWorkflow(
     setNotice(null);
     clearRecommendations();
     try {
-      await api.completeSession(
-        session.session_id,
-        request,
-        undefined,
-        idempotencyKey,
-      );
+      let completed;
+      try {
+        completed = await api.completeSession(
+          session.session_id,
+          request,
+          undefined,
+          idempotencyKey,
+        );
+      } catch (error) {
+        if (isDefinitiveMutationRejection(error)) {
+          clearIdempotencyKey(completeSessionIdempotencyRef);
+        }
+        await handleMutationFailure(error);
+        return false;
+      }
+
       clearIdempotencyKey(completeSessionIdempotencyRef);
-      await data.refresh();
       setSelectedSlotId(null);
       setActiveRoute(null);
-      return true;
-    } catch (error) {
-      if (isDefinitiveMutationRejection(error)) {
-        clearIdempotencyKey(completeSessionIdempotencyRef);
+      try {
+        await data.refresh();
+      } catch {
+        setNotice(
+          "Phiên đỗ xe đã kết thúc nhưng dữ liệu mới nhất chưa tải lại được.",
+        );
+        return true;
       }
-      await handleMutationFailure(error);
-      return false;
+
+      if (completed.time_benefit.voucher_id) {
+        setNotice(
+          `Voucher đã áp dụng ${completed.time_benefit.free_minutes} phút. ` +
+            `Thời gian còn lại sau ưu đãi: ${completed.time_benefit.billable_minutes} phút.`,
+        );
+      }
+      return true;
     } finally {
       setPending(null);
     }
@@ -916,6 +935,7 @@ export function useParkingWorkflow(
   async function updateAdjacentSlotStatus(
     slotId: FloorScopedId,
     status: AdjacentSlotObservedStatus,
+    evidence?: File,
   ) {
     if (adjacentObservationInFlightRef.current) return null;
     const slot = data.slots.find((candidate) => candidate.id === slotId);
@@ -932,6 +952,7 @@ export function useParkingWorkflow(
         user_id: identity.userId,
         observed_status: status,
         expected_slot_version: slot.version,
+        evidence,
       });
       await data.refresh();
       return observation;

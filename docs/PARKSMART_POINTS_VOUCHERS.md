@@ -1,13 +1,12 @@
 # ParkSmart Points and parking vouchers
 
-Status: implemented for earning, signed balance, catalog, redemption, voucher issuance,
-expiry and wallet display. Pricing, checkout, payment and attaching a voucher to a completed
-parking session are deliberately not implemented.
+Status: implemented for earning, signed balance and ledger history, catalog, feature-gated
+redemption, voucher issuance/expiry/wallet display, active-session application and completion
+time benefit. Pricing, checkout and payment are deliberately not implemented.
 
-The assistant has read-only access to the authoritative reward configuration, balance, catalog
-and owned voucher wallet; redemption remains a deterministic Rewards UI action. Wrong-parking
-evidence supports either camera capture or gallery selection, both feeding the same optional
-validated image upload pipeline.
+The assistant may read only the public reward configuration and authoritative catalog. It cannot
+read or infer a user's balance, wallet or ledger, and it has no reward mutation tools. Personal
+reward information and redemption remain deterministic ParkSmart Points UI actions.
 
 Verified adjacent observations earn the configured 10 points and confirmed wrong-parking
 reports earn the configured 20 points. Contribution allocation is capped at 100 points per
@@ -21,6 +20,12 @@ snapshots remain unchanged if the catalog is edited later. Vouchers are one-time
 have no cash value, expire after their snapshot validity (30 days for the defaults), and do not
 automatically refund points on expiry.
 
-Future checkout may attach no more than one voucher to a session and calculate
-`max(0, parking_minutes - free_minutes_snapshot)`. No tariff, price, invoice, payment, or
-voucher application behavior exists in the current parking lifecycle.
+## Voucher application and ledger
+
+The catalog and signed Points ledger are database-driven. New point redemption is fail-closed unless `REWARDS_REDEMPTION_ENABLED=true`; the frontend additionally requires `NEXT_PUBLIC_REWARDS_REDEMPTION_ENABLED=true`, but the backend remains authoritative.
+
+Issued vouchers can be applied once to an active owned parking session. A session has at most
+one applied voucher. Completion returns a time-only benefit (`total_minutes`, `free_minutes`,
+`billable_minutes`); ParkSmart does not model pricing, payments, or money.
+`GET /rewards/users/{user_id}/ledger` exposes the complete signed ledger, including redemption
+debits.

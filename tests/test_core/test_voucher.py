@@ -9,11 +9,26 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from src.core.config import get_settings
-from src.core.db_models import Base, ParkingUser, ParkingVoucher, RewardCatalogItem, RewardTransaction
+from src.core.db_models import (
+    Base,
+    ParkingSession,
+    ParkingUser,
+    ParkingVoucher,
+    RewardCatalogItem,
+    RewardTransaction,
+)
+from src.core.reward import RewardError
 from src.core.reward_redemption import RewardRedemptionService
 from src.core.seed import seed_if_missing
 from src.core.voucher import VoucherService
-from src.models.schemas import ParkingVoucherStatus, RewardSourceType, RewardTransactionStatus, RewardTransactionType
+from src.models.schemas import (
+    ErrorCode,
+    ParkingSessionStatus,
+    ParkingVoucherStatus,
+    RewardSourceType,
+    RewardTransactionStatus,
+    RewardTransactionType,
+)
 
 
 @pytest_asyncio.fixture
@@ -51,6 +66,26 @@ async def _issue_voucher(session, *, user_id: str = "USER-001", now: datetime | 
     await session.flush()
     _, voucher, _ = await RewardRedemptionService(session, clock=lambda: now).redeem(user_id=user_id, catalog_item_id=item.id)
     return voucher
+
+
+async def _active_session(
+    session,
+    *,
+    session_id: str = "SESSION-VOUCHER",
+    status: ParkingSessionStatus = ParkingSessionStatus.ACTIVE,
+) -> ParkingSession:
+    parking_session = ParkingSession(
+        id=session_id,
+        user_id="USER-001",
+        vehicle_id="VEHICLE-001",
+        slot_id="F1-D01",
+        status=status,
+        parked_at=datetime.now(UTC) - timedelta(minutes=30),
+        completed_at=(datetime.now(UTC) if status is ParkingSessionStatus.COMPLETED else None),
+    )
+    session.add(parking_session)
+    await session.flush()
+    return parking_session
 
 
 @pytest.mark.asyncio
@@ -106,3 +141,117 @@ def test_future_one_voucher_per_session_partial_unique_index_is_declared():
     assert index.unique is True
     assert [column.name for column in index.columns] == ["applied_session_id"]
     assert index.dialect_options["postgresql"]["where"] is not None
+
+
+@pytest.mark.asyncio
+async def test_applies_owned_issued_voucher_to_owned_active_session(
+    voucher_engine: AsyncEngine,
+):
+    factory = async_sessionmaker(voucher_engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        parking_session = await _active_session(session)
+        voucher = await _issue_voucher(session)
+        applied = await VoucherService(session).apply_to_session(
+            user_id="USER-001",
+            voucher_id=voucher.id,
+            session_id=parking_session.id,
+        )
+
+        assert applied.status is ParkingVoucherStatus.APPLIED
+        assert applied.applied_at is not None
+        assert applied.applied_session_id == parking_session.id
+        assert applied.version == 1
+        assert (
+            await VoucherService(session).get_applied_to_session(parking_session.id)
+        ) is applied
+
+
+@pytest.mark.asyncio
+async def test_rejects_completed_session_expired_voucher_and_wrong_owner(
+    voucher_engine: AsyncEngine,
+):
+    factory = async_sessionmaker(voucher_engine, expire_on_commit=False)
+    issued_at = datetime(2026, 8, 1, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        completed = await _active_session(
+            session,
+            session_id="SESSION-COMPLETED",
+            status=ParkingSessionStatus.COMPLETED,
+        )
+        voucher = await _issue_voucher(session, now=issued_at)
+
+        with pytest.raises(RewardError) as completed_error:
+            await VoucherService(session).apply_to_session(
+                user_id="USER-001",
+                voucher_id=voucher.id,
+                session_id=completed.id,
+            )
+        assert completed_error.value.code is ErrorCode.INVALID_TRANSITION
+
+        active = await _active_session(session, session_id="SESSION-ACTIVE")
+        with pytest.raises(RewardError) as expired_error:
+            await VoucherService(
+                session,
+                clock=lambda: issued_at + timedelta(days=31),
+            ).apply_to_session(
+                user_id="USER-001",
+                voucher_id=voucher.id,
+                session_id=active.id,
+            )
+        assert expired_error.value.code is ErrorCode.INVALID_TRANSITION
+
+        with pytest.raises(RewardError) as owner_error:
+            await VoucherService(session).apply_to_session(
+                user_id="USER-002",
+                voucher_id=voucher.id,
+                session_id=active.id,
+            )
+        assert owner_error.value.code is ErrorCode.INVALID_TRANSITION
+
+
+@pytest.mark.asyncio
+async def test_rejects_missing_resources_reapply_and_second_voucher_for_session(
+    voucher_engine: AsyncEngine,
+):
+    factory = async_sessionmaker(voucher_engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        active = await _active_session(session)
+        first = await _issue_voucher(session)
+        second = await _issue_voucher(session)
+
+        with pytest.raises(RewardError) as missing_session:
+            await VoucherService(session).apply_to_session(
+                user_id="USER-001",
+                voucher_id=first.id,
+                session_id="SESSION-MISSING",
+            )
+        assert missing_session.value.code is ErrorCode.SESSION_NOT_FOUND
+
+        with pytest.raises(RewardError) as missing_voucher:
+            await VoucherService(session).apply_to_session(
+                user_id="USER-001",
+                voucher_id="VOUCHER-MISSING",
+                session_id=active.id,
+            )
+        assert missing_voucher.value.code is ErrorCode.VOUCHER_NOT_FOUND
+
+        await VoucherService(session).apply_to_session(
+            user_id="USER-001",
+            voucher_id=first.id,
+            session_id=active.id,
+        )
+        with pytest.raises(RewardError) as reapplied:
+            await VoucherService(session).apply_to_session(
+                user_id="USER-001",
+                voucher_id=first.id,
+                session_id=active.id,
+            )
+        assert reapplied.value.code is ErrorCode.INVALID_TRANSITION
+
+        with pytest.raises(RewardError) as second_voucher:
+            await VoucherService(session).apply_to_session(
+                user_id="USER-001",
+                voucher_id=second.id,
+                session_id=active.id,
+            )
+        assert second_voucher.value.code is ErrorCode.INVALID_TRANSITION

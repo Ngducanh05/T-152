@@ -351,6 +351,12 @@ khi tính tổng `PENDING + EARNED` trong ngày, nên observation và report đ�
 vượt cap chung. `RewardSummary` luôn được tính từ ledger; frontend chỉ refetch dữ liệu có
 thẩm quyền. Observation hết hạn được lazy-expire trước list/get/verify, không cần worker.
 
+Catalog, redemption, signed ledger và voucher schema hiện hữu tiếp tục là nguồn duy nhất cho
+ParkSmart Points. Redemption mới fail-closed theo backend flag; UI chỉ mở mutation khi cả backend
+và frontend flag cho phép. Voucher `ISSUED` được gắn vào đúng một active session của chủ sở hữu,
+và completion chỉ tính `total/free/billable_minutes`, không có tariff hay payment. Agent chỉ đọc
+public reward configuration/catalog; balance, wallet và ledger cá nhân thuộc Points UI.
+
 Map vận hành không có renderer mới: contribution chọn floor F1/F2/F3 trên `ParkingMap`
 và overlay icon/outline lên `IsometricMap` hiện hữu mà không đổi màu status của slot.
 Nếu payload map chỉ có hình học F1, frontend tái sử dụng cùng hình học chuẩn với ID theo tầng
@@ -376,3 +382,8 @@ vẫn được backend đọc từ Supabase/PostgreSQL cho mỗi request.
 Report dialog là progressive form: chọn reason không tạo mutation; plate, description và
 evidence đều có thể được thêm trước một explicit submit. Modal giới hạn theo `100dvh`, cuộn
 nội bộ và giữ submit dock sticky để thao tác được trên màn hình thấp.
+
+Adjacent observation giữ nguyên verification/reward lifecycle và cũng dùng explicit review rồi
+submit. Evidence là tùy chọn, dùng cùng private bucket với prefix `slot-observations/`; PostgreSQL
+chỉ lưu path/MIME/size. Admin chỉ yêu cầu signed URL khi bấm xem ảnh. Evidence không tự verify,
+không đổi slot và không tăng reward.

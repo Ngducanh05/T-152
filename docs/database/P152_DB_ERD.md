@@ -2,9 +2,9 @@
 
 Source of truth:
 - `src/core/db_models.py`
-- Alembic revisions through `20260830_0016`
+- Alembic revisions through `20260831_0017`
 
-This document describes the schema after Alembic revision `20260830_0016` and
+This document describes the schema after Alembic revision `20260831_0017` and
 Supabase platform hardening.
 
 ## Identity boundary
@@ -84,8 +84,11 @@ erDiagram
 - `parking_slots.version` and `wrong_parking_reports.version` are optimistic-concurrency counters.
 - `slot_observations(observer_session_id, slot_id)` is unique.
 - `reward_transactions(source_type, source_reference, transaction_type)` is unique and prevents duplicate ledger effects.
-- `parking_vouchers.redemption_id` is unique; the nullable `applied_session_id` has a partial unique index for future application work.
-- Evidence stores only the private Storage object path/type/size; image bytes are not stored in PostgreSQL.
+- `parking_vouchers.redemption_id` is unique; the nullable `applied_session_id` has a partial
+  unique index enforcing at most one applied voucher per parking session.
+- Wrong-parking reports and slot observations store only private Storage object path/type/size;
+  image bytes and signed URLs are not stored in PostgreSQL.
+- `slot_observations.evidence_size_bytes` is nullable and non-negative when present.
 
 ## Supabase identity constraint
 
