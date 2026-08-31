@@ -19,6 +19,7 @@ _NOT_FOUND = {
     ErrorCode.REPORT_NOT_FOUND,
     ErrorCode.OBSERVATION_NOT_FOUND,
     ErrorCode.REWARD_CATALOG_ITEM_NOT_FOUND,
+    ErrorCode.VOUCHER_NOT_FOUND,
 }
 _CONFLICT = {
     ErrorCode.INVALID_TRANSITION,
@@ -37,6 +38,9 @@ _CONFLICT = {
     ErrorCode.IDEMPOTENCY_KEY_REUSED,
     ErrorCode.REWARD_CATALOG_ITEM_INACTIVE,
     ErrorCode.INSUFFICIENT_REWARD_POINTS,
+    ErrorCode.VOUCHER_NOT_USABLE,
+    ErrorCode.VOUCHER_EXPIRED,
+    ErrorCode.VOUCHER_SESSION_CONFLICT,
 }
 _RATE_LIMITED = {
     ErrorCode.AGENT_DAILY_LIMIT_REACHED,
@@ -48,7 +52,9 @@ _UNAVAILABLE = {
     ErrorCode.AGENT_TOOL_UNAVAILABLE,
     ErrorCode.SPEECH_DISABLED,
     ErrorCode.SPEECH_TRANSCRIPTION_UNAVAILABLE,
+    ErrorCode.REDEMPTION_DISABLED,
 }
+_FORBIDDEN = {ErrorCode.VOUCHER_OWNERSHIP_MISMATCH}
 
 
 def status_for_error_code(code: ErrorCode) -> int:
@@ -60,6 +66,8 @@ def status_for_error_code(code: ErrorCode) -> int:
         return status.HTTP_429_TOO_MANY_REQUESTS
     if code in _UNAVAILABLE:
         return status.HTTP_503_SERVICE_UNAVAILABLE
+    if code in _FORBIDDEN:
+        return status.HTTP_403_FORBIDDEN
     return status.HTTP_422_UNPROCESSABLE_CONTENT
 
 

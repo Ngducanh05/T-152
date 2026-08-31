@@ -37,9 +37,8 @@ from src.models.schemas import (
     WrongParkingReason,
     WrongParkingReport,
 )
+from src.services.image_evidence import EVIDENCE_CHUNK_BYTES, read_bounded_image
 from src.services.report_evidence import ReportEvidenceStorage, validate_report_image
-
-EVIDENCE_CHUNK_BYTES = 64 * 1024
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 logger = logging.getLogger(__name__)
@@ -83,17 +82,12 @@ def _report_http_error(error: ParkingReportError) -> HTTPException:
 
 
 async def _read_bounded_evidence(evidence: UploadFile, max_bytes: int) -> bytes:
-    if evidence.size is not None and evidence.size > max_bytes:
-        raise _evidence_too_large(max_bytes)
-
-    content = bytearray()
-    while True:
-        chunk = await evidence.read(EVIDENCE_CHUNK_BYTES)
-        if not chunk:
-            return bytes(content)
-        content.extend(chunk)
-        if len(content) > max_bytes:
-            raise _evidence_too_large(max_bytes)
+    return await read_bounded_image(
+        evidence,
+        max_bytes=max_bytes,
+        too_large_code=ErrorCode.REPORT_EVIDENCE_TOO_LARGE.value,
+        label="Report evidence",
+    )
 
 
 def _report_response(report: object) -> WrongParkingReport:

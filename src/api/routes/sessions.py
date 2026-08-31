@@ -18,9 +18,10 @@ from src.core.errors import DomainError
 from src.core.idempotency import IdempotencyService
 from src.core.parking_session import ParkingSessionError, ParkingSessionService
 from src.core.parking_state import ParkingStateError, ParkingStateService
+from src.core.parking_time_benefit import ParkingTimeBenefitService
 from src.core.reservation import ReservationService
 from src.models.common import ErrorResponse, SuccessResponse
-from src.models.schemas import EntityId, ErrorCode, ReservationStatus
+from src.models.schemas import EntityId, ErrorCode, ParkingSessionCompletion, ParkingTimeBenefit, ReservationStatus
 from src.models.schemas import ParkingSession as ParkingSessionResponse
 
 router = APIRouter(prefix="/sessions", tags=["Parking Sessions"])
@@ -87,6 +88,14 @@ def _state_error(error: ParkingStateError) -> HTTPException:
 
 def _response(parking_session: object) -> ParkingSessionResponse:
     return ParkingSessionResponse.model_validate(parking_session, from_attributes=True)
+
+
+def _completion_response(parking_session: object, benefit: object) -> ParkingSessionCompletion:
+    session_response = _response(parking_session)
+    return ParkingSessionCompletion(
+        **session_response.model_dump(),
+        time_benefit=ParkingTimeBenefit.model_validate(benefit, from_attributes=True),
+    )
 
 
 @router.post(
@@ -191,7 +200,7 @@ async def active_vehicle(
 
 @router.post(
     "/{session_id}/complete",
-    response_model=SuccessResponse[ParkingSessionResponse],
+    response_model=SuccessResponse[ParkingSessionCompletion],
     responses=ERROR_RESPONSES,
 )
 async def complete_session(
@@ -203,7 +212,7 @@ async def complete_session(
         str | None,
         Header(alias="Idempotency-Key", min_length=1, max_length=128),
     ] = None,
-) -> SuccessResponse[ParkingSessionResponse]:
+) -> SuccessResponse[ParkingSessionCompletion]:
     user_id = resolve_parking_user_id(request.user_id, current_user)
     try:
         async with session.begin():
@@ -219,14 +228,15 @@ async def complete_session(
             )
             replay = idempotency.replay(claim)
             if replay is not None:
-                response_data = ParkingSessionResponse.model_validate(replay)
+                response_data = ParkingSessionCompletion.model_validate(replay)
             else:
                 parking_session = await ParkingSessionService(session, ParkingStateService(session)).complete_session(
                     session_id,
                     user_id=user_id,
                     expected_version=request.expected_version,
                 )
-                response_data = _response(parking_session)
+                benefit = await ParkingTimeBenefitService(session).calculate(parking_session)
+                response_data = _completion_response(parking_session, benefit)
                 await idempotency.complete(
                     claim,
                     response_data.model_dump(mode="json"),

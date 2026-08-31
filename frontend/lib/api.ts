@@ -22,6 +22,7 @@ import type {
   ParkingEvent,
   ParkingReservation,
   ParkingSession,
+  ParkingSessionCompletion,
   ParkingSlot,
   ParkingSnapshot,
   ParkingStatus,
@@ -40,6 +41,7 @@ import type {
   RewardCatalogItem,
   RewardRedemptionResult,
   RewardSummary,
+  RewardLedgerEntry,
   ParkingVoucher,
   SimulatorStep,
   SimulatorMutationRequest,
@@ -405,7 +407,7 @@ export class ParkSmartApiClient {
     signal?: AbortSignal,
     idempotencyKey?: string,
   ) {
-    return this.request<ParkingSession>(
+    return this.request<ParkingSessionCompletion>(
       `/sessions/${encodeURIComponent(sessionId)}/complete`,
       {
         method: "POST",
@@ -429,6 +431,17 @@ export class ParkSmartApiClient {
     payload: AdjacentSlotObservationRequest,
     signal?: AbortSignal,
   ) {
+    if (payload.evidence) {
+      const form = new FormData();
+      form.set("user_id", payload.user_id);
+      form.set("observed_status", payload.observed_status);
+      form.set("expected_slot_version", String(payload.expected_slot_version));
+      form.set("evidence", payload.evidence);
+      return this.request<SlotObservation>(
+        `/parking/slots/${encodeURIComponent(slotId)}/observation`,
+        { method: "POST", body: form, signal },
+      );
+    }
     return this.request<SlotObservation>(
       `/parking/slots/${encodeURIComponent(slotId)}/observation`,
       {
@@ -608,6 +621,13 @@ export class ParkSmartApiClient {
     return this.request<RewardCatalogItem[]>("/rewards/catalog", { signal });
   }
 
+  getRewardLedger(userId: string, signal?: AbortSignal) {
+    return this.request<RewardLedgerEntry[]>(
+      `/rewards/users/${encodeURIComponent(userId)}/ledger`,
+      { signal },
+    );
+  }
+
   redeemRewardVoucher(
     payload: { user_id: string; catalog_item_id: string },
     signal?: AbortSignal,
@@ -625,6 +645,17 @@ export class ParkSmartApiClient {
     return this.request<ParkingVoucher[]>(
       `/rewards/users/${encodeURIComponent(userId)}/vouchers`,
       { signal },
+    );
+  }
+
+  applyVoucher(
+    voucherId: string,
+    payload: { user_id: string; session_id?: string | null },
+    signal?: AbortSignal,
+  ) {
+    return this.request<ParkingVoucher>(
+      `/rewards/vouchers/${encodeURIComponent(voucherId)}/apply`,
+      { method: "POST", body: JSON.stringify(payload), signal },
     );
   }
 
@@ -667,6 +698,13 @@ export class ParkSmartApiClient {
   getAdminReportEvidenceUrl(reportId: string, signal?: AbortSignal) {
     return this.request<ReportEvidenceUrlResponse>(
       `/admin/reports/${encodeURIComponent(reportId)}/evidence-url`,
+      { signal },
+    );
+  }
+
+  getAdminObservationEvidenceUrl(observationId: string, signal?: AbortSignal) {
+    return this.request<ReportEvidenceUrlResponse>(
+      `/admin/slot-observations/${encodeURIComponent(observationId)}/evidence-url`,
       { signal },
     );
   }

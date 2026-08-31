@@ -263,6 +263,34 @@ describe("adjacent slot observations", () => {
       }),
     });
   });
+
+  it("uses FormData without a manual content type when observation evidence is present", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse(successEnvelope({ id: "OBS-1" })),
+    );
+    const api = new ParkSmartApiClient({
+      baseUrl: "http://api.test/api/v1",
+      fetcher,
+      authProvider: {
+        getAccessToken: vi.fn(async () => "access-token"),
+        refreshAccessToken: vi.fn(async () => null),
+      },
+    });
+    const evidence = new File(["jpeg"], "proof.jpg", { type: "image/jpeg" });
+
+    await api.observeAdjacentSlot("F1-D02", {
+      user_id: "USER-001",
+      observed_status: "OCCUPIED",
+      expected_slot_version: 7,
+      evidence,
+    });
+
+    const request = fetcher.mock.calls[0]?.[1];
+    expect(request?.body).toBeInstanceOf(FormData);
+    const headers = new Headers(request?.headers);
+    expect(headers.has("Content-Type")).toBe(false);
+    expect(headers.get("Authorization")).toBe("Bearer access-token");
+  });
 });
 
 describe("admin operations client", () => {

@@ -20,3 +20,12 @@ Admin evidence access remains tied to report authorization and uses a short-live
 URL. Hard-delete removes the Storage object together with the report row; any retained
 reward-ledger source reference must not copy the image path, plate number or description
 into reward metadata.
+
+## Adjacent observation evidence
+
+The same private bucket also stores `slot-observations/{observation_id}/...` objects. One optional
+image uses the same backend-only MIME/signature/size validation as report evidence. The database
+stores only nullable path, content type and byte count. No public URL is created: an admin requests
+a five-minute signed URL through the admin-only observation endpoint when they explicitly choose to
+view the proof. If the authoritative database mutation loses a race after upload, the backend makes
+a best-effort delete of the orphaned private object.

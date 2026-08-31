@@ -10,6 +10,16 @@ atomically creates a debit/redemption/voucher with `Idempotency-Key`, and
 `ISSUED`, `APPLIED`, `EXPIRED`, and `CANCELLED`; redemption statuses are `COMPLETED` and
 `REFUNDED`.
 
+`GET /rewards/users/{user_id}/ledger` returns the complete owned signed ledger without arbitrary
+transaction metadata. `POST /rewards/vouchers/{voucher_id}/apply` validates the trusted user,
+an owned active session and the one-voucher-per-session constraint, then returns the updated
+voucher. `POST /rewards/redemptions` is backend-gated by `REWARDS_REDEMPTION_ENABLED` and returns
+`503 REDEMPTION_DISABLED` while disabled; issued vouchers remain readable and applicable.
+
+Completing `POST /sessions/{session_id}/complete` preserves the parking-session response fields
+and adds `time_benefit { total_minutes, free_minutes, billable_minutes, voucher_id }`. These are
+duration values only and are not money, a tariff or a checkout result.
+
 ## Status and scope
 
 This document defines the shared Phase 0 identifiers, enums, Pydantic data contracts, and response envelopes. It does not define ORM models, database migrations, repositories, transactions, or parking business logic.
@@ -341,6 +351,12 @@ neighbours within the same floor, zone and five-slot row on F1/F2/F3. Non-adjace
 `SlotObservation` and optional `PENDING` reward, but never changes the slot. Admin verification
 is the only path that may call Parking State Service and write an event with source
 `verified_user_observation`.
+
+The endpoint accepts its existing JSON request and optional `multipart/form-data` with the same
+text fields plus an `evidence` image. Valid types are JPEG, PNG, WebP, HEIC and HEIF; backend
+validation checks bounded bytes, declared MIME and real signature. The response's nullable
+evidence metadata never contains a URL. `GET /api/v1/admin/slot-observations/{id}/evidence-url`
+is admin-protected and creates a five-minute private signed URL only when requested.
 
 ## Phase 13 contribution and reward APIs
 

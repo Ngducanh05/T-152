@@ -115,6 +115,7 @@ export interface ParkingWorkflow {
   updateAdjacentSlotStatus: (
     slotId: FloorScopedId,
     status: AdjacentSlotObservedStatus,
+    evidence?: File | null,
   ) => Promise<SlotObservation | null>;
   resetDemo: () => Promise<void>;
   sendAgentMessage: (message: string) => Promise<string | null>;
@@ -916,6 +917,7 @@ export function useParkingWorkflow(
   async function updateAdjacentSlotStatus(
     slotId: FloorScopedId,
     status: AdjacentSlotObservedStatus,
+    evidence?: File | null,
   ) {
     if (adjacentObservationInFlightRef.current) return null;
     const slot = data.slots.find((candidate) => candidate.id === slotId);
@@ -932,6 +934,7 @@ export function useParkingWorkflow(
         user_id: identity.userId,
         observed_status: status,
         expected_slot_version: slot.version,
+        evidence,
       });
       await data.refresh();
       return observation;

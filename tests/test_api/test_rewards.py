@@ -15,7 +15,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 from src.api.dependencies import require_parking_user_or_demo
 from src.api.main import create_app
-from src.core.config import get_settings
+from src.core.config import Settings, get_settings
 from src.core.database import get_db_session
 from src.core.db_models import (
     Base,
@@ -41,6 +41,14 @@ class RewardsApi:
     client: AsyncClient
     session_factory: async_sessionmaker[AsyncSession]
     application: FastAPI
+
+
+@pytest.fixture(autouse=True)
+def enable_redemption_for_legacy_reward_flows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.core.reward_redemption.get_settings",
+        lambda: Settings(_env_file=None, rewards_redemption_enabled=True),
+    )
 
 
 @pytest_asyncio.fixture
@@ -136,7 +144,11 @@ async def test_authenticated_wallet_is_owned_and_expires_without_refund(rewards_
     item = await _catalog_and_credit(rewards_api, credited_at=issued_at)
     async with rewards_api.session_factory() as session, session.begin():
         session.add(ParkingUser(id="USER-002", display_name="Other"))
-        await RewardRedemptionService(session, clock=lambda: issued_at).redeem(
+        await RewardRedemptionService(
+            session,
+            settings=Settings(_env_file=None, rewards_redemption_enabled=True),
+            clock=lambda: issued_at,
+        ).redeem(
             user_id="USER-001", catalog_item_id=item.id
         )
     await _authenticate(rewards_api)

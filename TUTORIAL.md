@@ -203,3 +203,22 @@ bash
 
   uv run python scripts/reset_demo.py
    uv run uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
+
+## ParkSmart Points and adjacent evidence
+
+Run migrations through `20260831_0017` before testing the optional adjacent-slot image fields.
+For a normal rollout keep both redemption flags fail-closed:
+
+```text
+REWARDS_REDEMPTION_ENABLED=false
+NEXT_PUBLIC_REWARDS_REDEMPTION_ENABLED=false
+```
+
+The backend flag is authoritative; enabling only the browser flag never enables redemption.
+Points are opened from the header dialog rather than added to the chat conversation. A redeemed
+voucher may be manually applied to one owned active parking session; completion returns time
+benefit minutes only. There is no payment, price or invoice feature in this tutorial.
+
+For adjacent observations, choose empty/occupied first, optionally select one valid image, then
+explicitly submit. Images use the private Storage bucket under `slot-observations/`; only admins
+can request a short-lived signed URL to inspect an image.

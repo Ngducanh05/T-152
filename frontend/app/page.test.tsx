@@ -287,9 +287,11 @@ describe("user chat page", () => {
     );
     await user.click(screen.getByRole("button", { name: "Giúp kiểm tra ngay" }));
     await user.click(screen.getByRole("button", { name: "Ô đang trống" }));
+    await user.click(screen.getByRole("button", { name: "Gửi đóng góp" }));
     expect(workflow.updateAdjacentSlotStatus).toHaveBeenCalledWith(
       "F1-D02",
       "AVAILABLE",
+      null,
     );
   });
 });

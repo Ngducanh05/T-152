@@ -376,3 +376,17 @@ vẫn được backend đọc từ Supabase/PostgreSQL cho mỗi request.
 Report dialog là progressive form: chọn reason không tạo mutation; plate, description và
 evidence đều có thể được thêm trước một explicit submit. Modal giới hạn theo `100dvh`, cuộn
 nội bộ và giữ submit dock sticky để thao tác được trên màn hình thấp.
+
+## Points, vouchers and observation evidence
+
+The signed `reward_transactions.points_delta` ledger remains the only authoritative balance.
+The user-facing Points dialog owns personal balance, history and vouchers; the Agent receives
+only general reward configuration and catalog tools. `RewardRedemptionService` atomically creates
+the signed debit, redemption snapshot and issued voucher. `VoucherApplicationService` applies one
+owned, unexpired voucher to one active session; `ParkingTimeBenefitService` later computes duration
+only. `ParkingSessionService` remains a parking-lifecycle service and does not price or redeem.
+
+Adjacent observations may include one optional private image. The image passes bounded read,
+declared-type and signature validation before it is uploaded below `slot-observations/`; metadata
+only is persisted on the observation. It remains `PENDING` and cannot change a slot until normal
+admin verification. Admins fetch a five-minute signed URL only after clicking to view it.

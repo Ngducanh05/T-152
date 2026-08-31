@@ -148,3 +148,15 @@ flowchart LR
 - AI Agent và các dịch vụ phía sau được giữ nguyên, chỉ thay đổi cách hệ thống thu thập dữ liệu đầu vào.
 
 ---
+
+## 8. ParkSmart Points, voucher và ảnh quan sát
+
+Người dùng mở ParkSmart Points để xem số dư khả dụng, điểm chờ, ledger có dấu, catalog và ví
+voucher. Đổi điểm cần xác nhận rõ ràng, idempotency và backend flag `REWARDS_REDEMPTION_ENABLED`.
+Voucher đã phát chỉ được áp dụng thủ công cho một phiên đỗ xe đang ACTIVE thuộc chính người dùng.
+Khi hoàn tất phiên, hệ thống chỉ trả về tổng phút, phút miễn phí và phút cần tính sau này; chưa có
+giá, thanh toán hay hoá đơn.
+
+Quan sát ô bên cạnh có hai bước: chọn trạng thái, rồi xem lại và tùy chọn chụp/chọn một ảnh trước
+khi gửi. Ảnh không tự xác minh hoặc đổi trạng thái ô. Admin nhấn xem ảnh để lấy signed URL tạm thời
+và vẫn có thể xác minh/từ chối khi Storage lỗi.

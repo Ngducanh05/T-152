@@ -202,6 +202,9 @@ describe("AdminDashboard report warnings", () => {
       verified_at: null,
       verified_by: null,
       rejection_reason: null,
+      evidence_storage_path: null,
+      evidence_content_type: null,
+      evidence_size_bytes: null,
       version: 0,
     }];
     render(<AdminDashboard />);

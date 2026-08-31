@@ -27,7 +27,6 @@ export interface WrongParkingReportDraft {
 interface WrongParkingReportDialogProps {
   slots: ParkingSlot[];
   initialSlotId?: string | null;
-  rewardPoints: number;
   onClose: () => void;
   onSubmit: (
     draft: WrongParkingReportDraft,
@@ -57,7 +56,6 @@ const ALLOWED_IMAGE_TYPES = new Set([
 export function WrongParkingReportDialog({
   slots,
   initialSlotId = null,
-  rewardPoints,
   onClose,
   onSubmit,
 }: WrongParkingReportDialogProps) {
@@ -201,12 +199,10 @@ export function WrongParkingReportDialog({
         {submittedReport ? (
           <div className="report-success" role="status" aria-live="polite">
             <b>Đã gửi báo cáo.</b>
-            {submittedReport.reward_points > 0 ? (
-              <p>+{submittedReport.reward_points} điểm đang chờ xác minh.</p>
-            ) : submittedReport.duplicate_candidate_of_id ? (
+            {submittedReport.duplicate_candidate_of_id ? (
               <p>Một report tương tự đang được xử lý nên report này không có điểm chờ.</p>
             ) : (
-              <p>Bạn đã đạt giới hạn điểm hôm nay, nhưng report vẫn được bộ phận vận hành kiểm tra.</p>
+              <p>Báo cáo đang chờ xác minh. Bạn có thể theo dõi trong ParkSmart Points.</p>
             )}
             <button type="button" className="primary-button" onClick={requestClose}>
               Hoàn tất
@@ -217,9 +213,6 @@ export function WrongParkingReportDialog({
             <p>
               Chọn ô và lý do, sau đó bổ sung biển số, mô tả hoặc ảnh nếu có.
               Bạn luôn được xem lại thông tin trước khi gửi.
-            </p>
-            <p className="reward-condition">
-              Report hợp lệ sau khi được bộ phận vận hành kiểm tra sẽ nhận +{rewardPoints} điểm ParkSmart.
             </p>
             <label>
               Ô cần phản ánh

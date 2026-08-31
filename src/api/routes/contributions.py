@@ -124,6 +124,7 @@ async def reward_configuration() -> SuccessResponse[RewardConfiguration]:
             adjacent_observation_reward_points=(settings.adjacent_observation_reward_points),
             wrong_parking_report_reward_points=(settings.wrong_parking_report_reward_points),
             contribution_daily_points_limit=(settings.contribution_daily_points_limit),
+            redemption_enabled=settings.rewards_redemption_enabled,
         )
     )
 

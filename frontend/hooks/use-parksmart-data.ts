@@ -15,6 +15,7 @@ import type {
   RewardCatalogItem,
   RewardSummary,
   ParkingVoucher,
+  RewardLedgerEntry,
 } from "@/lib/types";
 
 export const PARKING_POLL_INTERVAL_MS = 10_000;
@@ -31,6 +32,7 @@ export interface ParkSmartSnapshot {
   contributions: ContributionRecord[];
   rewardCatalog: RewardCatalogItem[];
   vouchers: ParkingVoucher[];
+  rewardLedger: RewardLedgerEntry[];
 }
 
 export interface ParkSmartDataState {
@@ -45,6 +47,7 @@ export interface ParkSmartDataState {
   contributions: ContributionRecord[];
   rewardCatalog: RewardCatalogItem[];
   vouchers: ParkingVoucher[];
+  rewardLedger: RewardLedgerEntry[];
   lastUpdatedAt: string | null;
   loading: boolean;
   refreshing: boolean;
@@ -68,6 +71,7 @@ const initialState: ParkSmartDataState = {
   contributions: [],
   rewardCatalog: [],
   vouchers: [],
+  rewardLedger: [],
   lastUpdatedAt: null,
   loading: true,
   refreshing: false,
@@ -89,6 +93,7 @@ export async function loadAuthoritativeState(
   // client always implements these methods and production failures still surface.
   const getCatalog = api.getRewardCatalog?.bind(api) ?? (async () => []);
   const getVouchers = api.getUserVouchers?.bind(api) ?? (async () => []);
+  const getLedger = api.getRewardLedger?.bind(api) ?? (async () => []);
   const [map, parkingSnapshot] = await Promise.all([
     api.getMap(signal),
     api.getParkingSnapshot(signal),
@@ -108,13 +113,15 @@ export async function loadAuthoritativeState(
       contributions: [],
       rewardCatalog,
       vouchers: [],
+      rewardLedger: [],
     };
   }
-  const [userState, contributions, rewardCatalog, vouchers] = await Promise.all([
+  const [userState, contributions, rewardCatalog, vouchers, rewardLedger] = await Promise.all([
     api.getUserParkingState(userId, signal),
     api.getUserContributions(userId, signal),
     getCatalog(signal),
     getVouchers(userId, signal),
+    getLedger(userId, signal),
   ]);
   return {
     map,
@@ -128,6 +135,7 @@ export async function loadAuthoritativeState(
     contributions,
     rewardCatalog,
     vouchers,
+    rewardLedger,
   };
 }
 

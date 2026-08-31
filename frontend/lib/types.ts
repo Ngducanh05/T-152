@@ -71,6 +71,7 @@ export interface AdjacentSlotObservationRequest {
   user_id: EntityId;
   observed_status: AdjacentSlotObservedStatus;
   expected_slot_version: number;
+  evidence?: File | null;
 }
 
 export type SlotObservationStatus = "PENDING" | "VERIFIED" | "REJECTED" | "EXPIRED";
@@ -96,6 +97,9 @@ export interface SlotObservation {
   verified_at: string | null;
   verified_by: string | null;
   rejection_reason: string | null;
+  evidence_storage_path: string | null;
+  evidence_content_type: string | null;
+  evidence_size_bytes: number | null;
   version: number;
 }
 
@@ -112,6 +116,23 @@ export interface RewardConfiguration {
   adjacent_observation_reward_points: number;
   wrong_parking_report_reward_points: number;
   contribution_daily_points_limit: number;
+  redemption_enabled: boolean;
+}
+
+export interface RewardLedgerEntry {
+  id: EntityId;
+  source_type: RewardSourceType;
+  source_reference: EntityId;
+  transaction_type:
+    | "CONTRIBUTION_REWARD"
+    | "REWARD_REVERSAL"
+    | "ADMIN_ADJUSTMENT"
+    | "VOUCHER_REDEMPTION"
+    | "VOUCHER_REFUND";
+  status: RewardTransactionStatus;
+  points_delta: number;
+  created_at: string;
+  settled_at: string | null;
 }
 
 export interface RewardCatalogItem {
@@ -279,6 +300,17 @@ export interface ParkingSession {
   status: ParkingSessionStatus;
   parked_at: string;
   completed_at: string | null;
+}
+
+export interface ParkingTimeBenefit {
+  total_minutes: number;
+  free_minutes: number;
+  billable_minutes: number;
+  voucher_id: EntityId | null;
+}
+
+export interface ParkingSessionCompletion extends ParkingSession {
+  time_benefit: ParkingTimeBenefit;
 }
 
 export interface ConfirmParkingRequest {

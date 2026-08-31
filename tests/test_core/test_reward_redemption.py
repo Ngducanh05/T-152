@@ -9,12 +9,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateSchema, DropSchema
 
-from src.core.config import get_settings
+from src.core.config import Settings, get_settings
 from src.core.db_models import Base, ParkingVoucher, RewardCatalogItem, RewardRedemption, RewardTransaction
 from src.core.reward import RewardError, RewardService
 from src.core.reward_redemption import RewardRedemptionService
 from src.core.seed import seed_if_missing
 from src.models.schemas import ErrorCode, RewardSourceType, RewardTransactionStatus, RewardTransactionType
+
+
+def _redemption_settings() -> Settings:
+    return Settings(_env_file=None, rewards_redemption_enabled=True)
 
 
 @pytest_asyncio.fixture
@@ -75,7 +79,7 @@ async def test_successful_redemption_creates_signed_debit_and_owned_voucher(rede
     factory = async_sessionmaker(redemption_engine, expire_on_commit=False)
     async with factory() as session, session.begin():
         item = await _catalog_and_balance(session)
-        redemption, voucher, available = await RewardRedemptionService(session).redeem(
+        redemption, voucher, available = await RewardRedemptionService(session, settings=_redemption_settings()).redeem(
             user_id="USER-001", catalog_item_id=item.id
         )
 
@@ -99,6 +103,24 @@ async def test_successful_redemption_creates_signed_debit_and_owned_voucher(rede
 
 
 @pytest.mark.asyncio
+async def test_redemption_disabled_fails_closed_without_any_reward_mutation(redemption_engine: AsyncEngine):
+    factory = async_sessionmaker(redemption_engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        item = await _catalog_and_balance(session)
+        with pytest.raises(RewardError) as error:
+            await RewardRedemptionService(
+                session,
+                settings=Settings(_env_file=None, rewards_redemption_enabled=False),
+            ).redeem(user_id="USER-001", catalog_item_id=item.id)
+        assert error.value.code is ErrorCode.REDEMPTION_DISABLED
+
+    async with factory() as session:
+        assert await RewardService(session).finalized_balance("USER-001") == 100
+        assert await session.scalar(select(func.count()).select_from(RewardRedemption)) == 0
+        assert await session.scalar(select(func.count()).select_from(ParkingVoucher)) == 0
+
+
+@pytest.mark.asyncio
 async def test_redemption_uses_authoritative_finalized_signed_balance(redemption_engine: AsyncEngine):
     factory = async_sessionmaker(redemption_engine, expire_on_commit=False)
     async with factory() as session, session.begin():
@@ -118,7 +140,7 @@ async def test_redemption_uses_authoritative_finalized_signed_balance(redemption
         )
         assert await RewardService(session).finalized_balance("USER-001") == 50
         with pytest.raises(RewardError) as error:
-            await RewardRedemptionService(session).redeem(user_id="USER-001", catalog_item_id=item.id)
+            await RewardRedemptionService(session, settings=_redemption_settings()).redeem(user_id="USER-001", catalog_item_id=item.id)
         assert error.value.code is ErrorCode.INSUFFICIENT_REWARD_POINTS
 
     async with factory() as session:
@@ -134,7 +156,7 @@ async def test_insufficient_balance_rolls_back_without_debit_or_voucher(redempti
         item = await _catalog_and_balance(session, cost=101, finalized_points=100)
         assert await RewardService(session).finalized_balance("USER-001") == 100
         with pytest.raises(RewardError) as error:
-            await RewardRedemptionService(session).redeem(user_id="USER-001", catalog_item_id=item.id)
+            await RewardRedemptionService(session, settings=_redemption_settings()).redeem(user_id="USER-001", catalog_item_id=item.id)
         assert error.value.code is ErrorCode.INSUFFICIENT_REWARD_POINTS
 
     async with factory() as session:
@@ -150,7 +172,7 @@ async def test_redemption_snapshots_survive_catalog_changes(redemption_engine: A
     factory = async_sessionmaker(redemption_engine, expire_on_commit=False)
     async with factory() as session, session.begin():
         item = await _catalog_and_balance(session)
-        redemption, voucher, _ = await RewardRedemptionService(session).redeem(user_id="USER-001", catalog_item_id=item.id)
+        redemption, voucher, _ = await RewardRedemptionService(session, settings=_redemption_settings()).redeem(user_id="USER-001", catalog_item_id=item.id)
         item.points_cost = 500
         item.free_minutes = 60
         item.validity_days = 7
@@ -174,7 +196,7 @@ async def test_concurrent_redemptions_cannot_double_spend_same_points(redemption
         await start.wait()
         try:
             async with factory() as session, session.begin():
-                await RewardRedemptionService(session).redeem(user_id="USER-001", catalog_item_id=item.id)
+                await RewardRedemptionService(session, settings=_redemption_settings()).redeem(user_id="USER-001", catalog_item_id=item.id)
             return True
         except RewardError:
             return False

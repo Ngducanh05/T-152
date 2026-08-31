@@ -8,12 +8,30 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateSchema, DropSchema
 
-from src.core.config import get_settings
-from src.core.db_models import Base, ParkingUser, ParkingVoucher, RewardCatalogItem, RewardTransaction
+from src.core.config import Settings, get_settings
+from src.core.db_models import (
+    Base,
+    ParkingSession,
+    ParkingUser,
+    ParkingVoucher,
+    RewardCatalogItem,
+    RewardTransaction,
+    Vehicle,
+)
+from src.core.parking_time_benefit import ParkingTimeBenefitService
+from src.core.reward import RewardError
 from src.core.reward_redemption import RewardRedemptionService
 from src.core.seed import seed_if_missing
 from src.core.voucher import VoucherService
-from src.models.schemas import ParkingVoucherStatus, RewardSourceType, RewardTransactionStatus, RewardTransactionType
+from src.core.voucher_application import VoucherApplicationService
+from src.models.schemas import (
+    ErrorCode,
+    ParkingSessionStatus,
+    ParkingVoucherStatus,
+    RewardSourceType,
+    RewardTransactionStatus,
+    RewardTransactionType,
+)
 
 
 @pytest_asyncio.fixture
@@ -49,7 +67,11 @@ async def _issue_voucher(session, *, user_id: str = "USER-001", now: datetime | 
     )
     session.add_all((item, credit))
     await session.flush()
-    _, voucher, _ = await RewardRedemptionService(session, clock=lambda: now).redeem(user_id=user_id, catalog_item_id=item.id)
+    _, voucher, _ = await RewardRedemptionService(
+        session,
+        settings=Settings(_env_file=None, rewards_redemption_enabled=True),
+        clock=lambda: now,
+    ).redeem(user_id=user_id, catalog_item_id=item.id)
     return voucher
 
 
@@ -86,7 +108,17 @@ async def test_expiration_is_lazy_and_does_not_refund_points(voucher_engine: Asy
 async def test_vouchers_are_owned_and_keep_catalog_snapshot_values(voucher_engine: AsyncEngine):
     factory = async_sessionmaker(voucher_engine, expire_on_commit=False)
     async with factory() as session, session.begin():
-        session.add(ParkingUser(id="USER-002", display_name="Second user"))
+        session.add_all(
+            (
+                ParkingUser(id="USER-002", display_name="Second user"),
+                Vehicle(
+                    id="VEHICLE-002",
+                    user_id="USER-002",
+                    plate_number="51A-00002",
+                    requires_charging=False,
+                ),
+            )
+        )
         first = await _issue_voucher(session)
         second = await _issue_voucher(session, user_id="USER-002")
         catalog = await session.get(RewardCatalogItem, first.catalog_item_id)
@@ -106,3 +138,109 @@ def test_future_one_voucher_per_session_partial_unique_index_is_declared():
     assert index.unique is True
     assert [column.name for column in index.columns] == ["applied_session_id"]
     assert index.dialect_options["postgresql"]["where"] is not None
+
+
+@pytest.mark.asyncio
+async def test_owned_issued_voucher_applies_once_without_changing_the_reward_ledger(
+    voucher_engine: AsyncEngine,
+):
+    factory = async_sessionmaker(voucher_engine, expire_on_commit=False)
+    now = datetime(2026, 8, 31, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        voucher = await _issue_voucher(session, now=now)
+        session.add(
+            ParkingSession(
+                id="SESSION-APPLICATION-001",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F1-A01",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=now - timedelta(minutes=20),
+                completed_at=None,
+            )
+        )
+        ledger_before = len(list(await session.scalars(select(RewardTransaction))))
+        applied = await VoucherApplicationService(session, clock=lambda: now).apply(
+            user_id="USER-001",
+            voucher_id=voucher.id,
+        )
+        assert applied.status is ParkingVoucherStatus.APPLIED
+        assert applied.applied_session_id == "SESSION-APPLICATION-001"
+        assert len(list(await session.scalars(select(RewardTransaction)))) == ledger_before
+
+
+@pytest.mark.asyncio
+async def test_voucher_application_rejects_another_users_session_and_session_reuse(
+    voucher_engine: AsyncEngine,
+):
+    factory = async_sessionmaker(voucher_engine, expire_on_commit=False)
+    now = datetime(2026, 8, 31, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        session.add_all(
+            (
+                ParkingUser(id="USER-002", display_name="Second user"),
+                Vehicle(
+                    id="VEHICLE-002",
+                    user_id="USER-002",
+                    plate_number="51A-00003",
+                    requires_charging=False,
+                ),
+            )
+        )
+        first = await _issue_voucher(session, now=now)
+        second = await _issue_voucher(session, user_id="USER-002", now=now)
+        session.add_all(
+            (
+                ParkingSession(
+                    id="SESSION-APPLICATION-002",
+                    user_id="USER-001",
+                    vehicle_id="VEHICLE-001",
+                    slot_id="F1-A01",
+                    status=ParkingSessionStatus.ACTIVE,
+                    parked_at=now,
+                    completed_at=None,
+                ),
+                ParkingSession(
+                    id="SESSION-APPLICATION-003",
+                    user_id="USER-002",
+                    vehicle_id="VEHICLE-002",
+                    slot_id="F1-A02",
+                    status=ParkingSessionStatus.ACTIVE,
+                    parked_at=now,
+                    completed_at=None,
+                ),
+            )
+        )
+        await session.flush()
+        service = VoucherApplicationService(session, clock=lambda: now)
+        await service.apply(user_id="USER-001", voucher_id=first.id, session_id="SESSION-APPLICATION-002")
+        with pytest.raises(RewardError) as reused:
+            await service.apply(user_id="USER-002", voucher_id=second.id, session_id="SESSION-APPLICATION-002")
+        assert reused.value.code is ErrorCode.VOUCHER_OWNERSHIP_MISMATCH
+
+
+@pytest.mark.asyncio
+async def test_time_benefit_is_duration_only_and_forfeits_unused_minutes(voucher_engine: AsyncEngine):
+    factory = async_sessionmaker(voucher_engine, expire_on_commit=False)
+    parked_at = datetime(2026, 8, 31, 8, 0, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        voucher = await _issue_voucher(session, now=parked_at)
+        voucher.free_minutes_snapshot = 30
+        session.add(
+            ParkingSession(
+                id="SESSION-BENEFIT-001",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F1-A01",
+                status=ParkingSessionStatus.COMPLETED,
+                parked_at=parked_at,
+                completed_at=parked_at + timedelta(minutes=20),
+            )
+        )
+        voucher.status = ParkingVoucherStatus.APPLIED
+        voucher.applied_at = parked_at
+        voucher.applied_session_id = "SESSION-BENEFIT-001"
+        await session.flush()
+        benefit = await ParkingTimeBenefitService(session).calculate("SESSION-BENEFIT-001")
+    assert (benefit.total_minutes, benefit.free_minutes, benefit.billable_minutes) == (20, 20, 0)
+    assert benefit.voucher_id == voucher.id

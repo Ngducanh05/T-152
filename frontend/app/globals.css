@@ -513,6 +513,68 @@ body .admin-operations select, body .admin-operations input { font-size: 13px; }
 body .admin-operations form h3 { font-size: 15px; }
 body .admin-operations button { min-height: 40px; font-size: 12px; }
 
+/* ParkSmart Points dialog and observation image evidence. Scoped to avoid moving chat layout. */
+.parksmart-points-button { position: relative; width: 44px; min-width: 44px; height: 44px; padding: 0; display: inline-grid; place-items: center; border: 1px solid #b9d6c5; border-radius: 12px; color: var(--green-dark); background: #fff; cursor: pointer; }
+.parksmart-points-button svg { width: 22px; height: 22px; fill: currentColor; }
+.parksmart-points-badge { position: absolute; top: -6px; right: -8px; min-width: 21px; min-height: 21px; padding: 2px 5px; display: grid; place-items: center; border: 2px solid #fff; border-radius: 999px; color: #fff; background: var(--green-dark); font-size: 9px; font-weight: 900; line-height: 1; }
+.parksmart-points-button:focus-visible, .reward-dialog button:focus-visible, .adjacent-observation-review button:focus-visible, .observation-evidence-panel button:focus-visible { outline: 3px solid #1d78d0; outline-offset: 2px; }
+
+.reward-dialog-backdrop { position: fixed; inset: 0; z-index: 140; padding: 20px; display: grid; place-items: center; background: #10251db8; backdrop-filter: blur(4px); }
+.reward-dialog { width: min(620px, 100%); max-height: min(780px, calc(100dvh - 40px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid #c4ded0; border-radius: 20px; color: var(--ink); background: #fff; box-shadow: 0 30px 80px #0a201799; }
+.reward-dialog-header { position: relative; flex: 0 0 auto; min-height: 78px; padding: 18px 58px 16px 20px; border-bottom: 1px solid var(--line); }
+.reward-dialog-header small { color: var(--green-dark); font-size: 9px; font-weight: 800; letter-spacing: .8px; }
+.reward-dialog-header h2 { margin-top: 3px; font-size: 21px; }
+.reward-dialog-header .modal-close { min-width: 44px; min-height: 44px; right: 10px; top: 12px; }
+.reward-tabs { flex: 0 0 auto; display: flex; overflow-x: auto; border-bottom: 1px solid var(--line); background: #fbfdfc; }
+.reward-tabs button { min-height: 44px; padding: 11px 14px; border: 0; border-bottom: 3px solid transparent; color: var(--muted); background: transparent; font-size: 12px; font-weight: 800; white-space: nowrap; cursor: pointer; }
+.reward-tabs button[aria-selected="true"] { border-bottom-color: var(--green); color: var(--green-dark); }
+.reward-dialog-body { min-height: 0; padding: 18px; overflow-y: auto; overscroll-behavior: contain; }
+.reward-dialog-message { margin-top: 14px; padding: 10px 12px; border: 1px solid #b8dbc9; border-radius: 10px; color: var(--green-dark); background: #f2fbf7; font-size: 12px; line-height: 1.45; }
+.reward-catalog, .reward-vouchers { display: grid; gap: 10px; }
+.reward-catalog-item, .reward-voucher-card, .reward-confirmation, .reward-success { padding: 14px; display: grid; gap: 9px; border: 1px solid #d3e4da; border-radius: 13px; background: #fbfefc; }
+.reward-catalog-item h3, .reward-voucher-group h3, .reward-confirmation h3, .reward-success h3 { font-size: 15px; }
+.reward-catalog-item p, .reward-confirmation p, .reward-success p, .reward-voucher-card small, .reward-voucher-card p { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.reward-catalog-item small { color: #8d4f12; font-weight: 700; }
+.reward-catalog-item button, .reward-voucher-card button, .reward-confirmation button, .reward-success button { width: fit-content; min-height: 44px; padding: 9px 12px; border: 1px solid var(--green); border-radius: 10px; color: #fff; background: var(--green); font-size: 12px; font-weight: 800; cursor: pointer; }
+.reward-catalog-item button:disabled, .reward-voucher-card button:disabled, .reward-confirmation button:disabled { opacity: .5; cursor: not-allowed; }
+.reward-voucher-group { display: grid; gap: 8px; }
+.reward-voucher-group + .reward-voucher-group { margin-top: 18px; }
+.reward-voucher-card > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.reward-voucher-card b { color: var(--green-dark); }
+.reward-voucher-card span { padding: 4px 7px; border-radius: 999px; color: #405e50; background: #e7f4ec; font-size: 9px; font-weight: 800; }
+.reward-confirmation ul { padding-left: 20px; display: grid; gap: 7px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.reward-confirmation > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.reward-confirmation > div button:first-child { color: var(--green-dark); background: #fff; }
+.reward-ledger-list { display: grid; list-style: none; }
+.reward-ledger-list li { min-height: 62px; padding: 10px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); }
+.reward-ledger-list li > div { display: grid; gap: 4px; }
+.reward-ledger-list small { color: var(--muted); font-size: 10px; }
+.reward-ledger-list strong.positive { color: #167344; }.reward-ledger-list strong.negative { color: #a03e36; }
+
+.adjacent-observation-review { margin-top: 12px; padding: 13px; display: grid; gap: 11px; border: 1px solid #c8dfd2; border-radius: 13px; background: #fff; }
+.adjacent-observation-review > p { margin: 0; }
+.adjacent-review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.adjacent-review-actions button { min-height: 44px; padding: 9px 12px; border: 1px solid var(--green); border-radius: 10px; color: #fff; background: var(--green); font-weight: 800; cursor: pointer; }
+.adjacent-review-actions .secondary-button { color: var(--green-dark); background: #fff; }
+.adjacent-observation-review .report-evidence-actions { margin: 0; }
+.adjacent-observation-review .report-evidence-selected { margin: 0; }
+.adjacent-observation-review .report-evidence-selected img { width: 100%; max-height: 220px; object-fit: contain; border: 1px solid var(--line); border-radius: 10px; background: #f5f8f6; }
+.observation-evidence-panel { margin: 0 0 14px; display: grid; gap: 10px; }
+.observation-evidence-panel .secondary-button { width: fit-content; min-height: 44px; }
+.observation-evidence-panel .admin-error { margin: 0; }
+.observation-evidence-image { width: 100%; max-height: 380px; object-fit: contain; border: 1px solid var(--line); border-radius: 10px; background: #f1f6f3; }
+
+@media (max-width: 640px) {
+  .reward-dialog-backdrop { padding: 0; align-items: end; }
+  .reward-dialog { width: 100%; max-height: 92dvh; border-radius: 20px 20px 0 0; }
+  .reward-dialog-body { padding: 15px; }
+  .reward-summary-grid { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reward-dialog *, .parksmart-points-button, .adjacent-observation-review *, .observation-evidence-panel * { animation: none !important; scroll-behavior: auto !important; transition: none !important; }
+}
+
 @media (min-width: 720px) {
   .chat-app-header { padding-inline: max(24px, calc((100vw - 960px) / 2)); }
   .chat-conversation { padding: 26px 20px 142px; }

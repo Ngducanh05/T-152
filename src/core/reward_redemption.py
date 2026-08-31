@@ -6,6 +6,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.config import Settings, get_settings
 from src.core.db_models import ParkingVoucher, RewardCatalogItem, RewardRedemption, RewardTransaction
 from src.core.reward import RewardError, RewardService
 from src.models.schemas import (
@@ -47,12 +48,25 @@ class RewardCatalogService:
 class RewardRedemptionService:
     """Creates debit, redemption, and voucher in the caller-owned transaction."""
 
-    def __init__(self, session: AsyncSession, *, rewards: RewardService | None = None, clock=None) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        rewards: RewardService | None = None,
+        settings: Settings | None = None,
+        clock=None,
+    ) -> None:
         self.session = session
-        self.rewards = rewards or RewardService(session)
+        self.settings = settings or get_settings()
+        self.rewards = rewards or RewardService(session, settings=self.settings)
         self.clock = clock or (lambda: datetime.now(UTC))
 
     async def redeem(self, *, user_id: str, catalog_item_id: str) -> tuple[RewardRedemption, ParkingVoucher, int]:
+        if not self.settings.rewards_redemption_enabled:
+            raise RewardError(
+                ErrorCode.REDEMPTION_DISABLED,
+                "Reward redemption is currently unavailable.",
+            )
         now = self.clock()
         if now.tzinfo is None or now.utcoffset() != timedelta(0):
             raise RewardError(ErrorCode.INVALID_TRANSITION, "Reward clock must use UTC.")

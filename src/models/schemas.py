@@ -209,6 +209,14 @@ class ErrorCode(StrEnum):
     REWARD_CATALOG_ITEM_NOT_FOUND = "REWARD_CATALOG_ITEM_NOT_FOUND"
     REWARD_CATALOG_ITEM_INACTIVE = "REWARD_CATALOG_ITEM_INACTIVE"
     INSUFFICIENT_REWARD_POINTS = "INSUFFICIENT_REWARD_POINTS"
+    REDEMPTION_DISABLED = "REDEMPTION_DISABLED"
+    VOUCHER_NOT_FOUND = "VOUCHER_NOT_FOUND"
+    VOUCHER_NOT_USABLE = "VOUCHER_NOT_USABLE"
+    VOUCHER_EXPIRED = "VOUCHER_EXPIRED"
+    VOUCHER_SESSION_CONFLICT = "VOUCHER_SESSION_CONFLICT"
+    VOUCHER_OWNERSHIP_MISMATCH = "VOUCHER_OWNERSHIP_MISMATCH"
+    OBSERVATION_EVIDENCE_INVALID = "OBSERVATION_EVIDENCE_INVALID"
+    OBSERVATION_EVIDENCE_TOO_LARGE = "OBSERVATION_EVIDENCE_TOO_LARGE"
     AGENT_DISABLED = "AGENT_DISABLED"
     AGENT_DAILY_LIMIT_REACHED = "AGENT_DAILY_LIMIT_REACHED"
     AGENT_TOOL_UNAVAILABLE = "AGENT_TOOL_UNAVAILABLE"
@@ -371,6 +379,9 @@ class SlotObservation(ContractModel):
     verified_at: AwareDatetime | None = None
     verified_by: EntityId | None = None
     rejection_reason: str | None = Field(default=None, max_length=500)
+    evidence_storage_path: str | None = None
+    evidence_content_type: str | None = None
+    evidence_size_bytes: int | None = Field(default=None, ge=0)
     version: int = Field(ge=0)
     reward_status: RewardTransactionStatus | None = None
 
@@ -431,6 +442,20 @@ class RewardConfiguration(ContractModel):
     adjacent_observation_reward_points: int = Field(ge=0)
     wrong_parking_report_reward_points: int = Field(ge=0)
     contribution_daily_points_limit: int = Field(ge=0)
+    # API constructors always provide the runtime setting. The default preserves
+    # backward-compatible parsing of cached/deployed pre-flag configuration.
+    redemption_enabled: bool = False
+
+
+class RewardLedgerEntry(ContractModel):
+    id: EntityId
+    source_type: RewardSourceType
+    source_reference: EntityId
+    transaction_type: RewardTransactionType
+    status: RewardTransactionStatus
+    points_delta: int
+    created_at: AwareDatetime
+    settled_at: AwareDatetime | None = None
 
 
 class RewardCatalogItem(ContractModel):
@@ -471,6 +496,17 @@ class RewardRedemptionResult(ContractModel):
     redemption: RewardRedemption
     voucher: ParkingVoucher
     available_points: int = Field(ge=0)
+
+
+class ParkingTimeBenefit(ContractModel):
+    total_minutes: float = Field(ge=0)
+    free_minutes: float = Field(ge=0)
+    billable_minutes: float = Field(ge=0)
+    voucher_id: EntityId | None = None
+
+
+class ParkingSessionCompletion(ParkingSession):
+    time_benefit: ParkingTimeBenefit
 
 
 class ContributionRecord(ContractModel):

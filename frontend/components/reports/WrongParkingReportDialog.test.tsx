@@ -38,7 +38,7 @@ describe("WrongParkingReportDialog", () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn(async () => createdReport);
     const { container } = render(
-      <WrongParkingReportDialog slots={canonicalMap.slots} initialSlotId="F1-D01" rewardPoints={20} onClose={vi.fn()} onSubmit={onSubmit} />,
+      <WrongParkingReportDialog slots={canonicalMap.slots} initialSlotId="F1-D01" onClose={vi.fn()} onSubmit={onSubmit} />,
     );
     await user.click(screen.getByRole("button", { name: /Xe đỗ chéo vạch/ }));
     await user.click(screen.getByRole("button", { name: /Chụp ảnh/ }));
@@ -62,7 +62,6 @@ describe("WrongParkingReportDialog", () => {
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
-        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={onSubmit}
       />,
@@ -99,7 +98,6 @@ describe("WrongParkingReportDialog", () => {
     render(
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
-        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={onSubmit}
       />,
@@ -132,7 +130,6 @@ describe("WrongParkingReportDialog", () => {
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
-        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={onSubmit}
       />,
@@ -162,7 +159,6 @@ describe("WrongParkingReportDialog", () => {
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
-        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={onSubmit}
       />,
@@ -189,7 +185,6 @@ describe("WrongParkingReportDialog", () => {
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
-        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={onSubmit}
       />,
@@ -212,7 +207,6 @@ describe("WrongParkingReportDialog", () => {
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
-        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={onSubmit}
       />,
@@ -233,7 +227,6 @@ describe("WrongParkingReportDialog", () => {
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
-        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={vi.fn(async () => createdReport)}
       />,
@@ -254,7 +247,6 @@ describe("WrongParkingReportDialog", () => {
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
-        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={vi.fn(async () => createdReport)}
       />,
@@ -283,7 +275,6 @@ describe("WrongParkingReportDialog", () => {
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
-        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={onSubmit}
       />,
@@ -313,7 +304,6 @@ describe("WrongParkingReportDialog", () => {
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
-        rewardPoints={20}
         onClose={vi.fn()}
         onSubmit={vi.fn(async () => createdReport)}
       />,
@@ -342,7 +332,6 @@ describe("WrongParkingReportDialog", () => {
       <WrongParkingReportDialog
         slots={canonicalMap.slots}
         initialSlotId="F1-D01"
-        rewardPoints={20}
         onClose={onClose}
         onSubmit={onSubmit}
       />,

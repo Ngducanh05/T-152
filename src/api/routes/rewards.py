@@ -9,10 +9,19 @@ from src.api.dependencies import ParkingUserDependency, SessionDependency, resol
 from src.api.errors import domain_http_error
 from src.core.errors import DomainError
 from src.core.idempotency import IdempotencyService
+from src.core.reward import RewardService
 from src.core.reward_redemption import RewardCatalogService, RewardRedemptionService
 from src.core.voucher import VoucherService
+from src.core.voucher_application import VoucherApplicationService
 from src.models.common import ErrorResponse, SuccessResponse
-from src.models.schemas import EntityId, ParkingVoucher, RewardCatalogItem, RewardRedemption, RewardRedemptionResult
+from src.models.schemas import (
+    EntityId,
+    ParkingVoucher,
+    RewardCatalogItem,
+    RewardLedgerEntry,
+    RewardRedemption,
+    RewardRedemptionResult,
+)
 
 router = APIRouter(prefix="/rewards", tags=["Rewards"])
 ERROR_RESPONSES = {
@@ -20,6 +29,7 @@ ERROR_RESPONSES = {
     403: {"model": ErrorResponse},
     404: {"model": ErrorResponse},
     409: {"model": ErrorResponse},
+    503: {"model": ErrorResponse},
     422: {"model": ErrorResponse},
 }
 
@@ -28,6 +38,13 @@ class RedeemRewardVoucherRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     user_id: EntityId
     catalog_item_id: EntityId
+
+
+class ApplyVoucherRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: EntityId
+    session_id: EntityId | None = None
 
 
 def _catalog(item: object) -> RewardCatalogItem:
@@ -40,6 +57,10 @@ def _voucher(item: object) -> ParkingVoucher:
 
 def _redemption(item: object) -> RewardRedemption:
     return RewardRedemption.model_validate(item, from_attributes=True)
+
+
+def _ledger(item: object) -> RewardLedgerEntry:
+    return RewardLedgerEntry.model_validate(item, from_attributes=True)
 
 
 @router.get("/catalog", response_model=SuccessResponse[list[RewardCatalogItem]])
@@ -86,6 +107,24 @@ async def redeem_reward_voucher(
 
 
 @router.get(
+    "/users/{user_id}/ledger",
+    response_model=SuccessResponse[list[RewardLedgerEntry]],
+    responses=ERROR_RESPONSES,
+)
+async def user_reward_ledger(
+    user_id: str,
+    session: SessionDependency,
+    current_user: ParkingUserDependency,
+) -> SuccessResponse[list[RewardLedgerEntry]]:
+    user_id = resolve_parking_user_id(user_id, current_user)
+    try:
+        ledger = await RewardService(session).list_user_ledger(user_id)
+    except DomainError as error:
+        raise domain_http_error(error) from error
+    return SuccessResponse(data=[_ledger(entry) for entry in ledger])
+
+
+@router.get(
     "/users/{user_id}/vouchers", response_model=SuccessResponse[list[ParkingVoucher]], responses=ERROR_RESPONSES
 )
 async def user_vouchers(
@@ -100,6 +139,30 @@ async def user_vouchers(
     except DomainError as error:
         raise domain_http_error(error) from error
     return SuccessResponse(data=[_voucher(item) for item in vouchers])
+
+
+@router.post(
+    "/vouchers/{voucher_id}/apply",
+    response_model=SuccessResponse[ParkingVoucher],
+    responses=ERROR_RESPONSES,
+)
+async def apply_voucher(
+    voucher_id: str,
+    request: ApplyVoucherRequest,
+    session: SessionDependency,
+    current_user: ParkingUserDependency,
+) -> SuccessResponse[ParkingVoucher]:
+    user_id = resolve_parking_user_id(request.user_id, current_user)
+    try:
+        async with session.begin():
+            voucher = await VoucherApplicationService(session).apply(
+                user_id=user_id,
+                voucher_id=voucher_id,
+                session_id=request.session_id,
+            )
+    except DomainError as error:
+        raise domain_http_error(error) from error
+    return SuccessResponse(data=_voucher(voucher), message="Voucher applied to the active parking session.")
 
 
 __all__ = ["router"]

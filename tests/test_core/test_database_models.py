@@ -23,6 +23,7 @@ from src.core.db_models import (
     RewardCatalogItem,
     RewardRedemption,
     RewardTransaction,
+    SlotObservation,
     Vehicle,
     WrongParkingReport,
 )
@@ -111,7 +112,9 @@ def test_parking_migration_follows_profiles_revision():
     invariant_revision = scripts.get_revision("20260826_0015")
     reward_revision = scripts.get_revision("20260830_0016")
 
-    assert scripts.get_current_head() == "20260830_0016"
+    observation_evidence_revision = scripts.get_revision("20260831_0017")
+
+    assert scripts.get_current_head() == "20260831_0017"
     assert parking_revision is not None
     assert parking_revision.down_revision == "20260804_0001"
     assert location_cleanup_revision is not None
@@ -140,6 +143,16 @@ def test_parking_migration_follows_profiles_revision():
     assert invariant_revision.down_revision == "20260826_0014"
     assert reward_revision is not None
     assert reward_revision.down_revision == "20260826_0015"
+    assert observation_evidence_revision is not None
+    assert observation_evidence_revision.down_revision == "20260830_0016"
+
+
+def test_slot_observation_evidence_stores_only_private_metadata() -> None:
+    observation = SlotObservation.__table__
+    assert {"evidence_storage_path", "evidence_content_type", "evidence_size_bytes"} <= set(observation.c.keys())
+    assert "ck_slot_observations_evidence_size_nonnegative" in {
+        constraint.name for constraint in observation.constraints
+    }
 
 
 def test_agent_daily_usage_model_and_migration_constraints_match():

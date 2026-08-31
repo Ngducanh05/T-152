@@ -33,6 +33,7 @@ from src.models.schemas import (
     WrongParkingReportVerificationOutcome,
     ZoneId,
 )
+from src.services.image_evidence import ImageEvidenceStorage
 from src.services.report_evidence import ReportEvidenceStorage
 
 router = APIRouter(
@@ -287,6 +288,36 @@ async def get_slot_observation(
     except SlotObservationError as error:
         raise _observation_http_error(error) from error
     return SuccessResponse(data=SlotObservation.model_validate(observation, from_attributes=True))
+
+
+@router.get(
+    "/slot-observations/{observation_id}/evidence-url",
+    response_model=SuccessResponse[ReportEvidenceUrlResponse],
+    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+)
+async def get_slot_observation_evidence_url(
+    observation_id: str,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> SuccessResponse[ReportEvidenceUrlResponse]:
+    try:
+        observation = await SlotObservationService(session).get_observation(observation_id)
+    except SlotObservationError as error:
+        raise _observation_http_error(error) from error
+    if not observation.evidence_storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "OBSERVATION_EVIDENCE_NOT_FOUND", "message": "Observation evidence was not found."},
+        )
+    expires_in = 300
+    signed_url = await ImageEvidenceStorage(
+        settings,
+        namespace="slot-observations",
+        invalid_code=ErrorCode.OBSERVATION_EVIDENCE_INVALID.value,
+        too_large_code=ErrorCode.OBSERVATION_EVIDENCE_TOO_LARGE.value,
+        label="Observation evidence",
+    ).create_signed_url(observation.evidence_storage_path, expires_in=expires_in)
+    return SuccessResponse(data=ReportEvidenceUrlResponse(signed_url=signed_url, expires_in=expires_in))
 
 
 @router.post(

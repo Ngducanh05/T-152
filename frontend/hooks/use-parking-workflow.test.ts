@@ -78,10 +78,12 @@ function fixture() {
       adjacent_observation_reward_points: 10,
       wrong_parking_report_reward_points: 20,
       contribution_daily_points_limit: 100,
+      redemption_enabled: false,
     },
     contributions: [],
     rewardCatalog: [],
     vouchers: [],
+    rewardLedger: [],
   };
   const refresh = vi.fn(async () => snapshot);
   const data: WorkflowData = {
@@ -478,6 +480,9 @@ describe("useParkingWorkflow", () => {
         verified_at: null,
         verified_by: null,
         rejection_reason: null,
+        evidence_storage_path: null,
+        evidence_content_type: null,
+        evidence_size_bytes: null,
         version: 0,
       });
       await firstRequest;

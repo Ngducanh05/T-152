@@ -80,7 +80,77 @@ class SlotObservationService:
         slot_id: str,
         observed_status: SlotStatus,
         expected_slot_version: int,
+        observation_id: str | None = None,
+        evidence_storage_path: str | None = None,
+        evidence_content_type: str | None = None,
+        evidence_size_bytes: int | None = None,
     ) -> SlotObservation:
+        active_session, slot = await self._validate_create_request(
+            user_id=user_id,
+            slot_id=slot_id,
+            observed_status=observed_status,
+            expected_slot_version=expected_slot_version,
+            lock=True,
+        )
+        now = self._now()
+        observation = SlotObservation(
+            id=observation_id or f"OBSERVATION-{uuid4()}",
+            observer_user_id=user_id,
+            observer_session_id=active_session.id,
+            slot_id=slot_id,
+            observed_status=observed_status,
+            verification_status=SlotObservationStatus.PENDING,
+            reward_points=0,
+            observed_slot_version=slot.version,
+            created_at=now,
+            expires_at=now + timedelta(seconds=self.settings.observation_verification_ttl_seconds),
+            verified_at=None,
+            verified_by=None,
+            rejection_reason=None,
+            evidence_storage_path=evidence_storage_path,
+            evidence_content_type=evidence_content_type,
+            evidence_size_bytes=evidence_size_bytes,
+            version=0,
+        )
+        self.session.add(observation)
+        reward = await self.rewards.reserve_contribution_reward(
+            user_id=user_id,
+            source_type=RewardSourceType.ADJACENT_SLOT_OBSERVATION,
+            source_reference=observation.id,
+            requested_points=self.settings.adjacent_observation_reward_points,
+            metadata={"slot_id": slot.id, "floor_id": slot.floor_id},
+        )
+        observation.reward_points = reward.points_delta if reward is not None else 0
+        await self.session.flush()
+        observation.reward_status = reward.status if reward is not None else None
+        return observation
+
+    async def preflight_create_observation(
+        self,
+        *,
+        user_id: str,
+        slot_id: str,
+        observed_status: SlotStatus,
+        expected_slot_version: int,
+    ) -> None:
+        """Reject obvious invalid uploads without retaining locks across storage I/O."""
+        await self._validate_create_request(
+            user_id=user_id,
+            slot_id=slot_id,
+            observed_status=observed_status,
+            expected_slot_version=expected_slot_version,
+            lock=False,
+        )
+
+    async def _validate_create_request(
+        self,
+        *,
+        user_id: str,
+        slot_id: str,
+        observed_status: SlotStatus,
+        expected_slot_version: int,
+        lock: bool,
+    ) -> tuple[ParkingSession, ParkingSlot]:
         if observed_status not in {SlotStatus.AVAILABLE, SlotStatus.OCCUPIED}:
             raise SlotObservationError(
                 ErrorCode.INVALID_OBSERVATION_TRANSITION,
@@ -110,12 +180,16 @@ class SlotObservationService:
                 f"Parking slot {slot_id} is not adjacent to {active_session_snapshot.slot_id}.",
                 details={"slot_id": slot_id, "parked_slot_id": active_session_snapshot.slot_id},
             )
-        slot = await self.session.scalar(select(ParkingSlot).where(ParkingSlot.id == slot_id).with_for_update())
+        slot_query = select(ParkingSlot).where(ParkingSlot.id == slot_id)
+        if lock:
+            slot_query = slot_query.with_for_update()
+        slot = await self.session.scalar(slot_query)
         if slot is None:
             raise SlotObservationError(ErrorCode.SLOT_NOT_FOUND, f"Parking slot {slot_id} was not found.")
-        active_session = await self.session.scalar(
-            select(ParkingSession).where(ParkingSession.id == active_session_snapshot.id).with_for_update()
-        )
+        active_session_query = select(ParkingSession).where(ParkingSession.id == active_session_snapshot.id)
+        if lock:
+            active_session_query = active_session_query.with_for_update()
+        active_session = await self.session.scalar(active_session_query)
         if active_session is None or active_session.status is not ParkingSessionStatus.ACTIVE:
             raise SlotObservationError(
                 ErrorCode.ACTIVE_SESSION_NOT_FOUND,
@@ -149,35 +223,7 @@ class SlotObservationService:
                 details={"observation_id": existing.id},
             )
 
-        now = self._now()
-        observation = SlotObservation(
-            id=f"OBSERVATION-{uuid4()}",
-            observer_user_id=user_id,
-            observer_session_id=active_session.id,
-            slot_id=slot_id,
-            observed_status=observed_status,
-            verification_status=SlotObservationStatus.PENDING,
-            reward_points=0,
-            observed_slot_version=slot.version,
-            created_at=now,
-            expires_at=now + timedelta(seconds=self.settings.observation_verification_ttl_seconds),
-            verified_at=None,
-            verified_by=None,
-            rejection_reason=None,
-            version=0,
-        )
-        self.session.add(observation)
-        reward = await self.rewards.reserve_contribution_reward(
-            user_id=user_id,
-            source_type=RewardSourceType.ADJACENT_SLOT_OBSERVATION,
-            source_reference=observation.id,
-            requested_points=self.settings.adjacent_observation_reward_points,
-            metadata={"slot_id": slot.id, "floor_id": slot.floor_id},
-        )
-        observation.reward_points = reward.points_delta if reward is not None else 0
-        await self.session.flush()
-        observation.reward_status = reward.status if reward is not None else None
-        return observation
+        return active_session, slot
 
     async def expire_pending(self) -> int:
         now = self._now()

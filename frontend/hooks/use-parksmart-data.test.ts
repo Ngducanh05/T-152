@@ -19,6 +19,7 @@ const rewardConfiguration = {
   adjacent_observation_reward_points: 10,
   wrong_parking_report_reward_points: 20,
   contribution_daily_points_limit: 100,
+  redemption_enabled: false,
 };
 const rewardSummary = {
   available_points: 20,
@@ -53,6 +54,9 @@ function responseFor(url: string) {
   }
   if (url.endsWith("/rewards/catalog")) return successResponse([]);
   if (url.includes("/rewards/users/") && url.endsWith("/vouchers")) {
+    return successResponse([]);
+  }
+  if (url.includes("/rewards/users/") && url.endsWith("/ledger")) {
     return successResponse([]);
   }
   throw new Error(`Unexpected request: ${url}`);
@@ -92,7 +96,7 @@ it("loads static map, dynamic snapshot, and aggregate user state", async () => {
   expect(result.current.activeReservation).toEqual(activeReservation);
   expect(result.current.activeSession).toEqual(activeSession);
   expect(result.current.rewardSummary).toEqual(rewardSummary);
-  expect(fetcher).toHaveBeenCalledTimes(6);
+  expect(fetcher).toHaveBeenCalledTimes(7);
 });
 
 it("finishes aggregate loading when Strict Mode remounts the effect", async () => {

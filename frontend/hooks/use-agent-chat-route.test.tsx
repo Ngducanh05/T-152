@@ -40,10 +40,12 @@ describe("Agent structured UI effects", () => {
         adjacent_observation_reward_points: 10,
         wrong_parking_report_reward_points: 20,
         contribution_daily_points_limit: 100,
+        redemption_enabled: false,
       },
       contributions: [],
       rewardCatalog: [],
       vouchers: [],
+      rewardLedger: [],
     };
     const api = {
       confirmLocation: vi.fn(),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { AgentComposer } from "@/components/assistant/AgentComposer";
 import { ConversationActionList } from "@/components/assistant/ConversationActionList";
@@ -14,6 +14,7 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { LocationPicker } from "@/components/location/LocationPicker";
 import { AdjacentSlotObservation } from "@/components/parking/AdjacentSlotObservation";
 import { RewardCenter } from "@/components/rewards/RewardCenter";
+import { ParkSmartPointsButton } from "@/components/rewards/ParkSmartPointsButton";
 import {
   WrongParkingReportDialog,
   type WrongParkingReportDraft,
@@ -23,7 +24,7 @@ import { useParkingWorkflow } from "@/hooks/use-parking-workflow";
 import { formatApiErrorForOperator, parkSmartApi } from "@/lib/api";
 import type { ParkingIdentity } from "@/lib/auth";
 import { formatParkingLocation } from "@/lib/parking-display";
-import { isAgentEnabled } from "@/lib/public-config";
+import { isAgentEnabled, isRewardsRedemptionEnabled } from "@/lib/public-config";
 import { notifyWrongParkingReportCreated } from "@/lib/report-updates";
 import { buildRouteInstructions } from "@/lib/route-instructions";
 import type { ChatUiAction } from "@/lib/types";
@@ -51,6 +52,8 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
   const [manualLocationPicker, setManualLocationPicker] = useState(false);
   const [manualReportDialog, setManualReportDialog] = useState(false);
   const [firstVehicleDialogOpen, setFirstVehicleDialogOpen] = useState(false);
+  const [rewardCenterOpen, setRewardCenterOpen] = useState(false);
+  const rewardButtonRef = useRef<HTMLButtonElement>(null);
 
   const showLocationPicker =
     manualLocationPicker || workflow.requestedPanel?.kind === "location";
@@ -108,6 +111,11 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
     return report;
   }
 
+  function closeRewardCenter() {
+    setRewardCenterOpen(false);
+    window.requestAnimationFrame(() => rewardButtonRef.current?.focus());
+  }
+
   function requireVehicle(action: () => void) {
     if (!identity.vehicleId) {
       setFirstVehicleDialogOpen(true);
@@ -137,6 +145,11 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
           <span className="brand-mark" aria-hidden="true">P</span>
           <strong>ParkSmart<span>AI</span></strong>
         </div>
+        <ParkSmartPointsButton
+          buttonRef={rewardButtonRef}
+          availablePoints={data.rewardSummary?.available_points ?? 0}
+          onClick={() => setRewardCenterOpen(true)}
+        />
         <LogoutButton />
         {data.activeSession ? (
           <div className="chat-location-button" aria-label={`Vị trí đỗ xe: ${formatParkingLocation(data.activeSession.slot_id)}`}>
@@ -191,17 +204,6 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
                 </button>
               </article>
             </section>
-          )}
-          {data.rewardSummary && (
-            <RewardCenter
-              userId={identity.userId}
-              summary={data.rewardSummary}
-              contributions={data.contributions}
-              catalog={data.rewardCatalog}
-              vouchers={data.vouchers}
-              onRedeem={(catalogItemId, idempotencyKey) => parkSmartApi.redeemRewardVoucher({ user_id: identity.userId, catalog_item_id: catalogItemId }, undefined, idempotencyKey)}
-              onRefresh={data.refresh}
-            />
           )}
           {hasPriorityContent && (
             <section
@@ -298,9 +300,6 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
                             data.activeSession?.session_id,
                       )
                       .map((contribution) => contribution.slot_id)}
-                    rewardPoints={
-                      data.rewardConfiguration?.adjacent_observation_reward_points ?? 0
-                    }
                     pendingSlotId={workflow.pendingAdjacentSlotId}
                     onObserve={workflow.updateAdjacentSlotStatus}
                   />
@@ -433,9 +432,6 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
         <WrongParkingReportDialog
           slots={data.slots}
           initialSlotId={initialReportSlotId}
-          rewardPoints={
-            data.rewardConfiguration?.wrong_parking_report_reward_points ?? 0
-          }
           onClose={closeReportDialog}
           onSubmit={submitWrongParkingReport}
         />
@@ -447,6 +443,36 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
             setFirstVehicleDialogOpen(false);
             await refreshProfile();
           }}
+        />
+      )}
+      {data.rewardSummary && (
+        <RewardCenter
+          open={rewardCenterOpen}
+          userId={identity.userId}
+          summary={data.rewardSummary}
+          ledger={data.rewardLedger}
+          catalog={data.rewardCatalog}
+          vouchers={data.vouchers}
+          activeSession={data.activeSession}
+          redemptionEnabled={
+            isRewardsRedemptionEnabled() &&
+            Boolean(data.rewardConfiguration?.redemption_enabled)
+          }
+          onClose={closeRewardCenter}
+          onRedeem={(catalogItemId, idempotencyKey) =>
+            parkSmartApi.redeemRewardVoucher(
+              { user_id: identity.userId, catalog_item_id: catalogItemId },
+              undefined,
+              idempotencyKey,
+            )
+          }
+          onApply={(voucherId) =>
+            parkSmartApi.applyVoucher(voucherId, {
+              user_id: identity.userId,
+              session_id: data.activeSession?.session_id ?? null,
+            })
+          }
+          onRefresh={data.refresh}
         />
       )}
     </main>

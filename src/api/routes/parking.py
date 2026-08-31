@@ -3,14 +3,17 @@
 import logging
 from datetime import UTC, datetime
 from typing import Annotated, Literal
+from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
+from starlette.datastructures import UploadFile
 
 from src.api.dependencies import (
     ParkingUserDependency,
     SessionDependency,
+    SettingsDependency,
     resolve_parking_user_id,
 )
 from src.api.errors import domain_http_error
@@ -52,6 +55,7 @@ from src.models.schemas import (
     SlotStatus,
     ZoneId,
 )
+from src.services.image_evidence import ImageEvidenceStorage, read_bounded_image, validate_image
 
 router = APIRouter(prefix="/parking", tags=["Parking"])
 logger = logging.getLogger(__name__)
@@ -168,26 +172,126 @@ async def parking_slot(
 )
 async def observe_adjacent_parking_slot(
     slot_id: SlotId,
-    request: AdjacentSlotObservationRequest,
+    http_request: Request,
     session: SessionDependency,
     current_user: ParkingUserDependency,
+    settings: SettingsDependency,
 ) -> SuccessResponse[SlotObservation]:
-    user_id = resolve_parking_user_id(request.user_id, current_user)
+    content_type = http_request.headers.get("content-type", "")
+    content_length = http_request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_length = int(content_length)
+        except ValueError:
+            declared_length = None
+        if declared_length is not None and declared_length > settings.report_evidence_max_bytes + 64 * 1024:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail={
+                    "code": ErrorCode.OBSERVATION_EVIDENCE_TOO_LARGE.value,
+                    "message": "Observation evidence must not exceed the configured size limit.",
+                },
+            )
+    evidence_upload: UploadFile | None = None
     try:
+        if content_type.startswith("multipart/form-data"):
+            try:
+                form = await http_request.form(max_files=1, max_fields=4, max_part_size=2048)
+                evidence = form.get("evidence")
+                if evidence is not None and not isinstance(evidence, UploadFile):
+                    raise ValueError("evidence must be an uploaded file")
+                evidence_upload = evidence
+                payload = AdjacentSlotObservationRequest(
+                    user_id=str(form.get("user_id") or ""),
+                    observed_status=form.get("observed_status"),
+                    expected_slot_version=form.get("expected_slot_version"),
+                )
+            except (ValidationError, ValueError) as error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={"code": "VALIDATION_ERROR", "message": "Request validation failed."},
+                ) from error
+        else:
+            try:
+                payload = AdjacentSlotObservationRequest.model_validate(await http_request.json())
+            except (ValidationError, ValueError) as error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={"code": "VALIDATION_ERROR", "message": "Request validation failed."},
+                ) from error
+
+        user_id = resolve_parking_user_id(payload.user_id, current_user)
+        evidence_bytes: bytes | None = None
+        normalized_content_type: str | None = None
+        if evidence_upload is not None:
+            evidence_bytes = await read_bounded_image(
+                evidence_upload,
+                max_bytes=settings.report_evidence_max_bytes,
+                too_large_code=ErrorCode.OBSERVATION_EVIDENCE_TOO_LARGE.value,
+                label="Observation evidence",
+            )
+            normalized_content_type = validate_image(
+                content_type=evidence_upload.content_type,
+                data=evidence_bytes,
+                max_bytes=settings.report_evidence_max_bytes,
+                invalid_code=ErrorCode.OBSERVATION_EVIDENCE_INVALID.value,
+                too_large_code=ErrorCode.OBSERVATION_EVIDENCE_TOO_LARGE.value,
+                label="Observation evidence",
+            )
+
+        observation_id = f"OBSERVATION-{uuid4()}"
+        storage = ImageEvidenceStorage(
+            settings,
+            namespace="slot-observations",
+            invalid_code=ErrorCode.OBSERVATION_EVIDENCE_INVALID.value,
+            too_large_code=ErrorCode.OBSERVATION_EVIDENCE_TOO_LARGE.value,
+            label="Observation evidence",
+        )
         async with session.begin():
-            observation = await SlotObservationService(session).create_observation(
+            await SlotObservationService(session, settings=settings).preflight_create_observation(
                 user_id=user_id,
                 slot_id=slot_id,
-                observed_status=request.observed_status,
-                expected_slot_version=request.expected_slot_version,
+                observed_status=payload.observed_status,
+                expected_slot_version=payload.expected_slot_version,
             )
+        stored_evidence = None
+        if evidence_bytes is not None and normalized_content_type is not None:
+            stored_evidence = await storage.upload(
+                object_id=observation_id,
+                data=evidence_bytes,
+                content_type=normalized_content_type,
+                allow_demo_fallback=current_user is None,
+            )
+
+        try:
+            async with session.begin():
+                observation = await SlotObservationService(session, settings=settings).create_observation(
+                    user_id=user_id,
+                    slot_id=slot_id,
+                    observed_status=payload.observed_status,
+                    expected_slot_version=payload.expected_slot_version,
+                    observation_id=observation_id,
+                    evidence_storage_path=(stored_evidence.storage_path if stored_evidence is not None else None),
+                    evidence_content_type=(stored_evidence.content_type if stored_evidence is not None else None),
+                    evidence_size_bytes=(stored_evidence.size_bytes if stored_evidence is not None else None),
+                )
+        except Exception:
+            if stored_evidence is not None:
+                try:
+                    await storage.delete(stored_evidence.storage_path)
+                except Exception:  # Best-effort orphan cleanup must not hide the domain failure.
+                    logger.warning("slot_observation_evidence_cleanup_failed outcome=failure")
+            raise
     except SlotObservationError as error:
         raise _observation_error(error) from error
+    finally:
+        if evidence_upload is not None:
+            await evidence_upload.close()
     logger.info(
         "adjacent_slot_observation slot_id=%s actor_id=%s observed_status=%s outcome=success",
         slot_id,
         user_id,
-        request.observed_status.value,
+        payload.observed_status.value,
     )
     return SuccessResponse(
         data=SlotObservation.model_validate(observation, from_attributes=True),
@@ -284,8 +388,9 @@ async def user_parking_state(
             reward_summary=reward_summary,
             reward_configuration=RewardConfiguration(
                 adjacent_observation_reward_points=(settings.adjacent_observation_reward_points),
-                wrong_parking_report_reward_points=(settings.wrong_parking_report_reward_points),
-                contribution_daily_points_limit=(settings.contribution_daily_points_limit),
-            ),
+            wrong_parking_report_reward_points=(settings.wrong_parking_report_reward_points),
+            contribution_daily_points_limit=(settings.contribution_daily_points_limit),
+            redemption_enabled=settings.rewards_redemption_enabled,
+        ),
         )
     )

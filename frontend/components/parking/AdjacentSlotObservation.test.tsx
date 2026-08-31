@@ -12,7 +12,7 @@ afterEach(() => {
   window.sessionStorage.clear();
 });
 
-function pendingObservation(slotId: string): SlotObservation {
+function observation(slotId: string): SlotObservation {
   return {
     id: `OBS-${slotId}`,
     observer_user_id: "USER-001",
@@ -28,18 +28,20 @@ function pendingObservation(slotId: string): SlotObservation {
     verified_at: null,
     verified_by: null,
     rejection_reason: null,
+    evidence_storage_path: null,
+    evidence_content_type: null,
+    evidence_size_bytes: null,
     version: 0,
   };
 }
 
-function renderCard(onObserve = vi.fn(async (slotId: string) => pendingObservation(slotId))) {
+function renderCard(onObserve = vi.fn(async (slotId: string) => observation(slotId))) {
   render(
     <AdjacentSlotObservation
       parkingSessionId="SESSION-001"
       parkedSlotId="F1-D03"
       slots={canonicalMap.slots}
       observedSlotIds={[]}
-      rewardPoints={10}
       pendingSlotId={null}
       onObserve={onObserve}
     />,
@@ -47,74 +49,62 @@ function renderCard(onObserve = vi.fn(async (slotId: string) => pendingObservati
   return onObserve;
 }
 
+async function openReview(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Giúp kiểm tra ngay" }));
+  await user.click(screen.getByRole("button", { name: "Đã có xe" }));
+}
+
 describe("AdjacentSlotObservation", () => {
-  it("starts collapsed with a friendly invitation and dismisses for this session", async () => {
+  it("moves from status question to review without immediately submitting", async () => {
     const user = userEvent.setup();
-    renderCard();
-    expect(screen.getByText("Cùng giúp bãi xe chính xác hơn nhé!")).toBeVisible();
-    expect(screen.queryByText(/ô này đang trống hay đã có xe/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Để lúc khác" }));
-    expect(screen.queryByText("Cùng giúp bãi xe chính xác hơn nhé!")).not.toBeInTheDocument();
+    const onObserve = renderCard();
+    await openReview(user);
+    expect(onObserve).not.toHaveBeenCalled();
+    expect(screen.getByText("Đã có xe")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Gửi đóng góp" })).toBeVisible();
+    expect(screen.queryByText(/\+10|10 điểm/)).not.toBeInTheDocument();
   });
 
-  it("asks one slot at a time without exposing its current status", async () => {
+  it("skips uncertain slots without a network mutation", async () => {
     const user = userEvent.setup();
     const onObserve = renderCard();
     await user.click(screen.getByRole("button", { name: "Giúp kiểm tra ngay" }));
-    expect(screen.getByText(/Bạn nhìn giúp ô D02/)).toBeVisible();
-    expect(screen.getByText("1/2")).toBeVisible();
-    expect(screen.queryByText(/Hiện tại:/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Tôi không chắc" }));
     expect(onObserve).not.toHaveBeenCalled();
-    expect(screen.getByText(/Bạn nhìn giúp ô D04/)).toBeVisible();
+    expect(screen.getByText(/ô D04/)).toBeVisible();
   });
 
-  it("does not ask again about a slot already observed in this parking session", async () => {
+  it("provides separate camera/gallery inputs and forwards a selected image only after submit", async () => {
     const user = userEvent.setup();
-    render(
-      <AdjacentSlotObservation
-        parkingSessionId="SESSION-001"
-        parkedSlotId="F1-D03"
-        slots={canonicalMap.slots}
-        observedSlotIds={["F1-D02"]}
-        rewardPoints={10}
-        pendingSlotId={null}
-        onObserve={vi.fn(async (slotId: string) => pendingObservation(slotId))}
-      />,
-    );
-
-    expect(screen.getByText(/kiểm tra ô bên cạnh xe/)).toBeVisible();
-    expect(screen.getByText("Tối đa +10 điểm chờ xác minh")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Giúp kiểm tra ngay" }));
-    expect(screen.getByText(/Bạn nhìn giúp ô D04/)).toBeVisible();
-    expect(screen.getByText("1/1")).toBeVisible();
-    expect(screen.queryByText(/Bạn nhìn giúp ô D02/)).not.toBeInTheDocument();
-  });
-
-  it("hides the card when all adjacent slots were already observed", () => {
-    const { container } = render(
-      <AdjacentSlotObservation
-        parkingSessionId="SESSION-001"
-        parkedSlotId="F1-D03"
-        slots={canonicalMap.slots}
-        observedSlotIds={["F1-D02", "F1-D04"]}
-        rewardPoints={10}
-        pendingSlotId={null}
-        onObserve={vi.fn(async (slotId: string) => pendingObservation(slotId))}
-      />,
-    );
-
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it("submits once and describes the reward as pending", async () => {
-    const user = userEvent.setup();
+    const objectUrl = vi.fn(() => "blob:adjacent-proof");
+    vi.stubGlobal("URL", { ...URL, createObjectURL: objectUrl, revokeObjectURL: vi.fn() });
     const onObserve = renderCard();
-    await user.click(screen.getByRole("button", { name: "Giúp kiểm tra ngay" }));
-    await user.dblClick(screen.getByRole("button", { name: "Đã có xe" }));
-    expect(onObserve).toHaveBeenCalledOnce();
-    expect(onObserve).toHaveBeenCalledWith("F1-D02", "OCCUPIED");
-    expect(await screen.findByText(/\+10 điểm sẽ được cộng nếu thông tin chính xác/)).toBeVisible();
-    expect(screen.queryByText(/đã nhận điểm/i)).not.toBeInTheDocument();
+    await openReview(user);
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="file"]'));
+    expect(inputs[0]).toHaveAttribute("accept", "image/*");
+    expect(inputs[0]).toHaveAttribute("capture", "environment");
+    expect(inputs[1]).toHaveAttribute("accept", "image/jpeg,image/png,image/webp,image/heic,image/heif");
+    const evidence = new File(["jpeg"], "proof.jpg", { type: "image/jpeg" });
+    await user.upload(inputs[1]!, evidence);
+    expect(screen.getByText(/proof.jpg/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Gửi đóng góp" }));
+    expect(onObserve).toHaveBeenCalledWith("F1-D02", "OCCUPIED", evidence);
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps selected status and image available after a failed submission", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("URL", { ...URL, createObjectURL: () => "blob:adjacent-proof", revokeObjectURL: vi.fn() });
+    const onObserve = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(observation("F1-D02"));
+    renderCard(onObserve);
+    await openReview(user);
+    const evidence = new File(["jpeg"], "retry.jpg", { type: "image/jpeg" });
+    await user.upload(document.querySelectorAll<HTMLInputElement>('input[type="file"]')[1]!, evidence);
+    await user.click(screen.getByRole("button", { name: "Gửi đóng góp" }));
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(screen.getByText(/retry.jpg/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Gửi đóng góp" }));
+    expect(onObserve).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
   });
 });

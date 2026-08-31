@@ -15,6 +15,7 @@ SUPABASE_SERVICE_ROLE_KEY=<SERVER ONLY>
 SUPABASE_REPORT_EVIDENCE_BUCKET=wrong-parking-evidence
 REPORT_EVIDENCE_MAX_BYTES=5000000
 WRONG_PARKING_REPORT_DAILY_LIMIT=5
+REWARDS_REDEMPTION_ENABLED=false
 
 LLM_API_KEY=<server only>
 LLM_MODEL=<configured model>
@@ -94,6 +95,7 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<public browser key>
 NEXT_PUBLIC_DEMO_MODE=false
 NEXT_PUBLIC_AGENT_ENABLED=true
 NEXT_PUBLIC_SPEECH_ENABLED=false
+NEXT_PUBLIC_REWARDS_REDEMPTION_ENABLED=false
 NEXT_PUBLIC_PRIVACY_CONTACT_EMAIL=<real monitored email>
 ```
 
@@ -150,7 +152,7 @@ alembic heads
 Expected target:
 
 ```text
-20260824_0012
+20260831_0017
 ```
 
 Run migrations once as a pre-deploy or release step. Do not run migrations
@@ -300,6 +302,16 @@ cold start as an authentication failure.
 - Backend creates signed URLs for admin evidence access.
 - User report upload is backend controlled.
 - Admin evidence URL endpoint remains admin protected.
+- The same private bucket may contain both `reports/` and `slot-observations/` namespaces.
+- Never use public evidence URLs; request short-lived signed URLs only after an admin action.
+
+## Reward redemption flag alignment
+
+`REWARDS_REDEMPTION_ENABLED` is the backend authority and defaults to `false`.
+`NEXT_PUBLIC_REWARDS_REDEMPTION_ENABLED` controls browser visibility only. The user interface
+shows catalog/redeem mutations only when both values permit them; a mismatch must fail closed
+because the backend still returns `REDEMPTION_DISABLED`. Existing balances and issued vouchers do
+not depend on the flag.
 
 ## Real Post-Deploy Smoke Flow
 
