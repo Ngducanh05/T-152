@@ -14,6 +14,7 @@ from src.api.dependencies import (
 )
 from src.api.errors import domain_http_error
 from src.core.database import get_db_session
+from src.core.db_models import ParkingSession as ParkingSessionRecord
 from src.core.errors import DomainError
 from src.core.idempotency import IdempotencyService
 from src.core.parking_session import ParkingSessionError, ParkingSessionService
@@ -21,7 +22,14 @@ from src.core.parking_state import ParkingStateError, ParkingStateService
 from src.core.parking_time_benefit import ParkingTimeBenefitService
 from src.core.reservation import ReservationService
 from src.models.common import ErrorResponse, SuccessResponse
-from src.models.schemas import EntityId, ErrorCode, ParkingSessionCompletion, ParkingTimeBenefit, ReservationStatus
+from src.models.schemas import (
+    EntityId,
+    ErrorCode,
+    ParkingSessionCompletion,
+    ParkingSessionStatus,
+    ParkingTimeBenefit,
+    ReservationStatus,
+)
 from src.models.schemas import ParkingSession as ParkingSessionResponse
 
 router = APIRouter(prefix="/sessions", tags=["Parking Sessions"])
@@ -96,6 +104,34 @@ def _completion_response(parking_session: object, benefit: object) -> ParkingSes
         **session_response.model_dump(),
         time_benefit=ParkingTimeBenefit.model_validate(benefit, from_attributes=True),
     )
+
+
+async def _completion_replay_response(
+    *,
+    replay: dict[str, object],
+    session: AsyncSession,
+    user_id: str,
+    session_id: str,
+) -> ParkingSessionCompletion:
+    """Adapt only a validated pre-time-benefit completion replay in place."""
+    if "time_benefit" in replay:
+        return ParkingSessionCompletion.model_validate(replay)
+
+    # A legacy response must still be a valid old completion response and must
+    # identify this exact caller/session.  Anything else remains corrupt data,
+    # not a shape we silently reinterpret.
+    legacy = ParkingSessionResponse.model_validate(replay)
+    if legacy.id != session_id or legacy.user_id != user_id:
+        raise RuntimeError("Legacy idempotency completion replay does not match the requested session.")
+    parking_session = await session.get(ParkingSessionRecord, session_id)
+    if (
+        parking_session is None
+        or parking_session.user_id != user_id
+        or parking_session.status is not ParkingSessionStatus.COMPLETED
+    ):
+        raise RuntimeError("Legacy idempotency completion replay has no matching completed session.")
+    benefit = await ParkingTimeBenefitService(session).calculate(parking_session)
+    return _completion_response(parking_session, benefit)
 
 
 @router.post(
@@ -228,7 +264,16 @@ async def complete_session(
             )
             replay = idempotency.replay(claim)
             if replay is not None:
-                response_data = ParkingSessionCompletion.model_validate(replay)
+                response_data = await _completion_replay_response(
+                    replay=replay,
+                    session=session,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+                # The existing claim is locked.  Upgrade only the validated
+                # legacy body so every later replay uses the current contract.
+                if "time_benefit" not in replay:
+                    await idempotency.complete(claim, response_data.model_dump(mode="json"))
             else:
                 parking_session = await ParkingSessionService(session, ParkingStateService(session)).complete_session(
                     session_id,

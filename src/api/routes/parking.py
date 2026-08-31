@@ -111,6 +111,34 @@ class AdjacentSlotObservationRequest(BaseModel):
     expected_slot_version: int = Field(ge=0)
 
 
+_OBSERVATION_TEXT_PROPERTIES: dict[str, dict[str, object]] = {
+    "user_id": {"type": "string", "minLength": 1},
+    "observed_status": {"type": "string", "enum": [SlotStatus.AVAILABLE.value, SlotStatus.OCCUPIED.value]},
+    "expected_slot_version": {"type": "integer", "minimum": 0},
+}
+_OBSERVATION_OPENAPI_REQUEST_BODY = {
+    "required": True,
+    "content": {
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": _OBSERVATION_TEXT_PROPERTIES,
+                "required": ["user_id", "observed_status", "expected_slot_version"],
+                "additionalProperties": False,
+            }
+        },
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {**_OBSERVATION_TEXT_PROPERTIES, "evidence": {"type": "string", "format": "binary"}},
+                "required": ["user_id", "observed_status", "expected_slot_version"],
+                "additionalProperties": False,
+            }
+        },
+    },
+}
+
+
 def _slot_response(slot: object) -> ParkingSlot:
     return ParkingSlot.model_validate(slot, from_attributes=True)
 
@@ -169,6 +197,7 @@ async def parking_slot(
 @router.post(
     "/slots/{slot_id}/observation",
     response_model=SuccessResponse[SlotObservation],
+    openapi_extra={"requestBody": _OBSERVATION_OPENAPI_REQUEST_BODY},
 )
 async def observe_adjacent_parking_slot(
     slot_id: SlotId,
@@ -263,6 +292,22 @@ async def observe_adjacent_parking_slot(
                 allow_demo_fallback=current_user is None,
             )
 
+        async def cleanup_uploaded_evidence() -> None:
+            if stored_evidence is None:
+                return
+            try:
+                deleted = await storage.delete(stored_evidence.storage_path)
+            except Exception:
+                deleted = False
+            if not deleted:
+                # The original create failure remains authoritative.  Log one
+                # best-effort cleanup failure for the orphaned private object.
+                logger.warning(
+                    "slot_observation_evidence_cleanup_failed observation_id=%s request_id=%s",
+                    observation_id,
+                    getattr(http_request.state, "request_id", "unknown"),
+                )
+
         try:
             async with session.begin():
                 observation = await SlotObservationService(session, settings=settings).create_observation(
@@ -276,11 +321,7 @@ async def observe_adjacent_parking_slot(
                     evidence_size_bytes=(stored_evidence.size_bytes if stored_evidence is not None else None),
                 )
         except Exception:
-            if stored_evidence is not None:
-                try:
-                    await storage.delete(stored_evidence.storage_path)
-                except Exception:  # Best-effort orphan cleanup must not hide the domain failure.
-                    logger.warning("slot_observation_evidence_cleanup_failed outcome=failure")
+            await cleanup_uploaded_evidence()
             raise
     except SlotObservationError as error:
         raise _observation_error(error) from error

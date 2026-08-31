@@ -1,7 +1,9 @@
 import asyncio
+import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -16,6 +18,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.schema import CreateSchema, DropSchema
 
+import src.api.routes.parking as parking_routes
 import src.core.parking_session as parking_session_module
 from src.api.dependencies import require_parking_user_or_demo
 from src.api.main import create_app
@@ -23,6 +26,7 @@ from src.core.config import get_settings
 from src.core.database import get_db_session
 from src.core.db_models import (
     Base,
+    IdempotencyRecord,
     ParkingEvent,
     ParkingReservation,
     ParkingSession,
@@ -31,14 +35,20 @@ from src.core.db_models import (
     SlotObservation,
     Vehicle,
 )
+from src.core.idempotency import request_fingerprint
+from src.core.parking_session import ParkingSessionError, ParkingSessionService
+from src.core.parking_state import ParkingStateError
 from src.core.seed import seed_if_missing
+from src.core.slot_observation import SlotObservationError, SlotObservationService
 from src.models.auth import AppRole, CurrentUser
 from src.models.schemas import (
+    ErrorCode,
     ParkingEventType,
     ParkingSessionStatus,
     ReservationStatus,
     SlotStatus,
 )
+from src.services.image_evidence import StoredImageEvidence
 
 
 @dataclass(slots=True)
@@ -384,6 +394,177 @@ async def test_observation_changes_slot_and_earns_only_after_admin_verification(
 
 
 @pytest.mark.asyncio
+async def test_observation_route_keeps_legacy_json_and_persists_optional_private_evidence_metadata(
+    phase4_api: Phase4Api,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    timestamp = datetime.now(UTC)
+    async with phase4_api.session_factory() as session, session.begin():
+        own_slot = await session.get(ParkingSlot, "F1-D03")
+        assert own_slot is not None
+        own_slot.status = SlotStatus.OCCUPIED
+        own_slot.occupied_by_vehicle_id = "VEHICLE-001"
+        session.add(
+            ParkingSession(
+                id="SESSION-OBSERVATION-EVIDENCE",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F1-D03",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=timestamp,
+                completed_at=None,
+            )
+        )
+
+    storage = type("Storage", (), {})()
+    storage.upload = AsyncMock(
+        return_value=StoredImageEvidence("slot-observations/OBSERVATION/test.jpg", "image/jpeg", 7)
+    )
+    storage.delete = AsyncMock(return_value=True)
+    monkeypatch.setattr(parking_routes, "ImageEvidenceStorage", lambda *args, **kwargs: storage)
+
+    legacy = await phase4_api.client.post(
+        "/api/v1/parking/slots/F1-D02/observation",
+        json={"user_id": "USER-001", "observed_status": "OCCUPIED", "expected_slot_version": 0},
+    )
+    multipart = await phase4_api.client.post(
+        "/api/v1/parking/slots/F1-D04/observation",
+        data={"user_id": "USER-001", "observed_status": "AVAILABLE", "expected_slot_version": "0"},
+        files={"evidence": ("observation.jpg", b"\xff\xd8\xffjpeg", "image/jpeg")},
+    )
+    assert legacy.status_code == multipart.status_code == 200
+    assert legacy.json()["data"]["verification_status"] == multipart.json()["data"]["verification_status"] == "PENDING"
+    assert legacy.json()["data"]["evidence_storage_path"] is None
+    assert multipart.json()["data"]["evidence_storage_path"] == "slot-observations/OBSERVATION/test.jpg"
+    assert multipart.json()["data"]["evidence_content_type"] == "image/jpeg"
+    assert multipart.json()["data"]["evidence_size_bytes"] == 7
+    assert legacy.json()["data"]["reward_points"] == multipart.json()["data"]["reward_points"] == 10
+    async with phase4_api.session_factory() as session:
+        slot = await session.get(ParkingSlot, "F1-D04")
+        observation = await session.get(SlotObservation, multipart.json()["data"]["id"])
+    assert slot is not None and slot.status is SlotStatus.AVAILABLE
+    assert observation is not None and observation.evidence_storage_path == "slot-observations/OBSERVATION/test.jpg"
+    assert not hasattr(observation, "evidence_bytes")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delete_result", [False, RuntimeError("storage delete failed")])
+async def test_observation_upload_cleanup_preserves_authoritative_create_failure(
+    phase4_api: Phase4Api,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    delete_result: bool | Exception,
+):
+    timestamp = datetime.now(UTC)
+    async with phase4_api.session_factory() as session, session.begin():
+        own_slot = await session.get(ParkingSlot, "F2-D03")
+        assert own_slot is not None
+        own_slot.status = SlotStatus.OCCUPIED
+        own_slot.occupied_by_vehicle_id = "VEHICLE-001"
+        session.add(
+            ParkingSession(
+                id="SESSION-OBSERVATION-CLEANUP",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F2-D03",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=timestamp,
+                completed_at=None,
+            )
+        )
+
+    storage = type("Storage", (), {})()
+    storage.upload = AsyncMock(
+        return_value=StoredImageEvidence("slot-observations/OBSERVATION/orphan.jpg", "image/jpeg", 7)
+    )
+    storage.delete = AsyncMock(side_effect=delete_result if isinstance(delete_result, Exception) else None)
+    if delete_result is False:
+        storage.delete.return_value = False
+    monkeypatch.setattr(parking_routes, "ImageEvidenceStorage", lambda *args, **kwargs: storage)
+
+    async def fail_create(*args, **kwargs):
+        raise SlotObservationError(ErrorCode.OBSERVATION_ALREADY_EXISTS, "Duplicate observation")
+
+    monkeypatch.setattr(parking_routes.SlotObservationService, "create_observation", fail_create)
+    caplog.set_level(logging.WARNING, logger="src.api.routes.parking")
+    response = await phase4_api.client.post(
+        "/api/v1/parking/slots/F2-D02/observation",
+        data={"user_id": "USER-001", "observed_status": "OCCUPIED", "expected_slot_version": "0"},
+        files={"evidence": ("observation.jpg", b"\xff\xd8\xffjpeg", "image/jpeg")},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "OBSERVATION_ALREADY_EXISTS"
+    storage.delete.assert_awaited_once_with("slot-observations/OBSERVATION/orphan.jpg")
+    assert caplog.text.count("slot_observation_evidence_cleanup_failed") == 1
+
+
+@pytest.mark.asyncio
+async def test_observation_openapi_documents_json_and_multipart_bodies(phase4_api: Phase4Api):
+    response = await phase4_api.client.get("/openapi.json")
+    assert response.status_code == 200
+    content = response.json()["paths"]["/api/v1/parking/slots/{slot_id}/observation"]["post"]["requestBody"]["content"]
+    assert set(content) == {"application/json", "multipart/form-data"}
+    assert content["multipart/form-data"]["schema"]["properties"]["evidence"] == {"type": "string", "format": "binary"}
+
+
+@pytest.mark.asyncio
+async def test_observation_and_session_completion_share_user_first_lock_order_without_deadlock(
+    phase4_api: Phase4Api,
+):
+    timestamp = datetime.now(UTC)
+    async with phase4_api.session_factory() as session, session.begin():
+        own_slot = await session.get(ParkingSlot, "F3-D03")
+        assert own_slot is not None
+        own_slot.status = SlotStatus.OCCUPIED
+        own_slot.occupied_by_vehicle_id = "VEHICLE-001"
+        own_slot.version = 0
+        session.add(
+            ParkingSession(
+                id="SESSION-LOCK-ORDER",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F3-D03",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=timestamp,
+                completed_at=None,
+            )
+        )
+
+    async def observe() -> str:
+        try:
+            async with phase4_api.session_factory() as session, session.begin():
+                await SlotObservationService(session).create_observation(
+                    user_id="USER-001",
+                    slot_id="F3-D02",
+                    observed_status=SlotStatus.OCCUPIED,
+                    expected_slot_version=0,
+                )
+            return "created"
+        except SlotObservationError:
+            return "rejected"
+
+    async def complete() -> str:
+        try:
+            async with phase4_api.session_factory() as session, session.begin():
+                await ParkingSessionService(session, clock=lambda: timestamp + timedelta(minutes=1)).complete_session(
+                    "SESSION-LOCK-ORDER", user_id="USER-001", expected_version=0
+                )
+            return "completed"
+        except (ParkingSessionError, ParkingStateError):
+            return "rejected"
+
+    outcomes = await asyncio.wait_for(asyncio.gather(observe(), complete()), timeout=5)
+    assert "completed" in outcomes
+    async with phase4_api.session_factory() as session:
+        parking_session = await session.get(ParkingSession, "SESSION-LOCK-ORDER")
+        observations = list(
+            await session.scalars(select(SlotObservation).where(SlotObservation.observer_session_id == "SESSION-LOCK-ORDER"))
+        )
+    assert parking_session is not None and parking_session.status is ParkingSessionStatus.COMPLETED
+    assert len(observations) <= 1
+
+
+@pytest.mark.asyncio
 async def test_rejected_and_expired_observations_cancel_reward_without_slot_change(
     phase4_api: Phase4Api,
 ):
@@ -643,6 +824,106 @@ async def test_phase4_domain_errors_use_stable_http_codes(phase4_api: Phase4Api)
     )
     assert invalid_location.status_code == 422
     assert invalid_location.json()["error"]["code"] == "INVALID_LOCATION_NODE_TYPE"
+
+
+@pytest.mark.asyncio
+async def test_complete_session_legacy_idempotency_replay_is_upgraded_without_lifecycle_reexecution(
+    phase4_api: Phase4Api,
+):
+    parked_at = datetime(2026, 9, 1, 8, 0, tzinfo=UTC)
+    completed_at = parked_at + timedelta(minutes=75)
+    session_id = "SESSION-LEGACY-COMPLETION"
+    key = "legacy-completion-key"
+    payload = {"user_id": "USER-001", "expected_version": 0}
+    old_response = {
+        "id": session_id,
+        "user_id": "USER-001",
+        "vehicle_id": "VEHICLE-001",
+        "slot_id": "F1-A01",
+        "status": "COMPLETED",
+        "parked_at": parked_at.isoformat(),
+        "completed_at": completed_at.isoformat(),
+    }
+    async with phase4_api.session_factory() as session, session.begin():
+        session.add_all(
+            (
+                ParkingSession(
+                    id=session_id,
+                    user_id="USER-001",
+                    vehicle_id="VEHICLE-001",
+                    slot_id="F1-A01",
+                    status=ParkingSessionStatus.COMPLETED,
+                    parked_at=parked_at,
+                    completed_at=completed_at,
+                ),
+                IdempotencyRecord(
+                    user_id="USER-001",
+                    operation="complete_parking_session",
+                    key=key,
+                    request_hash=request_fingerprint({"session_id": session_id, "expected_version": 0}),
+                    state="COMPLETED",
+                    response_body=old_response,
+                    expires_at=datetime.now(UTC) + timedelta(hours=1),
+                ),
+            )
+        )
+
+    replay = await phase4_api.client.post(
+        f"/api/v1/sessions/{session_id}/complete",
+        json=payload,
+        headers={"Idempotency-Key": key},
+    )
+    assert replay.status_code == 200
+    benefit = replay.json()["data"]["time_benefit"]
+    assert (benefit["total_minutes"], benefit["free_minutes"], benefit["billable_minutes"], benefit["voucher_id"]) == (75, 0, 75, None)
+
+    async with phase4_api.session_factory() as session:
+        sessions = list(await session.scalars(select(ParkingSession).where(ParkingSession.id == session_id)))
+        events = await session.scalar(select(func.count()).select_from(ParkingEvent).where(ParkingEvent.slot_id == "F1-A01"))
+        record = await session.get(IdempotencyRecord, ("USER-001", "complete_parking_session", key))
+    assert len(sessions) == 1 and sessions[0].status is ParkingSessionStatus.COMPLETED
+    assert events == 0
+    assert record is not None and record.response_body is not None and "time_benefit" in record.response_body
+
+    second_replay = await phase4_api.client.post(
+        f"/api/v1/sessions/{session_id}/complete",
+        json=payload,
+        headers={"Idempotency-Key": key},
+    )
+    assert second_replay.status_code == 200
+    assert second_replay.json()["data"] == replay.json()["data"]
+
+
+@pytest.mark.asyncio
+async def test_complete_session_new_format_idempotency_replay_preserves_time_benefit(phase4_api: Phase4Api):
+    parked_at = datetime.now(UTC) - timedelta(minutes=20)
+    session_id = "SESSION-NEW-FORMAT-REPLAY"
+    async with phase4_api.session_factory() as session, session.begin():
+        slot = await session.get(ParkingSlot, "F2-A01")
+        assert slot is not None
+        slot.status = SlotStatus.OCCUPIED
+        slot.occupied_by_vehicle_id = "VEHICLE-001"
+        slot.version = 0
+        session.add(
+            ParkingSession(
+                id=session_id,
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F2-A01",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=parked_at,
+                completed_at=None,
+            )
+        )
+
+    payload = {"user_id": "USER-001", "expected_version": 0}
+    headers = {"Idempotency-Key": "new-format-completion-key"}
+    first = await phase4_api.client.post(f"/api/v1/sessions/{session_id}/complete", json=payload, headers=headers)
+    replay = await phase4_api.client.post(f"/api/v1/sessions/{session_id}/complete", json=payload, headers=headers)
+    assert first.status_code == replay.status_code == 200
+    assert replay.json()["data"] == first.json()["data"]
+    benefit = replay.json()["data"]["time_benefit"]
+    assert benefit["free_minutes"] == 0 and benefit["billable_minutes"] == benefit["total_minutes"]
 
 
 @pytest.mark.asyncio

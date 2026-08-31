@@ -244,3 +244,129 @@ async def test_time_benefit_is_duration_only_and_forfeits_unused_minutes(voucher
         benefit = await ParkingTimeBenefitService(session).calculate("SESSION-BENEFIT-001")
     assert (benefit.total_minutes, benefit.free_minutes, benefit.billable_minutes) == (20, 20, 0)
     assert benefit.voucher_id == voucher.id
+
+
+@pytest.mark.asyncio
+async def test_voucher_application_retries_same_voucher_and_session_without_reuse(
+    voucher_engine: AsyncEngine,
+):
+    factory = async_sessionmaker(voucher_engine, expire_on_commit=False)
+    now = datetime(2026, 9, 1, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        first = await _issue_voucher(session, now=now)
+        second = await _issue_voucher(session, now=now)
+        first_session = ParkingSession(
+            id="SESSION-RETRY-ONE",
+            user_id="USER-001",
+            vehicle_id="VEHICLE-001",
+            slot_id="F1-A01",
+            status=ParkingSessionStatus.ACTIVE,
+            parked_at=now,
+            completed_at=None,
+        )
+        session.add(first_session)
+        service = VoucherApplicationService(session, clock=lambda: now)
+        applied = await service.apply(user_id="USER-001", voucher_id=first.id, session_id="SESSION-RETRY-ONE")
+        replay = await service.apply(user_id="USER-001", voucher_id=first.id, session_id="SESSION-RETRY-ONE")
+        assert replay.id == applied.id
+        with pytest.raises(RewardError) as session_conflict:
+            await service.apply(user_id="USER-001", voucher_id=second.id, session_id="SESSION-RETRY-ONE")
+        assert session_conflict.value.code is ErrorCode.VOUCHER_SESSION_CONFLICT
+        first_session.status = ParkingSessionStatus.COMPLETED
+        first_session.completed_at = now
+        session.add(
+            ParkingSession(
+                id="SESSION-RETRY-TWO",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F1-A02",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=now,
+                completed_at=None,
+            )
+        )
+        with pytest.raises(RewardError) as different_session:
+            await service.apply(user_id="USER-001", voucher_id=first.id, session_id="SESSION-RETRY-TWO")
+        assert different_session.value.code is ErrorCode.VOUCHER_NOT_USABLE
+
+
+@pytest.mark.asyncio
+async def test_expired_issued_voucher_application_does_not_create_a_transient_side_commit(
+    voucher_engine: AsyncEngine,
+):
+    factory = async_sessionmaker(voucher_engine, expire_on_commit=False)
+    issued_at = datetime(2026, 8, 1, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        voucher = await _issue_voucher(session, now=issued_at)
+        session.add(
+            ParkingSession(
+                id="SESSION-EXPIRED-VOUCHER",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F1-A01",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=issued_at,
+                completed_at=None,
+            )
+        )
+
+    async with factory() as session, session.begin():
+        stored = await session.get(ParkingVoucher, voucher.id)
+        assert stored is not None
+        version_before = stored.version
+        with pytest.raises(RewardError) as expired:
+            await VoucherApplicationService(session, clock=lambda: issued_at + timedelta(days=30)).apply(
+                user_id="USER-001", voucher_id=voucher.id, session_id="SESSION-EXPIRED-VOUCHER"
+            )
+        assert expired.value.code is ErrorCode.VOUCHER_EXPIRED
+        assert stored.status is ParkingVoucherStatus.ISSUED
+        assert stored.version == version_before
+        assert stored.applied_session_id is None
+
+    async with factory() as session, session.begin():
+        assert await VoucherService(session, clock=lambda: issued_at + timedelta(days=30)).expire_stale("USER-001") == 1
+    async with factory() as session:
+        stored = await session.get(ParkingVoucher, voucher.id)
+        debits = list(await session.scalars(select(RewardTransaction).where(RewardTransaction.points_delta < 0)))
+    assert stored is not None and stored.status is ParkingVoucherStatus.EXPIRED
+    assert len(debits) == 1
+
+
+@pytest.mark.asyncio
+async def test_time_benefit_covers_long_sessions_and_no_voucher_without_pricing(
+    voucher_engine: AsyncEngine,
+):
+    factory = async_sessionmaker(voucher_engine, expire_on_commit=False)
+    parked_at = datetime(2026, 9, 1, 8, 0, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        voucher = await _issue_voucher(session, now=parked_at)
+        voucher.free_minutes_snapshot = 30
+        voucher.status = ParkingVoucherStatus.APPLIED
+        voucher.applied_session_id = "SESSION-BENEFIT-LONG"
+        voucher.applied_at = parked_at
+        session.add_all(
+            (
+                ParkingSession(
+                    id="SESSION-BENEFIT-LONG",
+                    user_id="USER-001",
+                    vehicle_id="VEHICLE-001",
+                    slot_id="F1-A01",
+                    status=ParkingSessionStatus.COMPLETED,
+                    parked_at=parked_at,
+                    completed_at=parked_at + timedelta(minutes=75),
+                ),
+                ParkingSession(
+                    id="SESSION-BENEFIT-NONE",
+                    user_id="USER-001",
+                    vehicle_id="VEHICLE-001",
+                    slot_id="F1-A02",
+                    status=ParkingSessionStatus.COMPLETED,
+                    parked_at=parked_at,
+                    completed_at=parked_at + timedelta(minutes=20),
+                ),
+            )
+        )
+        long = await ParkingTimeBenefitService(session).calculate("SESSION-BENEFIT-LONG")
+        without_voucher = await ParkingTimeBenefitService(session).calculate("SESSION-BENEFIT-NONE")
+    assert (long.total_minutes, long.free_minutes, long.billable_minutes, long.voucher_id) == (75, 30, 45, voucher.id)
+    assert (without_voucher.total_minutes, without_voucher.free_minutes, without_voucher.billable_minutes, without_voucher.voucher_id) == (20, 0, 20, None)

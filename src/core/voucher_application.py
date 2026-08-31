@@ -65,12 +65,19 @@ class VoucherApplicationService:
 
         now = self._now()
         if voucher.status is ParkingVoucherStatus.ISSUED and voucher.expires_at <= now:
-            voucher.status = ParkingVoucherStatus.EXPIRED
-            voucher.version += 1
-            await self.session.flush()
+            # The caller owns the transaction.  Do not manufacture an expiry
+            # update immediately before raising: that change would be rolled
+            # back and suggest persistence that never happened.  Wallet reads
+            # use VoucherService.expire_stale as the authoritative lazy path.
             raise RewardError(ErrorCode.VOUCHER_EXPIRED, "Parking voucher has expired.")
         if voucher.status is ParkingVoucherStatus.EXPIRED:
             raise RewardError(ErrorCode.VOUCHER_EXPIRED, "Parking voucher has expired.")
+        if voucher.status is ParkingVoucherStatus.APPLIED:
+            if voucher.applied_session_id == parking_session.id:
+                # Natural idempotency: a retry of the exact already-completed
+                # application is successful, without a ledger mutation.
+                return voucher
+            raise RewardError(ErrorCode.VOUCHER_NOT_USABLE, "Parking voucher is not usable.")
         if voucher.status is not ParkingVoucherStatus.ISSUED:
             raise RewardError(ErrorCode.VOUCHER_NOT_USABLE, "Parking voucher is not usable.")
 

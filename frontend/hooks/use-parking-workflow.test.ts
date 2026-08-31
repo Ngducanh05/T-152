@@ -1040,6 +1040,70 @@ describe("useParkingWorkflow", () => {
     expect(result.current.requestedPanel).toEqual({ kind: "location", purpose: "find-vehicle" });
   });
 
+  it("surfaces voucher time benefit after a successful completion even when refresh fails", async () => {
+    const { api, data, refresh, slot } = fixture();
+    data.activeSession = {
+      session_id: "SESSION-COMPLETE-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: slot.id,
+      destination_node_id: slot.id,
+    };
+    api.completeSession.mockResolvedValue({
+      id: "SESSION-COMPLETE-001",
+      user_id: "USER-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: slot.id,
+      status: "COMPLETED",
+      parked_at: "2026-09-01T08:00:00Z",
+      completed_at: "2026-09-01T09:15:00Z",
+      time_benefit: { total_minutes: 75, free_minutes: 30, billable_minutes: 45, voucher_id: "V-1" },
+    });
+    refresh.mockRejectedValueOnce(new TypeError("refresh unavailable"));
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    let completed = false;
+    await act(async () => { completed = await result.current.completeSession(); });
+
+    expect(completed).toBe(true);
+    expect(api.completeSession).toHaveBeenCalledOnce();
+    expect(api.completeSession).toHaveBeenCalledWith(
+      "SESSION-COMPLETE-001",
+      { user_id: "USER-001", expected_version: slot.version },
+      undefined,
+      expect.any(String),
+    );
+    expect(result.current.notice).toContain("Tổng thời gian 75 phút");
+    expect(result.current.notice).toContain("áp dụng miễn phí 30 phút");
+    expect(result.current.notice).toContain("còn lại 45 phút");
+    expect(result.current.notice).toContain("chưa thể tải lại");
+  });
+
+  it("completes a session without a voucher without implying a discount", async () => {
+    const { api, data, slot } = fixture();
+    data.activeSession = {
+      session_id: "SESSION-COMPLETE-002",
+      vehicle_id: "VEHICLE-001",
+      slot_id: slot.id,
+      destination_node_id: slot.id,
+    };
+    api.completeSession.mockResolvedValue({
+      id: "SESSION-COMPLETE-002",
+      user_id: "USER-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: slot.id,
+      status: "COMPLETED",
+      parked_at: "2026-09-01T08:00:00Z",
+      completed_at: "2026-09-01T08:20:00Z",
+      time_benefit: { total_minutes: 20, free_minutes: 0, billable_minutes: 20, voucher_id: null },
+    });
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    await act(async () => { await result.current.completeSession(); });
+
+    expect(result.current.notice).toBe("Phiên đỗ xe đã kết thúc.");
+    expect(result.current.notice).not.toContain("miễn phí");
+  });
+
   it("ignores an unknown action type safely without calling an API", async () => {
     sessionStorage.setItem(MVP_AGENT_THREAD_STORAGE_KEY, "thread-unknown-action");
     const { api, data } = fixture();

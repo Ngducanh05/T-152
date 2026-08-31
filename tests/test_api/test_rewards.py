@@ -19,6 +19,7 @@ from src.core.config import Settings, get_settings
 from src.core.database import get_db_session
 from src.core.db_models import (
     Base,
+    ParkingSession,
     ParkingUser,
     ParkingVoucher,
     RewardCatalogItem,
@@ -30,6 +31,7 @@ from src.core.reward_redemption import RewardRedemptionService
 from src.core.seed import seed_if_missing
 from src.models.auth import AppRole, CurrentUser
 from src.models.schemas import (
+    ParkingSessionStatus,
     RewardSourceType,
     RewardTransactionStatus,
     RewardTransactionType,
@@ -92,6 +94,8 @@ async def _catalog_and_credit(
     api: RewardsApi,
     *,
     cost: int = 200,
+    free_minutes: int = 37,
+    validity_days: int = 19,
     finalized_points: int = 200,
     pending_points: int = 0,
     credited_at: datetime | None = None,
@@ -100,7 +104,7 @@ async def _catalog_and_credit(
     async with api.session_factory() as session, session.begin():
         item = RewardCatalogItem(
             id=f"CATALOG-{uuid4().hex}", code=f"CODE-{uuid4().hex[:10]}", name="Database-defined reward",
-            points_cost=cost, free_minutes=37, validity_days=19, is_active=True,
+            points_cost=cost, free_minutes=free_minutes, validity_days=validity_days, is_active=True,
         )
         session.add_all((
             item,
@@ -198,3 +202,68 @@ async def test_insufficient_redemption_conflict_leaves_no_mutations(rewards_api:
         assert await session.scalar(select(func.count()).select_from(RewardRedemption)) == 0
         assert await session.scalar(select(func.count()).select_from(ParkingVoucher)) == 0
         assert await session.scalar(select(func.count()).select_from(RewardTransaction).where(RewardTransaction.points_delta < 0)) == 0
+
+
+@pytest.mark.asyncio
+async def test_disabled_redemption_returns_503_without_any_mutation(
+    rewards_api: RewardsApi, monkeypatch: pytest.MonkeyPatch
+):
+    item = await _catalog_and_credit(rewards_api, cost=123, finalized_points=123)
+    monkeypatch.setattr(
+        "src.core.reward_redemption.get_settings",
+        lambda: Settings(_env_file=None, rewards_redemption_enabled=False),
+    )
+    await _authenticate(rewards_api)
+
+    response = await rewards_api.client.post(
+        "/api/v1/rewards/redemptions",
+        json={"user_id": "USER-001", "catalog_item_id": item.id},
+    )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "REDEMPTION_DISABLED"
+    async with rewards_api.session_factory() as session:
+        redemptions = await session.scalar(select(func.count()).select_from(RewardRedemption))
+        vouchers = await session.scalar(select(func.count()).select_from(ParkingVoucher))
+        debits = await session.scalar(
+            select(func.count()).select_from(RewardTransaction).where(RewardTransaction.points_delta < 0)
+        )
+    assert (redemptions, vouchers, debits) == (0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_owned_voucher_apply_is_retry_safe_and_does_not_change_reward_ledger(rewards_api: RewardsApi):
+    now = datetime.now(UTC)
+    item = await _catalog_and_credit(
+        rewards_api, cost=123, free_minutes=47, validity_days=9, finalized_points=123, credited_at=now
+    )
+    async with rewards_api.session_factory() as session, session.begin():
+        _, voucher, _ = await RewardRedemptionService(
+            session,
+            settings=Settings(_env_file=None, rewards_redemption_enabled=True),
+            clock=lambda: now,
+        ).redeem(user_id="USER-001", catalog_item_id=item.id)
+        session.add(
+            ParkingSession(
+                id="SESSION-API-VOUCHER",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F1-A01",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=now,
+                completed_at=None,
+            )
+        )
+    await _authenticate(rewards_api)
+    payload = {"user_id": "USER-001", "session_id": "SESSION-API-VOUCHER"}
+    async with rewards_api.session_factory() as session:
+        ledger_before = await session.scalar(select(func.count()).select_from(RewardTransaction))
+
+    first = await rewards_api.client.post(f"/api/v1/rewards/vouchers/{voucher.id}/apply", json=payload)
+    replay = await rewards_api.client.post(f"/api/v1/rewards/vouchers/{voucher.id}/apply", json=payload)
+    assert first.status_code == replay.status_code == 200
+    assert first.json()["data"]["status"] == replay.json()["data"]["status"] == "APPLIED"
+    assert first.json()["data"]["applied_session_id"] == "SESSION-API-VOUCHER"
+    assert first.json()["data"]["free_minutes_snapshot"] == 47
+    async with rewards_api.session_factory() as session:
+        ledger_after = await session.scalar(select(func.count()).select_from(RewardTransaction))
+    assert ledger_after == ledger_before

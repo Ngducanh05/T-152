@@ -29,6 +29,7 @@ import type {
   ParkingPreference,
   RecommendationCandidate,
   RouteResult,
+  ParkingSessionCompletion,
   SlotObservation,
 } from "@/lib/types";
 
@@ -141,6 +142,17 @@ function isDefinitiveMutationRejection(error: unknown) {
     error.status >= 400 &&
     error.status < 500
   );
+}
+
+function formatDisplayMinutes(value: number): string {
+  return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 }).format(value);
+}
+
+function completionNotice(completion: ParkingSessionCompletion, refreshFailed = false): string {
+  const benefit = completion.time_benefit;
+  const refreshNote = refreshFailed ? " Dữ liệu mới nhất chưa thể tải lại." : "";
+  if (!benefit.voucher_id) return `Phiên đỗ xe đã kết thúc.${refreshNote}`;
+  return `Phiên đỗ xe đã kết thúc. Tổng thời gian ${formatDisplayMinutes(benefit.total_minutes)} phút; áp dụng miễn phí ${formatDisplayMinutes(benefit.free_minutes)} phút; thời gian còn lại ${formatDisplayMinutes(benefit.billable_minutes)} phút.${refreshNote}`;
 }
 
 const AUTHORITATIVE_REFRESH_TOOLS = new Set([
@@ -763,16 +775,23 @@ export function useParkingWorkflow(
     setNotice(null);
     clearRecommendations();
     try {
-      await api.completeSession(
+      const completion = await api.completeSession(
         session.session_id,
         request,
         undefined,
         idempotencyKey,
       );
       clearIdempotencyKey(completeSessionIdempotencyRef);
-      await data.refresh();
       setSelectedSlotId(null);
       setActiveRoute(null);
+      setNotice(completionNotice(completion));
+      try {
+        await data.refresh();
+      } catch {
+        // The completion response is the mutation success boundary.  A later
+        // snapshot failure must never present this completed session as failed.
+        setNotice(completionNotice(completion, true));
+      }
       return true;
     } catch (error) {
       if (isDefinitiveMutationRejection(error)) {

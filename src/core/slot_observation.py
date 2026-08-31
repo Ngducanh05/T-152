@@ -85,6 +85,10 @@ class SlotObservationService:
         evidence_content_type: str | None = None,
         evidence_size_bytes: int | None = None,
     ) -> SlotObservation:
+        # Mutating flow lock order: ParkingUser -> ParkingSession -> ParkingSlot
+        # -> SlotObservation/RewardTransaction.  This matches the user-first
+        # order used by session and voucher mutations.  The preflight variant
+        # intentionally remains read-only so Storage upload never holds locks.
         active_session, slot = await self._validate_create_request(
             user_id=user_id,
             slot_id=slot_id,
@@ -156,29 +160,33 @@ class SlotObservationService:
                 ErrorCode.INVALID_OBSERVATION_TRANSITION,
                 "Observations only support AVAILABLE or OCCUPIED.",
             )
-        if await self.session.get(ParkingUser, user_id) is None:
+        user_query = select(ParkingUser).where(ParkingUser.id == user_id)
+        if lock:
+            user_query = user_query.with_for_update()
+        if await self.session.scalar(user_query) is None:
             raise SlotObservationError(
                 ErrorCode.USER_NOT_FOUND,
                 f"Parking user {user_id} was not found.",
             )
-        active_session_snapshot = await self.session.scalar(
-            select(ParkingSession).where(
-                ParkingSession.user_id == user_id,
-                ParkingSession.status == ParkingSessionStatus.ACTIVE,
-            )
+        active_session_query = select(ParkingSession).where(
+            ParkingSession.user_id == user_id,
+            ParkingSession.status == ParkingSessionStatus.ACTIVE,
         )
-        if active_session_snapshot is None:
+        if lock:
+            active_session_query = active_session_query.with_for_update()
+        active_session = await self.session.scalar(active_session_query)
+        if active_session is None:
             raise SlotObservationError(
                 ErrorCode.ACTIVE_SESSION_NOT_FOUND,
                 f"No active parking session exists for user {user_id}.",
             )
-        if slot_id == active_session_snapshot.slot_id or slot_id not in adjacent_slot_ids(
-            active_session_snapshot.slot_id
+        if slot_id == active_session.slot_id or slot_id not in adjacent_slot_ids(
+            active_session.slot_id
         ):
             raise SlotObservationError(
                 ErrorCode.INVALID_OBSERVATION_TRANSITION,
-                f"Parking slot {slot_id} is not adjacent to {active_session_snapshot.slot_id}.",
-                details={"slot_id": slot_id, "parked_slot_id": active_session_snapshot.slot_id},
+                f"Parking slot {slot_id} is not adjacent to {active_session.slot_id}.",
+                details={"slot_id": slot_id, "parked_slot_id": active_session.slot_id},
             )
         slot_query = select(ParkingSlot).where(ParkingSlot.id == slot_id)
         if lock:
@@ -186,15 +194,6 @@ class SlotObservationService:
         slot = await self.session.scalar(slot_query)
         if slot is None:
             raise SlotObservationError(ErrorCode.SLOT_NOT_FOUND, f"Parking slot {slot_id} was not found.")
-        active_session_query = select(ParkingSession).where(ParkingSession.id == active_session_snapshot.id)
-        if lock:
-            active_session_query = active_session_query.with_for_update()
-        active_session = await self.session.scalar(active_session_query)
-        if active_session is None or active_session.status is not ParkingSessionStatus.ACTIVE:
-            raise SlotObservationError(
-                ErrorCode.ACTIVE_SESSION_NOT_FOUND,
-                f"No active parking session exists for user {user_id}.",
-            )
         if slot.status is SlotStatus.RESERVED:
             raise SlotObservationError(
                 ErrorCode.INVALID_OBSERVATION_TRANSITION,
