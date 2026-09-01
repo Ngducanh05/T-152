@@ -33,7 +33,7 @@ from src.models.schemas import (
     WrongParkingReportVerificationOutcome,
     ZoneId,
 )
-from src.services.report_evidence import ReportEvidenceStorage
+from src.services.report_evidence import ObservationEvidenceStorage, ReportEvidenceStorage
 
 router = APIRouter(
     prefix="/admin",
@@ -319,7 +319,7 @@ async def get_slot_observation_evidence_url(
             },
         )
     expires_in = 300
-    signed_url = await ReportEvidenceStorage(settings).create_signed_url(
+    signed_url = await ObservationEvidenceStorage(settings).create_signed_url(
         observation.evidence_storage_path, expires_in=expires_in
     )
     return SuccessResponse(

@@ -407,7 +407,6 @@ function ParkSmartUserApp({ identity }: { identity: ParkingIdentity }) {
           userId={identity.userId}
           open={pointsOpen}
           summary={data.rewardSummary}
-          contributions={data.contributions}
           catalog={data.rewardCatalog}
           vouchers={data.vouchers}
           rewardLedger={data.rewardLedger}

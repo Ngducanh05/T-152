@@ -224,87 +224,89 @@ async def observe_adjacent_parking_slot(
 ) -> SuccessResponse[SlotObservation]:
     upload: UploadFile | None = None
     try:
-        if http_request.headers.get("content-type", "").startswith("multipart/form-data"):
-            form = await http_request.form(max_files=1, max_fields=4, max_part_size=2048)
-            candidate = form.get("evidence")
-            if candidate is not None and not isinstance(candidate, UploadFile):
-                raise ValueError("evidence must be an uploaded file")
-            upload = candidate
-            request = AdjacentSlotObservationRequest(
-                user_id=str(form.get("user_id") or ""),
-                observed_status=form.get("observed_status"),
-                expected_slot_version=form.get("expected_slot_version"),
-            )
-        else:
-            request = AdjacentSlotObservationRequest.model_validate(await http_request.json())
-    except (JSONDecodeError, ValidationError, ValueError) as error:
-        if upload is not None:
-            await upload.close()
-        raise HTTPException(status_code=422, detail={"code": "VALIDATION_ERROR", "message": "Request validation failed."}) from error
-
-    user_id = resolve_parking_user_id(request.user_id, current_user)
-    stored = None
-    storage = ObservationEvidenceStorage(get_settings())
-    try:
-        evidence_bytes = None
-        normalized_content_type = None
-        if upload is not None:
-            evidence_bytes = await _read_observation_evidence(upload, get_settings().report_evidence_max_bytes)
-            normalized_content_type = validate_observation_image(
-                content_type=upload.content_type,
-                data=evidence_bytes,
-                max_bytes=get_settings().report_evidence_max_bytes,
-            )
-        observation_id = f"OBSERVATION-{uuid4()}"
         try:
-            async with session.begin():
-                if evidence_bytes is not None and normalized_content_type is not None:
-                    stored = await storage.upload(
-                        observation_id=observation_id,
-                        data=evidence_bytes,
-                        content_type=normalized_content_type,
-                        allow_demo_fallback=current_user is None,
-                    )
-                observation = await SlotObservationService(session).create_observation(
-                    user_id=user_id,
-                    slot_id=slot_id,
-                    observed_status=request.observed_status,
-                    expected_slot_version=request.expected_slot_version,
-                    observation_id=observation_id,
-                    evidence_storage_path=stored.storage_path if stored else None,
-                    evidence_content_type=stored.content_type if stored else None,
-                    evidence_size_bytes=stored.size_bytes if stored else None,
+            if http_request.headers.get("content-type", "").startswith("multipart/form-data"):
+                form = await http_request.form(max_files=1, max_fields=4, max_part_size=2048)
+                candidate = form.get("evidence")
+                if candidate is not None and not isinstance(candidate, UploadFile):
+                    raise ValueError("evidence must be an uploaded file")
+                upload = candidate
+                request = AdjacentSlotObservationRequest(
+                    user_id=str(form.get("user_id") or ""),
+                    observed_status=form.get("observed_status"),
+                    expected_slot_version=form.get("expected_slot_version"),
                 )
-        except Exception:
-            if stored is not None:
-                try:
-                    deleted = await storage.delete(stored.storage_path)
-                    if not deleted:
-                        logger.warning(
-                            "slot_observation_evidence_cleanup_failed observation_id=%s",
+            else:
+                request = AdjacentSlotObservationRequest.model_validate(await http_request.json())
+        except (JSONDecodeError, ValidationError, ValueError) as error:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "VALIDATION_ERROR", "message": "Request validation failed."},
+            ) from error
+
+        user_id = resolve_parking_user_id(request.user_id, current_user)
+        stored = None
+        storage = ObservationEvidenceStorage(get_settings())
+        try:
+            evidence_bytes = None
+            normalized_content_type = None
+            if upload is not None:
+                evidence_bytes = await _read_observation_evidence(upload, get_settings().report_evidence_max_bytes)
+                normalized_content_type = validate_observation_image(
+                    content_type=upload.content_type,
+                    data=evidence_bytes,
+                    max_bytes=get_settings().report_evidence_max_bytes,
+                )
+            observation_id = f"OBSERVATION-{uuid4()}"
+            try:
+                async with session.begin():
+                    if evidence_bytes is not None and normalized_content_type is not None:
+                        stored = await storage.upload(
+                            observation_id=observation_id,
+                            data=evidence_bytes,
+                            content_type=normalized_content_type,
+                            allow_demo_fallback=current_user is None,
+                        )
+                    observation = await SlotObservationService(session).create_observation(
+                        user_id=user_id,
+                        slot_id=slot_id,
+                        observed_status=request.observed_status,
+                        expected_slot_version=request.expected_slot_version,
+                        observation_id=observation_id,
+                        evidence_storage_path=stored.storage_path if stored else None,
+                        evidence_content_type=stored.content_type if stored else None,
+                        evidence_size_bytes=stored.size_bytes if stored else None,
+                    )
+            except Exception:
+                if stored is not None:
+                    try:
+                        deleted = await storage.delete(stored.storage_path)
+                        if not deleted:
+                            logger.warning(
+                                "slot_observation_evidence_cleanup_failed observation_id=%s",
+                                observation_id,
+                            )
+                    except Exception:
+                        logger.exception(
+                            "slot_observation_evidence_cleanup_raised observation_id=%s",
                             observation_id,
                         )
-                except Exception:
-                    logger.exception(
-                        "slot_observation_evidence_cleanup_raised observation_id=%s",
-                        observation_id,
-                    )
-            raise
-    except SlotObservationError as error:
-        raise _observation_error(error) from error
+                raise
+        except SlotObservationError as error:
+            raise _observation_error(error) from error
+        logger.info(
+            "adjacent_slot_observation slot_id=%s actor_id=%s observed_status=%s outcome=success",
+            slot_id,
+            user_id,
+            request.observed_status.value,
+        )
+        return SuccessResponse(
+            data=SlotObservation.model_validate(observation, from_attributes=True),
+            message="Observation submitted for verification.",
+        )
     finally:
         if upload is not None:
             await upload.close()
-    logger.info(
-        "adjacent_slot_observation slot_id=%s actor_id=%s observed_status=%s outcome=success",
-        slot_id,
-        user_id,
-        request.observed_status.value,
-    )
-    return SuccessResponse(
-        data=SlotObservation.model_validate(observation, from_attributes=True),
-        message="Observation submitted for verification.",
-    )
 
 
 @router.get("/map", response_model=SuccessResponse[ParkingMapResponse])

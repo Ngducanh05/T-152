@@ -26,6 +26,26 @@ def _storage_error(code: str, message: str, status_code: int = 422) -> HTTPExcep
     return HTTPException(status_code=status_code, detail={"code": code, "message": message})
 
 
+def _observation_storage_error(error: HTTPException) -> HTTPException:
+    """Translate shared storage failures to the observation public namespace."""
+    detail = error.detail if isinstance(error.detail, dict) else {}
+    source_code = detail.get("code")
+    if source_code in {"REPORT_EVIDENCE_TOO_LARGE", "OBSERVATION_EVIDENCE_TOO_LARGE"}:
+        target_code = "OBSERVATION_EVIDENCE_TOO_LARGE"
+    elif source_code in {"OBSERVATION_EVIDENCE_INVALID", "OBSERVATION_EVIDENCE_NOT_FOUND"}:
+        target_code = source_code
+    else:
+        target_code = "OBSERVATION_EVIDENCE_INVALID"
+
+    source_message = detail.get("message")
+    message = (
+        source_message.replace("Report evidence", "Observation evidence")
+        if isinstance(source_message, str)
+        else "Observation evidence is unavailable."
+    )
+    return _storage_error(target_code, message, error.status_code)
+
+
 def validate_report_image(
     *,
     content_type: str | None,
@@ -61,12 +81,7 @@ def validate_observation_image(
     try:
         return validate_report_image(content_type=content_type, data=data, max_bytes=max_bytes)
     except HTTPException as error:
-        code = (
-            "OBSERVATION_EVIDENCE_TOO_LARGE"
-            if error.detail.get("code") == "REPORT_EVIDENCE_TOO_LARGE"
-            else "OBSERVATION_EVIDENCE_INVALID"
-        )
-        raise _storage_error(code, error.detail["message"], error.status_code) from error
+        raise _observation_storage_error(error) from error
 
 
 def _signature_matches(content_type: str, data: bytes) -> bool:
@@ -319,11 +334,20 @@ class ObservationEvidenceStorage(ReportEvidenceStorage):
         content_type: str,
         allow_demo_fallback: bool = False,
     ) -> StoredReportEvidence:
-        return await super().upload(
-            report_id=observation_id,
-            data=data,
-            content_type=content_type,
-            allow_demo_fallback=allow_demo_fallback,
-            path_prefix="slot-observations",
-            validator=validate_observation_image,
-        )
+        try:
+            return await super().upload(
+                report_id=observation_id,
+                data=data,
+                content_type=content_type,
+                allow_demo_fallback=allow_demo_fallback,
+                path_prefix="slot-observations",
+                validator=validate_observation_image,
+            )
+        except HTTPException as error:
+            raise _observation_storage_error(error) from error
+
+    async def create_signed_url(self, storage_path: str, *, expires_in: int = 300) -> str:
+        try:
+            return await super().create_signed_url(storage_path, expires_in=expires_in)
+        except HTTPException as error:
+            raise _observation_storage_error(error) from error

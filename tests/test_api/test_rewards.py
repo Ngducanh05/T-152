@@ -205,6 +205,63 @@ async def test_redemption_is_atomic_owned_and_idempotent(rewards_api: RewardsApi
 
 
 @pytest.mark.asyncio
+async def test_completed_redemption_replays_after_feature_flag_is_disabled(
+    rewards_api: RewardsApi,
+):
+    item = await _catalog_and_credit(rewards_api, cost=100, finalized_points=200)
+    await _authenticate(rewards_api)
+    settings = get_settings()
+    original_enabled = settings.rewards_redemption_enabled
+    payload = {"user_id": "USER-001", "catalog_item_id": item.id}
+    headers = {"Idempotency-Key": "replay-after-disable"}
+
+    try:
+        settings.rewards_redemption_enabled = True
+        first = await rewards_api.client.post(
+            "/api/v1/rewards/redemptions",
+            json=payload,
+            headers=headers,
+        )
+        assert first.status_code == 201
+        assert first.json()["data"]["voucher"]["status"] == "ISSUED"
+        assert first.json()["data"]["available_points"] == 100
+
+        settings.rewards_redemption_enabled = False
+        replay = await rewards_api.client.post(
+            "/api/v1/rewards/redemptions",
+            json=payload,
+            headers=headers,
+        )
+        new_request = await rewards_api.client.post(
+            "/api/v1/rewards/redemptions",
+            json=payload,
+            headers={"Idempotency-Key": "new-after-disable"},
+        )
+    finally:
+        settings.rewards_redemption_enabled = original_enabled
+
+    assert replay.status_code == 201
+    assert replay.json()["data"] == first.json()["data"]
+    assert new_request.status_code == 503
+    assert new_request.json()["error"]["code"] == "REDEMPTION_DISABLED"
+    async with rewards_api.session_factory() as session:
+        assert await session.scalar(select(func.count()).select_from(RewardRedemption)) == 1
+        assert await session.scalar(select(func.count()).select_from(ParkingVoucher)) == 1
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(RewardTransaction)
+                .where(
+                    RewardTransaction.transaction_type
+                    == RewardTransactionType.VOUCHER_REDEMPTION,
+                    RewardTransaction.points_delta < 0,
+                )
+            )
+            == 1
+        )
+
+
+@pytest.mark.asyncio
 async def test_insufficient_redemption_conflict_leaves_no_mutations(rewards_api: RewardsApi):
     item = await _catalog_and_credit(rewards_api, cost=201, finalized_points=100, pending_points=100)
     async with rewards_api.session_factory() as session:

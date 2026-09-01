@@ -121,6 +121,8 @@ export interface RewardConfiguration {
 
 export type RewardTransactionType =
   | "CONTRIBUTION_REWARD"
+  | "REWARD_REVERSAL"
+  | "ADMIN_ADJUSTMENT"
   | "VOUCHER_REDEMPTION"
   | "VOUCHER_REFUND";
 

@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -255,3 +256,48 @@ async def test_rejects_missing_resources_reapply_and_second_voucher_for_session(
                 session_id=active.id,
             )
         assert second_voucher.value.code is ErrorCode.INVALID_TRANSITION
+
+
+@pytest.mark.asyncio
+async def test_concurrent_vouchers_for_one_session_have_one_domain_winner(
+    voucher_engine: AsyncEngine,
+):
+    factory = async_sessionmaker(voucher_engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        parking_session = await _active_session(session, session_id="SESSION-CONCURRENT")
+        first = await _issue_voucher(session)
+        second = await _issue_voucher(session)
+        session_id = parking_session.id
+        voucher_ids = (first.id, second.id)
+
+    async def worker(voucher_id: str):
+        async with factory() as session, session.begin():
+            return await VoucherService(session).apply_to_session(
+                user_id="USER-001",
+                voucher_id=voucher_id,
+                session_id=session_id,
+            )
+
+    results = await asyncio.gather(
+        worker(voucher_ids[0]),
+        worker(voucher_ids[1]),
+        return_exceptions=True,
+    )
+
+    successes = [result for result in results if isinstance(result, ParkingVoucher)]
+    failures = [result for result in results if isinstance(result, RewardError)]
+    assert len(successes) == 1
+    assert successes[0].status is ParkingVoucherStatus.APPLIED
+    assert len(failures) == 1
+    assert failures[0].code is ErrorCode.INVALID_TRANSITION
+
+    async with factory() as session:
+        applied = list(
+            await session.scalars(
+                select(ParkingVoucher).where(
+                    ParkingVoucher.status == ParkingVoucherStatus.APPLIED,
+                    ParkingVoucher.applied_session_id == session_id,
+                )
+            )
+        )
+    assert len(applied) == 1

@@ -85,11 +85,13 @@ async def test_configuration_and_catalog_are_authoritative():
         assert (await _invoke(get_reward_configuration, _runtime()))["ok"] is True
         result = await _invoke(get_reward_catalog, _runtime())
     assert result["data"][0] == {
+        "id": "CAT-1",
         "code": "ODD",
         "name": "Database reward",
         "points_cost": 123,
         "free_minutes": 47,
         "validity_days": 9,
+        "version": 0,
     }
 
 

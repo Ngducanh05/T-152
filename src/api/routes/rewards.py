@@ -93,11 +93,6 @@ async def redeem_reward_voucher(
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", min_length=1, max_length=128)] = None,
 ) -> SuccessResponse[RewardRedemptionResult]:
     user_id = resolve_parking_user_id(request.user_id, current_user)
-    if not get_settings().rewards_redemption_enabled:
-        raise domain_http_error(
-            DomainError(ErrorCode.REDEMPTION_DISABLED, "Reward redemption is disabled."),
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
     try:
         async with session.begin():
             idempotency = IdempotencyService(session)
@@ -111,6 +106,11 @@ async def redeem_reward_voucher(
             if replay is not None:
                 result = RewardRedemptionResult.model_validate(replay)
             else:
+                if not get_settings().rewards_redemption_enabled:
+                    raise DomainError(
+                        ErrorCode.REDEMPTION_DISABLED,
+                        "Reward redemption is disabled.",
+                    )
                 redemption, voucher, balance = await RewardRedemptionService(session).redeem(
                     user_id=user_id, catalog_item_id=request.catalog_item_id
                 )

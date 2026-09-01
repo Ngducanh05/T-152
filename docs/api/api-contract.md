@@ -46,11 +46,11 @@ ADR-001 remains authoritative for the meaning and lifecycle of RESERVED.
 | SlotObservationStatus | PENDING, VERIFIED, REJECTED, EXPIRED |
 | WrongParkingReportVerificationOutcome | PENDING, CONFIRMED, REJECTED, DUPLICATE, UNVERIFIABLE |
 | RewardSourceType | ADJACENT_SLOT_OBSERVATION, WRONG_PARKING_REPORT, VOUCHER_REDEMPTION |
-| RewardTransactionType | CONTRIBUTION_REWARD, VOUCHER_REDEMPTION, VOUCHER_REFUND |
+| RewardTransactionType | CONTRIBUTION_REWARD, REWARD_REVERSAL, ADMIN_ADJUSTMENT, VOUCHER_REDEMPTION, VOUCHER_REFUND |
 | RewardTransactionStatus | PENDING, EARNED, CANCELLED, POSTED |
 | RewardRedemptionStatus | COMPLETED, REFUNDED |
 | ParkingVoucherStatus | ISSUED, APPLIED, EXPIRED, CANCELLED |
-| ErrorCode | Canonical values live in `src/models/schemas.py`; public feature availability codes include AGENT_DISABLED and SPEECH_DISABLED; contribution/report additions include OBSERVATION_NOT_FOUND, OBSERVATION_ALREADY_EXISTS, OBSERVATION_EXPIRED, INVALID_OBSERVATION_TRANSITION, OBSERVATION_VERSION_CONFLICT, REWARD_ALREADY_SETTLED, REPORT_REWARD_DUPLICATE and CONTRIBUTION_DAILY_LIMIT_REACHED |
+| ErrorCode | Canonical values live in `src/models/schemas.py`; public feature availability codes include AGENT_DISABLED, SPEECH_DISABLED and REDEMPTION_DISABLED; reward/evidence additions include VOUCHER_NOT_FOUND, OBSERVATION_EVIDENCE_INVALID, OBSERVATION_EVIDENCE_TOO_LARGE and OBSERVATION_EVIDENCE_NOT_FOUND; contribution/report additions include OBSERVATION_NOT_FOUND, OBSERVATION_ALREADY_EXISTS, OBSERVATION_EXPIRED, INVALID_OBSERVATION_TRANSITION, OBSERVATION_VERSION_CONFLICT, REWARD_ALREADY_SETTLED, REPORT_REWARD_DUPLICATE and CONTRIBUTION_DAILY_LIMIT_REACHED |
 
 ## Data schemas
 
@@ -70,7 +70,7 @@ The canonical Pydantic definitions live in src/models/schemas.py.
 | RecommendationCandidate | slot_id, score, distance_m, reasons |
 | RecommendationResult | recommendations, parking_state_version |
 | ParkingEvent | id, event_type, slot_id, actor_type, actor_id, old_status, new_status, created_at, metadata |
-| SlotObservation | id, observer_user_id, observer_session_id, slot_id, observed_status, verification_status, reward_points, observed_slot_version, created_at, expires_at, verified_at, verified_by, rejection_reason, version, reward_status |
+| SlotObservation | id, observer_user_id, observer_session_id, slot_id, observed_status, verification_status, reward_points, observed_slot_version, created_at, expires_at, verified_at, verified_by, rejection_reason, version, reward_status, evidence_storage_path, evidence_content_type, evidence_size_bytes |
 | WrongParkingReport | id, reporter_user_id, slot_id, reason_code, status, observed_plate_number, description, evidence_storage_path, evidence_content_type, evidence_size_bytes, created_at, updated_at, resolved_at, resolved_by, resolution_note, verification_outcome, reward_points, reward_status, duplicate_candidate_of_id, version |
 | RewardTransaction | id, user_id, source_type, source_reference, transaction_type, status, points_delta, created_at, settled_at, metadata |
 | RewardSummary | available_points, pending_points, verified_contributions, daily_pending_points, daily_earned_points, daily_limit_points |
@@ -80,7 +80,8 @@ The canonical Pydantic definitions live in src/models/schemas.py.
 
 Nullable fields include User.current_node_id, ParkingSlot.occupied_by_vehicle_id,
 ParkingSession.completed_at, RecommendationRequest.floor_id, RecommendationRequest.zone_id,
-the optional report evidence/resolution/reward fields, and the event fields that may not
+the optional report evidence/resolution/reward fields, optional slot-observation evidence
+metadata (`evidence_storage_path`, `evidence_content_type`, `evidence_size_bytes`), and the event fields that may not
 apply to a particular event:
 slot_id, actor_id, old_status, and new_status. ParkingEvent.metadata defaults to an empty
 object. MapEdge.bidirectional and MapEdge.enabled default to true.

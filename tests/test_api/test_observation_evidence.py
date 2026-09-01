@@ -109,3 +109,43 @@ def test_observation_openapi_documents_json_and_optional_multipart_contracts():
         "type": "string",
         "format": "binary",
     }
+
+
+def _unconfigured_observation_settings():
+    return get_settings().model_copy(
+        update={
+            "demo_mode": False,
+            "supabase_url": None,
+            "supabase_service_role_key": None,
+        }
+    )
+
+
+def _assert_observation_storage_error(error: HTTPException) -> None:
+    assert error.status_code == 503
+    assert error.detail["code"] == "OBSERVATION_EVIDENCE_INVALID"
+    assert "REPORT_EVIDENCE" not in error.detail["code"]
+    assert "Report evidence" not in error.detail["message"]
+
+
+@pytest.mark.asyncio
+async def test_observation_upload_configuration_error_uses_observation_namespace():
+    with pytest.raises(HTTPException) as caught:
+        await ObservationEvidenceStorage(_unconfigured_observation_settings()).upload(
+            observation_id="OBSERVATION-ERROR",
+            data=JPEG,
+            content_type="image/jpeg",
+            allow_demo_fallback=False,
+        )
+
+    _assert_observation_storage_error(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_observation_signed_url_configuration_error_uses_observation_namespace():
+    with pytest.raises(HTTPException) as caught:
+        await ObservationEvidenceStorage(
+            _unconfigured_observation_settings()
+        ).create_signed_url("slot-observations/OBSERVATION-ERROR/evidence.jpg")
+
+    _assert_observation_storage_error(caught.value)

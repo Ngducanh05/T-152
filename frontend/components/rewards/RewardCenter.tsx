@@ -10,7 +10,6 @@ import {
 } from "@/lib/idempotency";
 import type {
   ActiveParkingSession,
-  ContributionRecord,
   ParkingVoucher,
   RewardCatalogItem,
   RewardRedemptionResult,
@@ -24,7 +23,6 @@ interface RewardCenterProps {
   userId: string;
   open: boolean;
   summary: RewardSummary;
-  contributions: ContributionRecord[];
   catalog: RewardCatalogItem[];
   vouchers: ParkingVoucher[];
   rewardLedger: RewardTransaction[];
@@ -74,7 +72,6 @@ export function RewardCenter({
   userId,
   open,
   summary,
-  contributions,
   catalog,
   vouchers,
   rewardLedger,
@@ -255,12 +252,17 @@ export function RewardCenter({
 
   if (!open) return null;
 
+  const displayedVouchers = appliedVoucher
+    ? vouchers.map((voucher) =>
+        voucher.id === appliedVoucher.id ? appliedVoucher : voucher,
+      )
+    : vouchers;
   const currentSessionHasVoucher =
-    vouchers.some(
+    displayedVouchers.some(
       (voucher) =>
         voucher.status === "APPLIED" &&
         voucher.applied_session_id === activeSession?.session_id,
-    ) || appliedVoucher?.applied_session_id === activeSession?.session_id;
+    );
 
   return (
     <div
@@ -305,7 +307,7 @@ export function RewardCenter({
 
         {tab === "overview" && (
           <div role="tabpanel">
-            <RewardSummaryCard summary={summary} contributions={contributions} />
+            <RewardSummaryCard summary={summary} />
             <p>
               ParkSmart Points ghi nhận các đóng góp đã được xác minh. Điểm đang
               chờ chưa nằm trong số dư khả dụng.
@@ -380,10 +382,10 @@ export function RewardCenter({
         {tab === "wallet" && (
           <section className="voucher-wallet" role="tabpanel">
             <h2>Voucher của tôi</h2>
-            {vouchers.length === 0 ? (
+            {displayedVouchers.length === 0 ? (
               <p>Chưa có voucher nào.</p>
             ) : (
-              vouchers.map((voucher) => (
+              displayedVouchers.map((voucher) => (
                 <article key={voucher.id}>
                   <b>{voucher.free_minutes_snapshot} phút miễn phí</b>
                   <p>{voucherStatus(voucher.status)}</p>

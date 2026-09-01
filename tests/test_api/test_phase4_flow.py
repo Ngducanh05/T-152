@@ -7,9 +7,8 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
-from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -17,6 +16,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.schema import CreateSchema, DropSchema
+from starlette.datastructures import UploadFile
 
 import src.core.parking_session as parking_session_module
 from src.api.dependencies import require_parking_user_or_demo
@@ -31,6 +31,7 @@ from src.core.db_models import (
     ParkingSession,
     ParkingSlot,
     ParkingUser,
+    RewardTransaction,
     SlotObservation,
     Vehicle,
 )
@@ -270,8 +271,8 @@ async def test_completion_replays_new_time_benefit_response_without_recomputatio
         "vehicle_id": "VEHICLE-001",
         "slot_id": "F1-D01",
         "status": "COMPLETED",
-        "parked_at": parked_at.isoformat(),
-        "completed_at": completed_at.isoformat(),
+        "parked_at": parked_at.isoformat().replace("+00:00", "Z"),
+        "completed_at": completed_at.isoformat().replace("+00:00", "Z"),
         "time_benefit": {
             "voucher_id": None,
             "total_minutes": 75.0,
@@ -411,12 +412,14 @@ async def test_invalid_legacy_completion_replay_is_not_silently_accepted(
             )
         )
 
-    with pytest.raises(ValidationError):
-        await phase4_api.client.post(
-            "/api/v1/sessions/SESSION-EXPECTED/complete",
-            json={"user_id": "USER-001", "expected_version": 0},
-            headers={"Idempotency-Key": "invalid-legacy-replay"},
-        )
+    response = await phase4_api.client.post(
+        "/api/v1/sessions/SESSION-EXPECTED/complete",
+        json={"user_id": "USER-001", "expected_version": 0},
+        headers={"Idempotency-Key": "invalid-legacy-replay"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "INTERNAL_SERVER_ERROR"
 
 
 @pytest.mark.asyncio
@@ -485,6 +488,232 @@ async def test_adjacent_observation_requires_active_session(phase4_api: Phase4Ap
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "ACTIVE_SESSION_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_cross_user_multipart_observation_closes_upload_without_mutation(
+    phase4_api: Phase4Api,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async with phase4_api.session_factory() as session, session.begin():
+        session.add(ParkingUser(id="USER-002", display_name="Second User"))
+    async with phase4_api.session_factory() as session:
+        observations_before = await session.scalar(
+            select(func.count()).select_from(SlotObservation)
+        )
+        rewards_before = await session.scalar(
+            select(func.count()).select_from(RewardTransaction)
+        )
+
+    async def authenticated_user() -> CurrentUser:
+        return CurrentUser(
+            id=uuid4(),
+            email="user@example.com",
+            role=AppRole.USER,
+            parking_user_id="USER-001",
+        )
+
+    original_close = UploadFile.close
+    closed = asyncio.Event()
+
+    async def tracking_close(self):
+        closed.set()
+        await original_close(self)
+
+    monkeypatch.setattr(UploadFile, "close", tracking_close)
+    upload = AsyncMock()
+    phase4_api.application.dependency_overrides[require_parking_user_or_demo] = authenticated_user
+    try:
+        with patch(
+            "src.api.routes.parking.ObservationEvidenceStorage.upload",
+            upload,
+        ):
+            response = await phase4_api.client.post(
+                "/api/v1/parking/slots/F1-D02/observation",
+                data={
+                    "user_id": "USER-002",
+                    "observed_status": "OCCUPIED",
+                    "expected_slot_version": "0",
+                },
+                files={"evidence": ("space.jpg", b"\xff\xd8\xffimage", "image/jpeg")},
+            )
+    finally:
+        phase4_api.application.dependency_overrides.pop(require_parking_user_or_demo, None)
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "PARKING_OWNERSHIP_MISMATCH"
+    assert closed.is_set()
+    upload.assert_not_awaited()
+    async with phase4_api.session_factory() as session:
+        observations_after = await session.scalar(
+            select(func.count()).select_from(SlotObservation)
+        )
+        rewards_after = await session.scalar(
+            select(func.count()).select_from(RewardTransaction)
+        )
+    assert observations_after == observations_before
+    assert rewards_after == rewards_before
+
+
+@pytest.mark.asyncio
+async def test_observation_storage_failure_creates_no_observation_or_reward(
+    phase4_api: Phase4Api,
+):
+    timestamp = datetime.now(UTC)
+    async with phase4_api.session_factory() as session, session.begin():
+        own_slot = await session.get(ParkingSlot, "F1-D03")
+        assert own_slot is not None
+        own_slot.status = SlotStatus.OCCUPIED
+        own_slot.occupied_by_vehicle_id = "VEHICLE-001"
+        session.add(
+            ParkingSession(
+                id="SESSION-STORAGE-FAILURE",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F1-D03",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=timestamp,
+                completed_at=None,
+            )
+        )
+    async with phase4_api.session_factory() as session:
+        observations_before = await session.scalar(
+            select(func.count()).select_from(SlotObservation)
+        )
+        rewards_before = await session.scalar(
+            select(func.count())
+            .select_from(RewardTransaction)
+            .where(RewardTransaction.user_id == "USER-001")
+        )
+        target_before = await session.get(ParkingSlot, "F1-D02")
+        assert target_before is not None
+        target_state = (target_before.status, target_before.version)
+
+    storage_error = HTTPException(
+        status_code=503,
+        detail={
+            "code": "OBSERVATION_EVIDENCE_INVALID",
+            "message": "Observation evidence storage is unavailable.",
+        },
+    )
+    with patch(
+        "src.api.routes.parking.ObservationEvidenceStorage.upload",
+        AsyncMock(side_effect=storage_error),
+    ):
+        response = await phase4_api.client.post(
+            "/api/v1/parking/slots/F1-D02/observation",
+            data={
+                "user_id": "USER-001",
+                "observed_status": "OCCUPIED",
+                "expected_slot_version": "0",
+            },
+            files={"evidence": ("space.jpg", b"\xff\xd8\xffimage", "image/jpeg")},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "OBSERVATION_EVIDENCE_INVALID"
+    async with phase4_api.session_factory() as session:
+        observations_after = await session.scalar(
+            select(func.count()).select_from(SlotObservation)
+        )
+        rewards_after = await session.scalar(
+            select(func.count())
+            .select_from(RewardTransaction)
+            .where(RewardTransaction.user_id == "USER-001")
+        )
+        target_after = await session.get(ParkingSlot, "F1-D02")
+    assert observations_after == observations_before
+    assert rewards_after == rewards_before
+    assert target_after is not None
+    assert (target_after.status, target_after.version) == target_state
+
+
+@pytest.mark.asyncio
+async def test_observation_accepts_exact_max_file_size_with_multipart_overhead(
+    phase4_api: Phase4Api,
+):
+    timestamp = datetime.now(UTC)
+    async with phase4_api.session_factory() as session, session.begin():
+        own_slot = await session.get(ParkingSlot, "F2-D03")
+        assert own_slot is not None
+        own_slot.status = SlotStatus.OCCUPIED
+        own_slot.occupied_by_vehicle_id = "VEHICLE-001"
+        session.add(
+            ParkingSession(
+                id="SESSION-MAX-EVIDENCE",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F2-D03",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=timestamp,
+                completed_at=None,
+            )
+        )
+
+    max_bytes = get_settings().report_evidence_max_bytes
+    assert max_bytes == 5_000_000
+    jpeg = b"\xff\xd8\xff" + b"x" * (max_bytes - 3)
+    assert len(jpeg) == max_bytes
+    stored = StoredReportEvidence(
+        storage_path="slot-observations/OBSERVATION-MAX/evidence.jpg",
+        content_type="image/jpeg",
+        size_bytes=max_bytes,
+    )
+    with patch(
+        "src.api.routes.parking.ObservationEvidenceStorage.upload",
+        AsyncMock(return_value=stored),
+    ):
+        response = await phase4_api.client.post(
+            "/api/v1/parking/slots/F2-D02/observation",
+            data={
+                "user_id": "USER-001",
+                "observed_status": "OCCUPIED",
+                "expected_slot_version": "0",
+            },
+            files={"evidence": ("max.jpg", jpeg, "image/jpeg")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["evidence_size_bytes"] == max_bytes
+
+
+@pytest.mark.asyncio
+async def test_admin_observation_without_evidence_returns_observation_not_found_code(
+    phase4_api: Phase4Api,
+):
+    timestamp = datetime.now(UTC)
+    async with phase4_api.session_factory() as session, session.begin():
+        own_slot = await session.get(ParkingSlot, "F3-D03")
+        assert own_slot is not None
+        own_slot.status = SlotStatus.OCCUPIED
+        own_slot.occupied_by_vehicle_id = "VEHICLE-001"
+        session.add(
+            ParkingSession(
+                id="SESSION-NO-EVIDENCE",
+                user_id="USER-001",
+                vehicle_id="VEHICLE-001",
+                slot_id="F3-D03",
+                status=ParkingSessionStatus.ACTIVE,
+                parked_at=timestamp,
+                completed_at=None,
+            )
+        )
+
+    created = await phase4_api.client.post(
+        "/api/v1/parking/slots/F3-D02/observation",
+        json={
+            "user_id": "USER-001",
+            "observed_status": "OCCUPIED",
+            "expected_slot_version": 0,
+        },
+    )
+    assert created.status_code == 200
+    response = await phase4_api.client.get(
+        f"/api/v1/admin/slot-observations/{created.json()['data']['id']}/evidence-url"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "OBSERVATION_EVIDENCE_NOT_FOUND"
 
 
 @pytest.mark.asyncio

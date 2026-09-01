@@ -93,7 +93,6 @@ function defaultProps(): ComponentProps<typeof RewardCenter> {
     userId: "USER-001",
     open: true,
     summary,
-    contributions: [],
     catalog,
     vouchers: [voucher],
     rewardLedger: ledger,
@@ -141,6 +140,7 @@ describe("RewardCenter", () => {
     for (const label of ["Tổng quan", "Đổi điểm", "Voucher của tôi", "Lịch sử"]) {
       expect(screen.getByRole("tab", { name: label })).toBeVisible();
     }
+    expect(screen.queryByRole("button", { name: "Xem lịch sử" })).not.toBeInTheDocument();
     await openRedeemTab(user);
     expect(screen.getByText("Ưu đãi từ catalog")).toBeVisible();
     expect(screen.getByText(/123.*47.*9/)).toBeVisible();
@@ -265,6 +265,43 @@ describe("RewardCenter", () => {
     expect(keys[0]).toBe(keys[1]);
   });
 
+  it("keeps an ambiguous voucher-application key through close and reopen", async () => {
+    const user = userEvent.setup();
+    const keys: string[] = [];
+    const onApplyVoucher = vi
+      .fn<
+        (
+          voucherId: string,
+          sessionId: string,
+          key: string,
+        ) => Promise<ParkingVoucher>
+      >()
+      .mockImplementationOnce(async (_voucherId, _sessionId, key) => {
+        keys.push(key);
+        throw new TypeError("network lost");
+      })
+      .mockImplementationOnce(async (_voucherId, sessionId, key) => {
+        keys.push(key);
+        return {
+          ...voucher,
+          status: "APPLIED",
+          applied_at: "2026-08-03T00:00:00Z",
+          applied_session_id: sessionId,
+        };
+      });
+    const { props, rerender } = renderCenter({ onApplyVoucher });
+    await user.click(screen.getByRole("tab", { name: "Voucher của tôi" }));
+    await user.click(screen.getByRole("button", { name: "Áp dụng cho phiên hiện tại" }));
+    await waitFor(() => expect(onApplyVoucher).toHaveBeenCalledTimes(1));
+
+    rerender(<RewardCenter {...props} open={false} onApplyVoucher={onApplyVoucher} />);
+    rerender(<RewardCenter {...props} open onApplyVoucher={onApplyVoucher} />);
+    await user.click(screen.getByRole("tab", { name: "Voucher của tôi" }));
+    await user.click(screen.getByRole("button", { name: "Áp dụng cho phiên hiện tại" }));
+    await waitFor(() => expect(onApplyVoucher).toHaveBeenCalledTimes(2));
+    expect(keys[0]).toBe(keys[1]);
+  });
+
   it("keeps redemption success when refresh fails and does not retry", async () => {
     const user = userEvent.setup();
     const onRedeem = vi.fn(async () => redemptionResult);
@@ -302,6 +339,11 @@ describe("RewardCenter", () => {
     expect(await screen.findByText(/Đã áp dụng voucher 47 phút/i)).toBeVisible();
     expect(screen.getByText(/đã được áp dụng nhưng dữ liệu mới nhất/i)).toBeVisible();
     expect(screen.queryByText(/Không thể áp dụng voucher/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Đã áp dụng")).toBeVisible();
+    expect(screen.getByText("Phiên đã áp dụng: SESSION-001")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Áp dụng cho phiên hiện tại" }),
+    ).not.toBeInTheDocument();
     expect(onApplyVoucher).toHaveBeenCalledOnce();
   });
 });

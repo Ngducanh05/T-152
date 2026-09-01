@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -341,10 +341,19 @@ describe("user chat page", () => {
     expect(trigger.closest("header")).toHaveClass("chat-app-header");
     expect(screen.queryByRole("dialog", { name: "Điểm và voucher của bạn" })).not.toBeInTheDocument();
 
+    trigger.focus();
+    expect(trigger).toHaveFocus();
     await user.click(trigger);
     const dialog = screen.getByRole("dialog", { name: "Điểm và voucher của bạn" });
     expect(dialog).toBeVisible();
     expect(document.querySelector(".chat-conversation")).not.toContainElement(dialog);
+    const close = screen.getByRole("button", { name: "Đóng ParkSmart Points" });
+    await waitFor(() => expect(close).toHaveFocus());
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Điểm và voucher của bạn" })).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    await user.click(trigger);
     await user.click(screen.getByRole("button", { name: "Đóng ParkSmart Points" }));
     expect(screen.queryByRole("dialog", { name: "Điểm và voucher của bạn" })).not.toBeInTheDocument();
   });
