@@ -52,6 +52,12 @@ describe("WrongParkingReportDialog", () => {
     expect(camera).toHaveAttribute("capture", "environment");
     expect(gallery).toHaveAttribute("accept", "image/jpeg,image/png,image/webp,image/heic,image/heif");
     expect(gallery).not.toHaveAttribute("capture");
+    for (const input of [camera, gallery]) {
+      expect(input).toHaveClass("sr-only");
+      expect(input).not.toHaveClass("visually-hidden");
+    }
+    expect(screen.getByRole("button", { name: /Chụp ảnh/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Thêm ảnh/ })).toBeVisible();
 
     const cameraFile = new File(["camera"], "camera.jpg", { type: "image/jpeg" });
     await user.upload(camera, cameraFile);

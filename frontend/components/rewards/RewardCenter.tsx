@@ -296,6 +296,7 @@ export function RewardCenter({
             <button
               key={item.id}
               type="button"
+              className="points-tab"
               role="tab"
               aria-selected={tab === item.id}
               onClick={() => setTab(item.id)}
@@ -308,7 +309,7 @@ export function RewardCenter({
         {tab === "overview" && (
           <div role="tabpanel">
             <RewardSummaryCard summary={summary} />
-            <p>
+            <p className="points-overview-help">
               ParkSmart Points ghi nhận các đóng góp đã được xác minh. Điểm đang
               chờ chưa nằm trong số dư khả dụng.
             </p>
@@ -332,6 +333,7 @@ export function RewardCenter({
                   </p>
                   <button
                     type="button"
+                    className="reward-catalog-action"
                     disabled={
                       insufficient || !redemptionEnabled || mutationPending
                     }
@@ -360,6 +362,7 @@ export function RewardCenter({
                 <div className="points-confirmation-actions">
                   <button
                     type="button"
+                    className="primary-button"
                     disabled={mutationPending}
                     onClick={() => void confirmRedemption()}
                   >
@@ -386,9 +389,13 @@ export function RewardCenter({
               <p>Chưa có voucher nào.</p>
             ) : (
               displayedVouchers.map((voucher) => (
-                <article key={voucher.id}>
+                <article key={voucher.id} className="voucher-wallet-item">
                   <b>{voucher.free_minutes_snapshot} phút miễn phí</b>
-                  <p>{voucherStatus(voucher.status)}</p>
+                  <span
+                    className={`voucher-status voucher-status-${voucher.status.toLowerCase()}`}
+                  >
+                    {voucherStatus(voucher.status)}
+                  </span>
                   <small>
                     Hết hạn: {new Date(voucher.expires_at).toLocaleString("vi-VN")}
                   </small>
@@ -403,6 +410,7 @@ export function RewardCenter({
                     !currentSessionHasVoucher && (
                       <button
                         type="button"
+                        className="primary-button"
                         disabled={mutationPending}
                         onClick={() => void applyVoucher(voucher)}
                       >
@@ -456,12 +464,20 @@ export function RewardCenter({
         )}
 
         {redemptionResult && (
-          <p className="visually-hidden">
+          <p className="sr-only">
             Voucher {redemptionResult.voucher.id} đã được phát hành.
           </p>
         )}
-        {message && <p role="status">{message}</p>}
-        {refreshWarning && <p role="alert">{refreshWarning}</p>}
+        {message && (
+          <p className="points-status-message" role="status">
+            {message}
+          </p>
+        )}
+        {refreshWarning && (
+          <p className="points-refresh-warning" role="alert">
+            {refreshWarning}
+          </p>
+        )}
       </section>
     </div>
   );

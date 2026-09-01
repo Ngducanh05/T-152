@@ -138,8 +138,12 @@ describe("RewardCenter", () => {
     const user = userEvent.setup();
     renderCenter();
     for (const label of ["Tổng quan", "Đổi điểm", "Voucher của tôi", "Lịch sử"]) {
-      expect(screen.getByRole("tab", { name: label })).toBeVisible();
+      expect(screen.getByRole("tab", { name: label })).toHaveClass("points-tab");
     }
+    expect(screen.getByRole("tab", { name: "Tổng quan" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     expect(screen.queryByRole("button", { name: "Xem lịch sử" })).not.toBeInTheDocument();
     await openRedeemTab(user);
     expect(screen.getByText("Ưu đãi từ catalog")).toBeVisible();
@@ -170,6 +174,11 @@ describe("RewardCenter", () => {
     await waitFor(() => expect(props.onRedeem).toHaveBeenCalledOnce());
     expect(props.onRedeem).toHaveBeenCalledWith("UNUSUAL", expect.any(String));
     expect(vi.mocked(props.onRedeem).mock.calls[0][1]).not.toBe("");
+    const announcement = await screen.findByText(
+      "Voucher V-1 đã được phát hành.",
+    );
+    expect(announcement).toHaveClass("sr-only");
+    expect(announcement).not.toHaveClass("visually-hidden");
   });
 
   it("disables mutation for insufficient balance or disabled redemption", async () => {

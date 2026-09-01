@@ -287,19 +287,32 @@ export function WrongParkingReportDialog({
                     />
                     <small>{description.length}/500 ký tự</small>
                   </label>
-                  <section className="report-evidence">
-                    <label htmlFor="wrong-parking-gallery-input">Ảnh hiện trường (không bắt buộc)</label>
-                    <input ref={cameraInputRef} className="visually-hidden" type="file" accept="image/*" capture="environment" disabled={pending} onChange={evidenceChange} />
-                    <input id="wrong-parking-gallery-input" ref={galleryInputRef} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" disabled={pending} onChange={evidenceChange} />
-                    <div className="report-evidence-actions">
-                      <button type="button" disabled={pending} onClick={() => cameraInputRef.current?.click()}>{evidence ? "Chụp lại" : "Chụp ảnh"}</button>
-                      <button type="button" disabled={pending} onClick={() => galleryInputRef.current?.click()}>{evidence ? "Đổi ảnh" : "Thêm ảnh"}</button>
-                      {evidence && <button type="button" disabled={pending} onClick={() => selectEvidence(null)}>Xóa ảnh</button>}
+                  <section className="report-evidence evidence-picker">
+                    <div className="evidence-picker-heading">
+                      <label htmlFor="wrong-parking-gallery-input">
+                        Ảnh hiện trường
+                        <span className="sr-only"> (không bắt buộc)</span>
+                      </label>
+                      <span>Không bắt buộc</span>
                     </div>
-                    {evidence ? <div className="report-evidence-selected">
-                      {previewUrl ? <img src={previewUrl} alt="Ảnh hiện trường đã chọn" /> : null}
-                      <small>Đã chọn: {evidence.name}</small><small> · {(evidence.size / 1_000_000).toFixed(1)} MB</small>
-                    </div> : <small>Thêm ảnh giúp bộ phận vận hành xác minh nhanh hơn.</small>}
+                    <p className="evidence-picker-help">
+                      Thêm một ảnh giúp bộ phận vận hành xác minh nhanh hơn.
+                      <span>JPEG, PNG, WebP, HEIC/HEIF · tối đa 5 MB</span>
+                    </p>
+                    <input ref={cameraInputRef} className="sr-only" type="file" accept="image/*" capture="environment" disabled={pending} onChange={evidenceChange} />
+                    <input id="wrong-parking-gallery-input" ref={galleryInputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" disabled={pending} onChange={evidenceChange} />
+                    <div className="report-evidence-actions evidence-picker-actions">
+                      <button className="evidence-picker-action evidence-picker-camera" type="button" disabled={pending} onClick={() => cameraInputRef.current?.click()}>{evidence ? "Chụp lại" : "Chụp ảnh"}</button>
+                      <button className="evidence-picker-action" type="button" disabled={pending} onClick={() => galleryInputRef.current?.click()}>{evidence ? "Đổi ảnh" : "Thêm ảnh"}</button>
+                      {evidence && <button className="evidence-picker-action evidence-picker-remove" type="button" disabled={pending} onClick={() => selectEvidence(null)}>Xóa ảnh</button>}
+                    </div>
+                    {evidence ? <div className={`report-evidence-selected evidence-picker-selected${previewUrl ? " has-preview" : ""}`}>
+                      {previewUrl ? <img className="evidence-picker-preview" src={previewUrl} alt="Ảnh hiện trường đã chọn" /> : null}
+                      <div className="evidence-picker-copy">
+                        <small className="evidence-picker-file-name">Đã chọn: {evidence.name}</small>
+                        <small className="evidence-picker-meta">{evidence.type} · {(evidence.size / 1_000_000).toFixed(1)} MB</small>
+                      </div>
+                    </div> : null}
                   </section>
                   <p className="report-privacy-notice">
                     Ảnh chỉ được dùng để xác minh báo cáo. Không chụp khuôn mặt

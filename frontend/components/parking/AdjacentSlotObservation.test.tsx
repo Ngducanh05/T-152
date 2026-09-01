@@ -153,7 +153,19 @@ describe("AdjacentSlotObservation", () => {
     await user.click(screen.getByRole("button", { name: "Ô đang trống" }));
     expect(props.onObserve).not.toHaveBeenCalled();
     expect(screen.getByText("Xem lại đóng góp")).toBeVisible();
-    expect(screen.getByText(/Trạng thái đã chọn:/)).toHaveTextContent("Ô đang trống");
+    expect(
+      screen.getByText(/Trạng thái đã chọn:/).parentElement,
+    ).toHaveTextContent("Ô đang trống");
+    const cameraInput = screen.getByLabelText("Chụp ảnh quan sát");
+    const galleryInput = screen.getByLabelText("Chọn ảnh quan sát từ thư viện");
+    for (const input of [cameraInput, galleryInput]) {
+      expect(input).toHaveClass("sr-only");
+      expect(input).not.toHaveClass("visually-hidden");
+    }
+    expect(screen.getByRole("button", { name: "Chụp ảnh" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Chọn từ thư viện" }),
+    ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Gửi đóng góp" }));
     await waitFor(() => expect(props.onObserve).toHaveBeenCalledOnce());
     expect(props.onObserve).toHaveBeenCalledWith(

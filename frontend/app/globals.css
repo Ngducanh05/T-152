@@ -716,38 +716,186 @@ body .admin-operations button { min-height: 40px; font-size: 12px; }
 
 .points-modal {
   width: min(620px, calc(100vw - 2rem));
-  max-height: min(82vh, 720px);
+  max-height: min(82dvh, 720px);
+  padding: 28px;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.points-modal h1 {
+  padding-right: 42px;
+  font-size: clamp(26px, 4vw, 30px);
+  line-height: 1.15;
+  letter-spacing: -.6px;
+}
+
+.points-modal .modal-close {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: #52685e;
+}
+
+.points-modal .modal-close:hover {
+  color: var(--green-dark);
+  background: var(--green-soft);
 }
 
 .points-tabs {
   margin: 1rem 0;
   display: flex;
-  gap: 0.4rem;
+  width: 100%;
+  padding: 4px;
+  gap: 4px;
   overflow-x: auto;
+  border: 1px solid #e2e9e5;
+  border-radius: 12px;
+  background: #f2f5f3;
+  scrollbar-width: thin;
+  scrollbar-color: #b9c8c0 transparent;
 }
 
-.points-tabs button {
+.points-tab {
   flex: 0 0 auto;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
-.points-tabs button[aria-selected="true"] {
-  font-weight: 700;
-  text-decoration: underline;
+.points-tab:hover {
+  color: var(--green-dark);
+  background: #fff;
+}
+
+.points-tab[aria-selected="true"] {
+  color: #fff;
+  background: var(--green);
+  box-shadow: 0 2px 7px #0b68422b;
+}
+
+.points-tab[aria-selected="true"]:hover {
+  color: #fff;
+  background: var(--green-dark);
+}
+
+.points-overview-help {
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid #dbe8e1;
+  border-radius: 10px;
+  color: #52685e;
+  background: #f4faf7;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.reward-catalog,
+.voucher-wallet,
+.points-history {
+  display: grid;
+  gap: 10px;
+}
+
+.reward-catalog > h2,
+.voucher-wallet > h2,
+.points-history > h2 {
+  margin-bottom: 2px;
+  color: var(--ink);
+  font-size: 17px;
+}
+
+.reward-catalog > p,
+.voucher-wallet > p,
+.points-history > p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.reward-catalog-item {
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfdfc;
+}
+
+.reward-catalog-item h3 {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.reward-catalog-item p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.reward-catalog-action {
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid var(--green);
+  border-radius: 10px;
+  color: #fff;
+  background: var(--green);
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.reward-catalog-action:hover:not(:disabled) {
+  border-color: var(--green-dark);
+  background: var(--green-dark);
+}
+
+.reward-catalog-action:disabled {
+  color: #68766f;
+  border-color: #d5e3dc;
+  background: var(--green-soft);
+  cursor: not-allowed;
 }
 
 .points-history article {
-  padding: 0.5rem 0;
+  min-height: 56px;
+  padding: 10px 12px;
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  border-bottom: 1px solid var(--border, #ddd);
+  border-bottom: 1px solid var(--line);
 }
 
 .points-history article > div {
   display: grid;
   gap: 0.25rem;
+}
+
+.points-history article b {
+  font-size: 12px;
+}
+
+.points-history article time {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.points-history article > strong {
+  flex: 0 0 auto;
+  font-size: 15px;
+  text-align: right;
 }
 
 .points-positive {
@@ -759,17 +907,275 @@ body .admin-operations button { min-height: 40px; font-size: 12px; }
 }
 
 .points-confirmation {
-  margin-top: 1rem;
-  padding: 1rem;
-  border: 1px solid currentColor;
-  border-radius: 0.5rem;
+  margin-top: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid #cfe2d8;
+  border-radius: 12px;
+  background: #f4faf7;
 }
 
-.points-confirmation-actions,
-.observation-evidence-actions {
+.points-confirmation h3 {
+  color: var(--green-dark);
+  font-size: 15px;
+}
+
+.points-confirmation p {
+  color: #52685e;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.points-confirmation-actions {
+  margin-top: 4px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.points-confirmation-actions button {
+  min-height: 44px;
+}
+
+.voucher-wallet-item {
+  padding: 14px;
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.voucher-wallet-item > b {
+  color: var(--green-dark);
+  font-size: 16px;
+}
+
+.voucher-wallet-item > small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.voucher-wallet-item > p {
+  color: #52685e;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.voucher-wallet-item > button {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 3px;
+}
+
+.voucher-status {
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.voucher-status-issued {
+  color: var(--green-dark);
+  background: var(--green-soft);
+}
+
+.voucher-status-applied {
+  color: #245bb9;
+  background: var(--blue-soft);
+}
+
+.voucher-status-expired {
+  color: #66736d;
+  background: #eef1ef;
+}
+
+.voucher-status-cancelled {
+  color: #842f2f;
+  background: #fff0f0;
+}
+
+.points-modal > .points-status-message,
+.points-modal > .points-refresh-warning {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.points-modal > .points-status-message {
+  color: var(--green-dark);
+  border: 1px solid #c7e4d5;
+  background: var(--green-soft);
+}
+
+.points-modal > .points-refresh-warning {
+  color: #714300;
+  border: 1px solid #edc980;
+  background: #fff7e7;
+}
+
+.observation-review > h3 {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.observation-review-summary {
+  margin-top: 9px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid #c7e4d5;
+  border-radius: 11px;
+  background: var(--green-soft);
+}
+
+.observation-review-label {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.observation-review-summary strong {
+  color: var(--green-dark);
+  font-size: 13px;
+}
+
+.evidence-picker {
+  margin-top: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid #dbe8e1;
+  border-radius: 12px;
+  background: #f7faf8;
+}
+
+.evidence-picker-heading {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.evidence-picker-heading h4,
+.evidence-picker-heading > label {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.evidence-picker-heading > span {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #52685e;
+  background: var(--green-soft);
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.evidence-picker-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.evidence-picker-help span {
+  display: block;
+}
+
+.evidence-picker-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.evidence-picker-action {
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid #bcd5c8;
+  border-radius: 10px;
+  color: #285643;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.evidence-picker-camera {
+  border-color: #a9cfbc;
+  background: var(--green-soft);
+}
+
+.evidence-picker-action:hover:not(:disabled) {
+  color: var(--green-dark);
+  border-color: var(--green);
+  background: #eff8f3;
+}
+
+.evidence-picker-action:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.evidence-picker-remove {
+  grid-column: 1 / -1;
+  color: #7b4444;
+  border-color: #e5c4c4;
+  background: #fff8f8;
+}
+
+.evidence-picker-selected {
+  min-width: 0;
+  padding: 10px;
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+}
+
+.evidence-picker-selected.has-preview {
+  grid-template-columns: 96px minmax(0, 1fr);
+}
+
+.evidence-picker-preview {
+  width: 96px;
+  height: 76px;
+  max-width: 100%;
+  margin: 0;
+  display: block;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #eef4f1;
+}
+
+.evidence-picker-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.evidence-picker-file-name {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.evidence-picker-meta {
+  color: var(--muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
 }
 
 .observation-evidence-preview {
@@ -781,10 +1187,33 @@ body .admin-operations button { min-height: 40px; font-size: 12px; }
   object-fit: contain;
 }
 
+.observation-review .contribution-answer-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.observation-review .contribution-answer-grid .secondary-button {
+  grid-column: auto;
+}
+
+.report-evidence {
+  margin-top: 0;
+}
+
+.report-evidence .evidence-picker-preview {
+  width: 112px;
+  height: 84px;
+  object-fit: contain;
+}
+
+.report-evidence .evidence-picker-selected.has-preview {
+  grid-template-columns: 112px minmax(0, 1fr);
+}
+
 .points-trigger:focus-visible,
 .points-modal button:focus-visible,
-.observation-review button:focus-visible {
-  outline: 3px solid #2679ff;
+.observation-review button:focus-visible,
+.evidence-picker-action:focus-visible {
+  outline: 3px solid #1d78d0;
   outline-offset: 2px;
 }
 
@@ -798,7 +1227,28 @@ body .admin-operations button { min-height: 40px; font-size: 12px; }
     width: 100%;
     max-height: 90vh;
     margin: auto 0 0;
+    padding: 24px 16px max(18px, env(safe-area-inset-bottom));
     border-radius: 1rem 1rem 0 0;
+  }
+
+  .points-confirmation-actions,
+  .observation-review .contribution-answer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .observation-review .contribution-answer-grid .secondary-button {
+    grid-column: 1;
+  }
+
+  .evidence-picker-selected.has-preview,
+  .report-evidence .evidence-picker-selected.has-preview {
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+
+  .evidence-picker-preview,
+  .report-evidence .evidence-picker-preview {
+    width: 88px;
+    height: 72px;
   }
 }
 

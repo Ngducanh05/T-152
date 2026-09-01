@@ -295,14 +295,23 @@ export function AdjacentSlotObservation({
           ) : selectedStatus ? (
             <section className="observation-review" aria-labelledby="observation-review-title">
               <h3 id="observation-review-title">Xem lại đóng góp</h3>
-              <p>
-                Trạng thái đã chọn: <b>{selectedStatusLabel(selectedStatus)}</b>
-              </p>
-              <section className="observation-evidence">
-                <h4>Ảnh xác minh (không bắt buộc)</h4>
+              <div className="observation-review-summary">
+                <span className="observation-review-label">
+                  Trạng thái đã chọn:
+                </span>
+                <strong>{selectedStatusLabel(selectedStatus)}</strong>
+              </div>
+              <section className="observation-evidence evidence-picker">
+                <div className="evidence-picker-heading">
+                  <h4>Ảnh xác minh</h4>
+                  <span>Không bắt buộc</span>
+                </div>
+                <p className="evidence-picker-help">
+                  JPEG, PNG, WebP, HEIC/HEIF · tối đa 5 MB
+                </p>
                 <input
                   ref={cameraInputRef}
-                  className="visually-hidden"
+                  className="sr-only"
                   type="file"
                   aria-label="Chụp ảnh quan sát"
                   accept={ACCEPTED_IMAGE_TYPES}
@@ -311,44 +320,58 @@ export function AdjacentSlotObservation({
                 />
                 <input
                   ref={galleryInputRef}
-                  className="visually-hidden"
+                  className="sr-only"
                   type="file"
                   aria-label="Chọn ảnh quan sát từ thư viện"
                   accept={ACCEPTED_IMAGE_TYPES}
                   onChange={evidenceChange}
                 />
-                <div className="observation-evidence-actions">
+                <div className="observation-evidence-actions evidence-picker-actions">
                   <button
                     type="button"
+                    className="evidence-picker-action evidence-picker-camera"
                     onClick={() => cameraInputRef.current?.click()}
                   >
                     Chụp ảnh
                   </button>
                   <button
                     type="button"
+                    className="evidence-picker-action"
                     onClick={() => galleryInputRef.current?.click()}
                   >
                     {evidenceFile ? "Đổi ảnh" : "Chọn từ thư viện"}
                   </button>
                   {evidenceFile && (
-                    <button type="button" onClick={clearEvidence}>
+                    <button
+                      type="button"
+                      className="evidence-picker-action evidence-picker-remove"
+                      onClick={clearEvidence}
+                    >
                       Xóa ảnh
                     </button>
                   )}
                 </div>
                 {evidenceFile && (
-                  <div className="observation-evidence-selected">
+                  <div
+                    className={`observation-evidence-selected evidence-picker-selected${
+                      previewUrl ? " has-preview" : ""
+                    }`}
+                  >
                     {previewUrl && (
                       <img
-                        className="observation-evidence-preview"
+                        className="observation-evidence-preview evidence-picker-preview"
                         src={previewUrl}
                         alt="Ảnh quan sát đã chọn"
                       />
                     )}
-                    <p>{evidenceFile.name}</p>
-                    <small>
-                      {evidenceFile.type} · {readableFileSize(evidenceFile.size)}
-                    </small>
+                    <div className="evidence-picker-copy">
+                      <p className="evidence-picker-file-name">
+                        {evidenceFile.name}
+                      </p>
+                      <small className="evidence-picker-meta">
+                        {evidenceFile.type} · {readableFileSize(evidenceFile.size)}
+                      </small>
+                    </div>
                   </div>
                 )}
                 {evidenceError && (
