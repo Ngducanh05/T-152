@@ -499,6 +499,57 @@ describe("useParkingWorkflow", () => {
     expect(result.current.notice).toBeNull();
   });
 
+  it("returns the successful adjacent observation when refresh fails", async () => {
+    const { api, data, refresh, slot } = fixture();
+    data.activeSession = {
+      session_id: "SESSION-001",
+      vehicle_id: "VEHICLE-001",
+      slot_id: "F1-D03",
+      destination_node_id: "F1-D03",
+    };
+    const observation: SlotObservation = {
+      id: "OBSERVATION-001",
+      observer_user_id: "USER-001",
+      observer_session_id: "SESSION-001",
+      slot_id: slot.id,
+      observed_status: "OCCUPIED",
+      verification_status: "PENDING",
+      reward_points: 10,
+      reward_status: "PENDING",
+      evidence_storage_path: null,
+      evidence_content_type: null,
+      evidence_size_bytes: null,
+      observed_slot_version: slot.version,
+      created_at: "2026-08-23T10:00:00Z",
+      expires_at: "2026-08-23T10:30:00Z",
+      verified_at: null,
+      verified_by: null,
+      rejection_reason: null,
+      version: 0,
+    };
+    api.observeAdjacentSlot.mockResolvedValue(observation);
+    refresh.mockRejectedValueOnce(new TypeError("refresh failed"));
+    const { result } = renderHook(() => useParkingWorkflow(data, api));
+
+    let returned: SlotObservation | null = null;
+    await act(async () => {
+      returned = await result.current.updateAdjacentSlotStatus(
+        slot.id,
+        "OCCUPIED",
+      );
+    });
+
+    expect(returned).toBe(observation);
+    expect(returned).not.toBeNull();
+    expect(api.observeAdjacentSlot).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(result.current.notice).toBe(
+      "Đóng góp đã được gửi nhưng dữ liệu mới nhất chưa tải lại được.",
+    );
+    expect(result.current.pendingAdjacentSlotId).toBeNull();
+    expect(result.current.pending).toBeNull();
+  });
+
   it("shows the authoritative voucher time benefit after completion", async () => {
     const { api, data, slot } = fixture();
     data.activeSession = {

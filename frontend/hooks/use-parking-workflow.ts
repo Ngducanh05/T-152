@@ -948,23 +948,32 @@ export function useParkingWorkflow(
     setPendingAdjacentSlotId(slot.id);
     setNotice(null);
     try {
-      const observation = await api.observeAdjacentSlot(slot.id, {
-        user_id: identity.userId,
-        observed_status: status,
-        expected_slot_version: slot.version,
-        evidence,
-      });
-      await data.refresh();
+      let observation: SlotObservation;
+      try {
+        observation = await api.observeAdjacentSlot(slot.id, {
+          user_id: identity.userId,
+          observed_status: status,
+          expected_slot_version: slot.version,
+          evidence,
+        });
+      } catch (error) {
+        await refreshQuietly();
+        setNotice(
+          formatApiErrorForOperator(
+            error,
+            "Không thể cập nhật ô bên cạnh. Trạng thái mới nhất đã được tải lại.",
+          ),
+        );
+        return null;
+      }
+      try {
+        await data.refresh();
+      } catch {
+        setNotice(
+          "Đóng góp đã được gửi nhưng dữ liệu mới nhất chưa tải lại được.",
+        );
+      }
       return observation;
-    } catch (error) {
-      await refreshQuietly();
-      setNotice(
-        formatApiErrorForOperator(
-          error,
-          "Không thể cập nhật ô bên cạnh. Trạng thái mới nhất đã được tải lại.",
-        ),
-      );
-      return null;
     } finally {
       adjacentObservationInFlightRef.current = false;
       setPendingAdjacentSlotId(null);

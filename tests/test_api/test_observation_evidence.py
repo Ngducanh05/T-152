@@ -111,6 +111,15 @@ def test_observation_openapi_documents_json_and_optional_multipart_contracts():
     }
 
 
+def test_admin_observation_evidence_openapi_documents_storage_failures():
+    operation = create_app().openapi()["paths"][
+        "/api/v1/admin/slot-observations/{observation_id}/evidence-url"
+    ]["get"]
+    responses = operation["responses"]
+
+    assert {"200", "404", "422", "502", "503"} <= responses.keys()
+
+
 def _unconfigured_observation_settings():
     return get_settings().model_copy(
         update={

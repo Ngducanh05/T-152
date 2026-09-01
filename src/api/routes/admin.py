@@ -299,7 +299,12 @@ async def get_slot_observation(
 @router.get(
     "/slot-observations/{observation_id}/evidence-url",
     response_model=SuccessResponse[ObservationEvidenceUrlResponse],
-    responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+    responses={
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        502: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
 )
 async def get_slot_observation_evidence_url(
     observation_id: str,
