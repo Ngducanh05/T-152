@@ -526,7 +526,13 @@ body .admin-operations button { min-height: 40px; font-size: 12px; }
 }
 
 @media (max-width: 480px) {
-  .conversation-priority-dock { max-height: 48dvh; }
+  .conversation-priority-dock {
+    position: static;
+    top: auto;
+    max-height: none;
+    overflow-y: visible;
+    overscroll-behavior: auto;
+  }
   .adjacent-observation-grid { grid-template-columns: 1fr; }
 }
 
